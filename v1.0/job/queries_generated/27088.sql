@@ -1,0 +1,43 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        GROUP_CONCAT(DISTINCT ak.name ORDER BY ak.name) AS aka_names,
+        GROUP_CONCAT(DISTINCT k.keyword ORDER BY k.keyword) AS keywords,
+        GROUP_CONCAT(DISTINCT c.role ORDER BY c.role) AS roles
+    FROM title t
+    LEFT JOIN aka_title ak ON ak.movie_id = t.id
+    LEFT JOIN movie_keyword mk ON mk.movie_id = t.id
+    LEFT JOIN keyword k ON k.id = mk.keyword_id
+    LEFT JOIN cast_info ci ON ci.movie_id = t.id
+    LEFT JOIN role_type c ON c.id = ci.role_id
+    GROUP BY t.id, t.title, t.production_year
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT co.name ORDER BY co.name) AS company_names,
+        GROUP_CONCAT(DISTINCT ct.kind ORDER BY ct.kind) AS company_types
+    FROM movie_companies mc
+    JOIN company_name co ON co.id = mc.company_id
+    JOIN company_type ct ON ct.id = mc.company_type_id
+    GROUP BY mc.movie_id
+)
+SELECT 
+    md.title_id,
+    md.title,
+    md.production_year,
+    md.aka_names,
+    md.keywords,
+    cd.company_names,
+    cd.company_types,
+    CASE
+        WHEN md.production_year > 2000 THEN 'Modern'
+        WHEN md.production_year BETWEEN 1980 AND 2000 THEN 'Classic'
+        ELSE 'Vintage'
+    END AS era,
+    LENGTH(md.title) AS title_length
+FROM MovieDetails md
+LEFT JOIN CompanyDetails cd ON cd.movie_id = md.title_id
+ORDER BY md.production_year DESC, md.title_length DESC;

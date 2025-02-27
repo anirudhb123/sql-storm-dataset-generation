@@ -1,0 +1,59 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS Rank,
+        string_agg(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')))
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate, p.Score, p.OwnerUserId, pt.Name
+),
+TopRankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        ViewCount,
+        CreationDate,
+        Score,
+        OwnerUserId,
+        Tags
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+SELECT 
+    u.DisplayName AS Author,
+    trp.Title,
+    trp.ViewCount,
+    trp.CreationDate,
+    trp.Score,
+    trp.Tags,
+    COALESCE(b.Badge_Count, 0) AS BadgeCount
+FROM 
+    TopRankedPosts trp
+JOIN 
+    Users u ON trp.OwnerUserId = u.Id
+LEFT JOIN (
+    SELECT 
+        UserId, 
+        COUNT(Id) AS Badge_Count
+    FROM 
+        Badges
+    GROUP BY 
+        UserId
+) b ON u.Id = b.UserId
+ORDER BY 
+    trp.ViewCount DESC, 
+    trp.Score DESC;

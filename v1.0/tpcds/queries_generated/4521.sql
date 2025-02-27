@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2452245 AND 2452300
+    GROUP BY 
+        ws_bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_income_band_sk
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 10000
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_city,
+        c.c_birth_year,
+        AVG(ws_net_profit) AS avg_net_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, ca.ca_city, c.c_birth_year
+)
+SELECT 
+    COALESCE(HighValueCustomers.cd_demo_sk, 'N/A') AS demo_sk,
+    COALESCE(HighestCustomer.c_customer_id, 'Unknown') AS customer_id,
+    CustomerDetails.ca_city,
+    CASE 
+        WHEN HighestCustomer.total_net_profit > 1000 THEN 'VIP Customer'
+        ELSE 'Regular Customer'
+    END AS customer_type,
+    CustomerDetails.avg_net_profit
+FROM 
+    RankedSales AS HighestCustomer
+FULL OUTER JOIN 
+    HighValueCustomers ON HighestCustomer.ws_bill_customer_sk = HighValueCustomers.cd_demo_sk
+JOIN 
+    CustomerDetails ON COALESCE(HighestCustomer.ws_bill_customer_sk, -1) = CustomerDetails.c_customer_id
+WHERE 
+    CustomerDetails.avg_net_profit IS NOT NULL
+ORDER BY 
+    CustomerDetails.avg_net_profit DESC
+LIMIT 100;

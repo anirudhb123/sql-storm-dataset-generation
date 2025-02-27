@@ -1,0 +1,70 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    INNER JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+high_value_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice
+    FROM part p
+    WHERE p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice)
+        FROM part p2
+        WHERE p2.p_type LIKE '%brass%'
+    )
+),
+order_info AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+),
+customer_ordered_parts AS (
+    SELECT c.c_custkey, np.p_name, ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(li.l_extendedprice) DESC) AS rn
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    JOIN high_value_parts np ON li.l_partkey = np.p_partkey
+    GROUP BY c.c_custkey, np.p_name
+),
+final_output AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        sh.s_suppkey,
+        sh.s_name,
+        np.p_name,
+        oi.order_total,
+        CASE 
+            WHEN oi.order_total IS NULL THEN 'No Orders'
+            WHEN oi.order_total < 5000 THEN 'Low Value Order'
+            ELSE 'High Value Order'
+        END AS order_classification
+    FROM customer c
+    LEFT JOIN supplier_hierarchy sh ON c.c_nationkey = sh.s_nationkey 
+    JOIN customer_ordered_parts np ON c.c_custkey = np.c_custkey
+    LEFT JOIN order_info oi ON oi.o_orderkey = (
+        SELECT o.o_orderkey
+        FROM orders o
+        WHERE o.o_custkey = c.c_custkey
+        ORDER BY o.o_orderdate DESC
+        LIMIT 1
+    )
+    WHERE np.rn = 1
+)
+SELECT DISTINCT 
+    f.c_custkey, 
+    f.c_name, 
+    f.s_suppkey, 
+    f.s_name, 
+    f.p_name,
+    ('Order Total: ' || COALESCE(oi.order_total::varchar, 'No Orders')) AS order_summary,
+    f.order_classification
+FROM final_output f
+LEFT JOIN order_info oi ON f.o_orderkey = oi.o_orderkey
+WHERE f.order_classification IS NOT NULL
+ORDER BY f.c_custkey, f.s_suppkey;

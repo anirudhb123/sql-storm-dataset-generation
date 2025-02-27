@@ -1,0 +1,59 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        ca.ca_city,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ca.ca_state = 'CA'
+    GROUP BY 
+        c.c_customer_id, ca.ca_city
+),
+TopCities AS (
+    SELECT 
+        ca.ca_city,
+        SUM(total_sales) AS city_sales
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer_address ca ON cs.ca_city = ca.ca_city
+    GROUP BY 
+        ca.ca_city
+    ORDER BY 
+        city_sales DESC
+    LIMIT 10
+),
+DailySales AS (
+    SELECT 
+        d.d_date,
+        SUM(ws.ws_ext_sales_price) AS daily_sales
+    FROM 
+        date_dim d
+    JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE 
+        ws.ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        d.d_date
+    ORDER BY 
+        d.d_date DESC
+)
+SELECT 
+    t.city_sales,
+    ds.d_date,
+    ds.daily_sales
+FROM 
+    TopCities t
+JOIN 
+    DailySales ds ON ds.d_date = (SELECT MAX(d.d_date) FROM DailySales)
+WHERE 
+    t.city_sales > 5000
+ORDER BY 
+    t.city_sales DESC;

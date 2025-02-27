@@ -1,0 +1,39 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS RevisionCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= '2023-01-01'
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount, u.DisplayName, p.PostTypeId
+),
+TopPosts AS (
+    SELECT 
+        rp.* 
+    FROM RankedPosts rp 
+    WHERE rp.PostRank <= 10
+)
+SELECT 
+    tp.PostId, 
+    tp.Title, 
+    tp.Score, 
+    tp.ViewCount, 
+    tp.OwnerDisplayName, 
+    tp.CommentCount, 
+    tp.RevisionCount,
+    pt.Name AS PostType,
+    vt.Name AS VoteTypeName
+FROM TopPosts tp
+JOIN PostTypes pt ON tp.PostTypeId = pt.Id
+LEFT JOIN Votes v ON tp.PostId = v.PostId AND v.VoteTypeId = 2
+JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+ORDER BY tp.Score DESC, tp.ViewCount DESC;

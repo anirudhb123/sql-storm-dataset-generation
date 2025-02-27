@@ -1,0 +1,42 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        RANK() OVER (PARTITION BY o.o_orderdate ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+top_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.total_revenue
+    FROM 
+        ranked_orders ro
+    WHERE 
+        ro.revenue_rank <= 10
+    ORDER BY 
+        ro.total_revenue DESC
+)
+SELECT 
+    co.c_name,
+    co.c_acctbal,
+    to.total_revenue,
+    COUNT(DISTINCT l.l_linenumber) AS line_items_count
+FROM 
+    top_orders to
+JOIN 
+    customer co ON co.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = to.o_orderkey)
+JOIN 
+    lineitem l ON l.l_orderkey = to.o_orderkey
+GROUP BY 
+    co.c_name, co.c_acctbal, to.total_revenue
+ORDER BY 
+    to.total_revenue DESC, co.c_name;

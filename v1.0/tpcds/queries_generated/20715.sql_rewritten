@@ -1,0 +1,48 @@
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS rank_profit
+    FROM 
+        web_sales ws
+    LEFT JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        i.i_current_price IS NOT NULL AND
+        i.i_item_desc LIKE '%gadget%'
+    GROUP BY 
+        ws.ws_item_sk
+),
+top_sales AS (
+    SELECT 
+        sd.ws_item_sk,
+        sd.total_quantity,
+        sd.total_net_profit
+    FROM 
+        sales_data sd
+    WHERE 
+        sd.rank_profit <= 5
+    UNION ALL
+    SELECT 
+        -sd.ws_item_sk, 
+        sd.total_quantity,
+        sd.total_net_profit
+    FROM 
+        sales_data sd
+    WHERE 
+        sd.total_net_profit IS NULL 
+)
+SELECT 
+    COALESCE(ts.ws_item_sk, 'Unknown') AS item_key,
+    CAST(ts.total_quantity AS INTEGER) AS quantity_sold,
+    CAST(ts.total_net_profit AS DECIMAL(10, 2)) AS net_profit,
+    cast('2002-10-01 12:34:56' as timestamp) AS query_time
+FROM 
+    top_sales ts
+FULL OUTER JOIN 
+    customer c ON c.c_customer_sk = ABS(ts.ws_item_sk)  
+WHERE 
+    c.c_customer_sk IS NULL OR ts.total_net_profit IS NOT NULL
+ORDER BY 
+    ts.total_net_profit DESC NULLS LAST;

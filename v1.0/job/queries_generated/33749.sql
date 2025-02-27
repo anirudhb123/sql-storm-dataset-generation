@@ -1,0 +1,87 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL::integer AS parent_movie_id,
+        0 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.depth + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        rt.role,
+        COUNT(ci.person_id) AS actor_count,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY COUNT(ci.person_id) DESC) AS role_rank
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, rt.role
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(mc.id) AS involvement_count
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, cn.name, ct.kind
+),
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(mi.info, ', ') AS details
+    FROM 
+        movie_info mi 
+    GROUP BY 
+        mi.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(c.actor_count, 0) AS total_actors,
+    COALESCE(cd.company_name, 'N/A') AS production_company,
+    COALESCE(cd.company_type, 'N/A') AS company_type,
+    COALESCE(mi.details, 'No additional info') AS info,
+    CASE 
+        WHEN mh.depth > 0 THEN 'Episode'
+        ELSE 'Movie'
+    END AS movie_type,
+    MAX(CASE WHEN c.role_rank = 1 THEN c.role END) AS top_role
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    CastRoles c ON mh.movie_id = c.movie_id
+LEFT JOIN 
+    CompanyDetails cd ON mh.movie_id = cd.movie_id
+LEFT JOIN 
+    MovieInfo mi ON mh.movie_id = mi.movie_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.production_year, c.actor_count, cd.company_name, cd.company_type, mi.details, mh.depth
+ORDER BY 
+    mh.production_year DESC, mh.title;

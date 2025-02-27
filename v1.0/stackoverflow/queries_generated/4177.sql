@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.PostTypeId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        b.Class,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, b.Class
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        PH.UserId,
+        ph.CreationDate,
+        PHT.Name AS HistoryType
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate,
+    rp.Rank,
+    rp.CommentCount,
+    ub.UserId,
+    ub.BadgeCount,
+    p.UserDisplayName,
+    COALESCE(STRING_AGG(ph.HistoryType, ', '), 'No history') AS HistoryTypes
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Users p ON rp.PostId IN (SELECT a.AcceptedAnswerId FROM Posts a WHERE a.Id = rp.PostId)
+LEFT JOIN 
+    UserBadges ub ON p.Id = ub.UserId AND ub.Class = 1 -- Gold badges
+LEFT JOIN 
+    PostHistoryDetails ph ON ph.PostId = rp.PostId
+WHERE 
+    rp.Rank <= 5
+GROUP BY 
+    rp.PostId, rp.Title, rp.Score, rp.CreationDate, rp.Rank, rp.CommentCount, ub.UserId, ub.BadgeCount, p.UserDisplayName
+ORDER BY 
+    rp.Score DESC;

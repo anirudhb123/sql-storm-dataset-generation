@@ -1,0 +1,68 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.id
+), ranked_movies AS (
+    SELECT 
+        mh.title,
+        mh.production_year,
+        mh.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.depth) AS rank
+    FROM 
+        movie_hierarchy mh
+), detailed_movie_info AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        kt.kind AS kind,
+        COUNT(DISTINCT mc.company_id) AS company_count,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        movie_companies mc ON rm.id = mc.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON rm.id = mk.movie_id
+    LEFT JOIN 
+        kind_type kt ON rm.kind_id = kt.id
+    GROUP BY 
+        rm.title, rm.production_year, kt.kind
+)
+SELECT 
+    dmi.title,
+    dmi.production_year,
+    dmi.kind,
+    dmi.company_count,
+    dmi.keyword_count,
+    COALESCE(pi.info, 'No Information') AS person_info
+FROM 
+    detailed_movie_info dmi
+LEFT JOIN 
+    person_info pi ON pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography') 
+                   AND pi.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = (SELECT id FROM aka_title WHERE title = dmi.title LIMIT 1))
+WHERE 
+    dmi.production_year BETWEEN 2010 AND 2023
+ORDER BY 
+    dmi.production_year DESC, dmi.keyword_count DESC;

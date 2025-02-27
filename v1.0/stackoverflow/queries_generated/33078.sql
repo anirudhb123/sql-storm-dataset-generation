@@ -1,0 +1,88 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Starting with Questions
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.CreationDate,
+        a.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursiveCTE r ON a.ParentId = r.PostId
+)
+, VotesSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.PostId
+)
+, UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldCount,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverCount,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    cte.PostId,
+    cte.Title,
+    cte.CreationDate,
+    u.DisplayName AS OwnerDisplayName,
+    COALESCE(vs.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(vs.DownVotes, 0) AS TotalDownVotes,
+    ub.GoldCount,
+    ub.SilverCount,
+    ub.BronzeCount,
+    cte.Level,
+    CASE 
+        WHEN cte.Level > 2 THEN 'Deep Thread'
+        WHEN cte.Level = 2 THEN 'Normal Thread'
+        ELSE 'Standalone Question'
+    END AS ThreadType,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecursiveCTE cte
+LEFT JOIN 
+    Users u ON cte.OwnerUserId = u.Id
+LEFT JOIN 
+    VotesSummary vs ON cte.PostId = vs.PostId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    Posts p ON cte.PostId = p.Id
+LEFT JOIN 
+    LATERAL (SELECT STRING_AGG(DISTINCT TRIM(REGEXP_REPLACE(t.Tags, '<[^>]*>', '')), ', ') AS TagName
+              FROM unnest(string_to_array(p.Tags, ',')) t
+              WHERE t IS NOT NULL) AS t ON true
+WHERE 
+    cte.Title IS NOT NULL
+GROUP BY 
+    cte.PostId, cte.Title, cte.CreationDate, u.DisplayName, vs.UpVotes, vs.DownVotes, ub.GoldCount, ub.SilverCount, ub.BronzeCount, cte.Level
+ORDER BY 
+    cte.CreationDate DESC
+LIMIT 100;

@@ -1,0 +1,60 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        wr_returned_date_sk, 
+        wr_order_number, 
+        wr_return_quantity,
+        wr_return_amt,
+        wr_refunded_cash,
+        wr_net_loss,
+        1 AS ReturnLevel
+    FROM 
+        web_returns
+    WHERE 
+        wr_return_quantity > 0
+    
+    UNION ALL
+    
+    SELECT 
+        wr.returned_date_sk, 
+        wr.order_number, 
+        wr.return_quantity,
+        wr.return_amt,
+        wr.refunded_cash,
+        wr.net_loss,
+        cr.ReturnLevel + 1
+    FROM 
+        web_returns wr
+    JOIN 
+        CustomerReturns cr ON wr.returned_date_sk = cr.wr_returned_date_sk
+    WHERE 
+        cr.ReturnLevel < 5 -- Limit to 5 levels deep
+)
+
+SELECT 
+    c.c_customer_id,
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT cr.wr_order_number) AS TotalReturns,
+    SUM(cr.wr_return_amt) AS TotalReturnAmount,
+    AVG(cr.wr_net_loss) AS AvgNetLoss,
+    MAX(cr.ReturnLevel) AS MaxReturnLevel
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+LEFT JOIN 
+    CustomerReturns cr ON wr.wr_order_number = cr.wr_order_number
+WHERE 
+    ca.ca_state IS NOT NULL
+    AND cr.ReturnLevel IS NOT NULL
+    AND ca.ca_city != 'Sample City' -- Exclude specific city
+GROUP BY 
+    c.c_customer_id, ca.ca_city, ca.ca_state
+HAVING 
+    TotalReturns > 0
+ORDER BY 
+    TotalReturnAmount DESC
+LIMIT 100;

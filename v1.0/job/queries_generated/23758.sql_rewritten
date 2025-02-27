@@ -1,0 +1,69 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rank_by_cast_size
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FrequentActors AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COUNT(c.movie_id) AS movie_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.person_id, a.name
+    HAVING 
+        COUNT(c.movie_id) > 5
+),
+ComplicatedLink AS (
+    SELECT 
+        ml.movie_id,
+        COUNT(DISTINCT ml.linked_movie_id) AS linked_movie_count
+    FROM 
+        movie_link ml
+    WHERE 
+        ml.link_type_id IN (
+            SELECT id FROM link_type WHERE link = 'sequel'
+        )
+    GROUP BY 
+        ml.movie_id
+),
+FinalBenchmark AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        fa.name AS actor_name,
+        fa.movie_count,
+        cl.linked_movie_count
+    FROM 
+        RankedMovies rm
+    JOIN 
+        FrequentActors fa ON fa.movie_count > 3
+    LEFT JOIN 
+        ComplicatedLink cl ON rm.movie_id = cl.movie_id
+    WHERE 
+        rm.rank_by_cast_size <= 3
+        AND rm.production_year IS NOT NULL
+        AND cl.linked_movie_count IS NULL 
+)
+SELECT 
+    fb.title,
+    fb.production_year,
+    fb.actor_name,
+    COALESCE(fb.movie_count, 0) AS movie_count,
+    COALESCE(fb.linked_movie_count, 0) AS linked_movie_count,
+    CASE WHEN fb.linked_movie_count IS NULL THEN 'No sequels' ELSE 'Has sequels' END AS sequel_status
+FROM 
+    FinalBenchmark fb
+ORDER BY 
+    fb.production_year DESC, fb.movie_count DESC;

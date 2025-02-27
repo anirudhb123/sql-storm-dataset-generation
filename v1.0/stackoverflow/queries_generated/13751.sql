@@ -1,0 +1,57 @@
+-- Performance Benchmarking Query
+
+WITH UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    pd.PostId,
+    pd.Title AS PostTitle,
+    pd.CreationDate AS PostCreationDate,
+    pd.Score AS PostScore,
+    pd.ViewCount AS PostViewCount,
+    pd.AnswerCount AS PostAnswerCount,
+    pd.CommentCount AS PostCommentCount
+FROM 
+    Users u
+JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+JOIN 
+    PostDetails pd ON u.Id = pd.OwnerUserId
+ORDER BY 
+    ub.BadgeCount DESC, pd.Score DESC
+LIMIT 100;

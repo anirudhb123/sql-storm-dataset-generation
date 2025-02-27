@@ -1,0 +1,57 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        ci.person_id, 
+        ci.movie_id, 
+        1 AS level
+    FROM cast_info ci
+    WHERE ci.role_id = (SELECT id FROM role_type WHERE role = 'Actor')
+    
+    UNION ALL
+    
+    SELECT 
+        ci.person_id, 
+        ci.movie_id, 
+        ah.level + 1
+    FROM cast_info ci
+    JOIN ActorHierarchy ah ON ci.movie_id = ah.movie_id
+    WHERE ci.role_id = (SELECT id FROM role_type WHERE role = 'Supporting Actor')
+),
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(ki.keyword, 'No Keywords') AS keyword,
+        COALESCE(cn.name, 'Unknown Company') AS company_name,
+        ROW_NUMBER() OVER(PARTITION BY m.id ORDER BY ci.nr_order) AS cast_order
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN keyword ki ON mk.keyword_id = ki.id
+    LEFT JOIN movie_companies mc ON mc.movie_id = m.id
+    LEFT JOIN company_name cn ON mc.company_id = cn.id
+    LEFT JOIN complete_cast cc ON cc.movie_id = m.id
+    LEFT JOIN cast_info ci ON ci.movie_id = m.id
+),
+FilteredMovies AS (
+    SELECT 
+        mi.movie_id,
+        COUNT(DISTINCT ah.person_id) AS actor_count,
+        mi.title AS movie_title,
+        mi.production_year,
+        ARRAY_AGG(DISTINCT mi.keyword) AS keywords
+    FROM MovieInfo mi
+    LEFT JOIN ActorHierarchy ah ON mi.movie_id = ah.movie_id
+    WHERE mi.production_year >= 2000
+    GROUP BY mi.movie_id, mi.title, mi.production_year
+)
+SELECT 
+    fm.movie_title, 
+    fm.production_year, 
+    fm.actor_count,
+    STRING_AGG(DISTINCT fm.keywords, ', ') AS keywords_list
+FROM FilteredMovies fm
+WHERE fm.actor_count > 5
+GROUP BY fm.movie_title, fm.production_year, fm.actor_count
+ORDER BY fm.production_year DESC, fm.actor_count DESC
+LIMIT 10;

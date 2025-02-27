@@ -1,0 +1,75 @@
+
+WITH RECURSIVE TopMovies AS (
+    SELECT 
+        title.id AS movie_id,
+        title.title,
+        title.production_year,
+        RANK() OVER (PARTITION BY title.production_year ORDER BY COUNT(cast_info.person_id) DESC) AS cast_count_rank
+    FROM 
+        title
+    JOIN 
+        aka_title ON title.id = aka_title.movie_id
+    LEFT JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    GROUP BY 
+        title.id, title.title, title.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year
+    FROM 
+        TopMovies tm
+    WHERE 
+        tm.cast_count_rank <= 5
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS companies,
+        STRING_AGG(DISTINCT ct.kind, ', ') AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    COALESCE(cd.companies, 'No companies') AS companies,
+    COALESCE(cd.company_types, 'No types') AS company_types,
+    COALESCE(mk.keywords, 'No keywords') AS keywords,
+    COUNT(DISTINCT ci.person_id) AS total_cast,
+    MAX(cp.kind) AS main_cast_type
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_companies mc ON fm.movie_id = mc.movie_id
+LEFT JOIN 
+    CompanyDetails cd ON fm.movie_id = cd.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON fm.movie_id = mk.movie_id
+LEFT JOIN 
+    cast_info ci ON fm.movie_id = ci.movie_id
+LEFT JOIN 
+    role_type cp ON ci.role_id = cp.id
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year, cd.companies, cd.company_types, mk.keywords
+ORDER BY 
+    fm.production_year DESC, total_cast DESC;

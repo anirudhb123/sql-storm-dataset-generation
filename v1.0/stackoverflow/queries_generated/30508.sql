@@ -1,0 +1,66 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id, Title, ParentId, PostTypeId, Score, CreationDate, OwnerUserId
+    FROM Posts
+    WHERE ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT p.Id, p.Title, p.ParentId, p.PostTypeId, p.Score, p.CreationDate, p.OwnerUserId
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserScoreAggregates AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+BadgeCounts AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestClass
+    FROM Badges b
+    GROUP BY b.UserId
+),
+PostVoteAggregates AS (
+    SELECT 
+        p.Id,
+        COUNT(v.Id) AS VoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    u.Reputation,
+    ps.PostCount,
+    ps.TotalScore,
+    ps.AvgScore,
+    COALESCE(bc.BadgeCount, 0) AS BadgeCount,
+    COALESCE(bc.HighestClass, 0) AS HighestBadgeClass,
+    SUM(pv.VoteCount) AS TotalVotes,
+    SUM(pv.UpVotes) AS TotalUpVotes,
+    SUM(pv.DownVotes) AS TotalDownVotes,
+    COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 1) AS QuestionCount,
+    COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 2) AS AnswerCount
+FROM Users u
+JOIN UserScoreAggregates ps ON u.Id = ps.UserId
+LEFT JOIN BadgeCounts bc ON u.Id = bc.UserId
+LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN PostVoteAggregates pv ON p.Id = pv.Id
+WHERE u.Reputation > 1000
+GROUP BY u.DisplayName, u.Reputation, ps.PostCount, ps.TotalScore, ps.AvgScore, bc.BadgeCount, bc.HighestClass
+ORDER BY u.Reputation DESC, ps.TotalScore DESC
+LIMIT 100;
+
+-- Performance Benchmarking - Execution Plan will provide insights on the most costly operations.
+-- Each subquery is contributing to segmented data aggregations and can be analyzed independently.

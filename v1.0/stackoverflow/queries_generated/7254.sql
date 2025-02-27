@@ -1,0 +1,80 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    GROUP BY 
+        U.Id
+),
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        U.DisplayName AS OwnerName,
+        U.Reputation AS OwnerReputation,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        unnest(string_to_array(P.Tags, '><')) AS TagName ON TRUE
+    LEFT JOIN 
+        Tags T ON T.TagName = TagName
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, U.DisplayName, U.Reputation
+),
+HighEngagementPosts AS (
+    SELECT 
+        PS.*,
+        UA.TotalUpVotes,
+        UA.TotalDownVotes
+    FROM 
+        PostStatistics PS
+    JOIN 
+        UserActivity UA ON PS.OwnerName = UA.DisplayName
+    WHERE 
+        PS.ViewCount > 500 AND (PS.CommentCount + PS.AnswerCount) > 10
+)
+SELECT 
+    HEP.PostId,
+    HEP.Title,
+    HEP.CreationDate,
+    HEP.ViewCount,
+    HEP.Score,
+    HEP.AnswerCount,
+    HEP.CommentCount,
+    HEP.FavoriteCount,
+    HEP.OwnerName,
+    HEP.OwnerReputation,
+    HEP.Tags,
+    HEP.TotalUpVotes,
+    HEP.TotalDownVotes
+FROM 
+    HighEngagementPosts HEP
+ORDER BY 
+    HEP.Score DESC, HEP.ViewCount DESC
+LIMIT 100;

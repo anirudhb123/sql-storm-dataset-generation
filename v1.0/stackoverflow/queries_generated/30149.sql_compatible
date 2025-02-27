@@ -1,0 +1,89 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT UNNEST(string_to_array(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))::int)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+), LatestEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        MAX(ph.CreationDate) AS LatestEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        ph.PostId, ph.UserId
+), PostStatistics AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistoryTypeId IN (4, 5, 6)
+    GROUP BY 
+        PostId
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        CASE 
+            WHEN u.Reputation < 100 THEN 'Newbie'
+            WHEN u.Reputation BETWEEN 100 AND 1000 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS UserLevel
+    FROM 
+        Users u
+), FilteredPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.Rank,
+        rp.Tags,
+        COALESCE(ps.EditCount, 0) AS EditCount,
+        le.LatestEditDate,
+        ur.UserLevel
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostStatistics ps ON rp.PostId = ps.PostId
+    LEFT JOIN 
+        LatestEdits le ON rp.PostId = le.PostId
+    LEFT JOIN 
+        Users u ON rp.UserId = u.Id
+    LEFT JOIN 
+        UserReputation ur ON u.Id = ur.UserId
+    WHERE 
+        rp.Rank <= 10 AND 
+        (le.LatestEditDate IS NULL OR le.LatestEditDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '30 days')) 
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.ViewCount,
+    fp.Rank,
+    fp.Tags,
+    fp.EditCount,
+    fp.LatestEditDate,
+    fp.UserLevel
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.Score DESC, fp.CreationDate DESC;

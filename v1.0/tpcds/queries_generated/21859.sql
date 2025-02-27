@@ -1,0 +1,67 @@
+
+WITH RecursiveSales AS (
+    SELECT
+        ws_customer_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY ws_customer_sk ORDER BY SUM(ws_sales_price) DESC) AS rn
+    FROM
+        web_sales
+    GROUP BY
+        ws_customer_sk
+    HAVING
+        total_sales IS NOT NULL
+    UNION ALL
+    SELECT
+        cs_customer_sk,
+        SUM(cs_sales_price) AS total_sales,
+        COUNT(cs_order_number) AS order_count,
+        ROW_NUMBER() OVER (PARTITION BY cs_customer_sk ORDER BY SUM(cs_sales_price) DESC) AS rn
+    FROM
+        catalog_sales
+    GROUP BY
+        cs_customer_sk
+    HAVING
+        total_sales IS NOT NULL
+),
+AggregatedSales AS (
+    SELECT
+        ws.ws_customer_sk,
+        COALESCE(ws.total_sales, 0) AS web_total_sales,
+        COALESCE(cs.total_sales, 0) AS catalog_total_sales,
+        (COALESCE(ws.total_sales, 0) + COALESCE(cs.total_sales, 0)) AS grand_total_sales
+    FROM
+        (SELECT ws_customer_sk, SUM(ws_sales_price) AS total_sales FROM web_sales GROUP BY ws_customer_sk) ws
+    FULL OUTER JOIN (
+        SELECT cs_customer_sk, SUM(cs_sales_price) AS total_sales FROM catalog_sales GROUP BY cs_customer_sk
+    ) cs ON ws.ws_customer_sk = cs.cs_customer_sk
+),
+TopCustomers AS (
+    SELECT
+        ca_customer_id,
+        grand_total_sales,
+        ROW_NUMBER() OVER (ORDER BY grand_total_sales DESC) AS rank
+    FROM
+        AggregatedSales
+    JOIN customer ON customer.c_customer_sk = COALESCE(ws.ws_customer_sk, cs.cs_customer_sk)
+    WHERE
+        grand_total_sales > (SELECT AVG(grand_total_sales) FROM AggregatedSales)
+)
+SELECT
+    c.c_first_name,
+    c.c_last_name,
+    COALESCE(ca_city, 'Unknown') AS city,
+    tc.grand_total_sales,
+    CASE
+        WHEN tc.grand_total_sales > 1000 THEN 'High Roller'
+        WHEN tc.grand_total_sales BETWEEN 500 AND 1000 THEN 'Regular'
+        ELSE 'Occasional'
+    END AS customer_type
+FROM
+    TopCustomers tc
+JOIN customer c ON tc.c_customer_id = c.c_customer_id
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+WHERE
+    tc.rank <= 100
+ORDER BY
+    tc.grand_total_sales DESC;

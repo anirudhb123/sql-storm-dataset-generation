@@ -1,0 +1,41 @@
+WITH RECURSIVE Supp_Hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS Level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) AND s.s_name LIKE 'A%'
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.Level + 1
+    FROM supplier s
+    JOIN Supp_Hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal < sh.s_acctbal AND sh.Level < 5
+),
+Ranked_Orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS price_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+Price_Summary AS (
+    SELECT p.p_partkey, 
+           SUM(CASE WHEN ps.ps_supplycost IS NULL THEN 0 ELSE ps.ps_supplycost * ps.ps_availqty END) AS total_supply_cost,
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+)
+SELECT n.n_name, 
+       SUM(COALESCE(r.o_totalprice, 0)) AS total_order_price,
+       COUNT(DISTINCT s.s_suppkey) AS total_suppliers,
+       MAX(r.price_rank) AS max_price_rank,
+       STRING_AGG(DISTINCT p.p_name ORDER BY p.p_partkey) AS part_names
+FROM nation n
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN Supp_Hierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN Ranked_Orders r ON s.s_nationkey = n.n_nationkey
+LEFT JOIN Price_Summary ps ON s.s_suppkey = ps.p_partkey
+WHERE n.n_name NOT IN (SELECT n_name FROM nation WHERE n_nationkey IN (1, 2, 3))
+AND s.s_acctbal BETWEEN (SELECT AVG(s_acctbal) - 200.00 FROM supplier) AND (SELECT AVG(s_acctbal) + 200.00 FROM supplier)
+AND p.p_size IS NOT NULL
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT p.p_partkey) > 3
+ORDER BY n.n_name DESC
+LIMIT 10 OFFSET 5;

@@ -1,0 +1,72 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC) AS rank
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+ActorCount AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.movie_id
+),
+MoviesWithActors AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        COALESCE(ac.actor_count, 0) AS actor_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        ActorCount ac ON rm.movie_id = ac.movie_id
+),
+HighActorMovies AS (
+    SELECT 
+        mw.title,
+        mw.production_year,
+        mw.actor_count,
+        CASE
+            WHEN mw.actor_count > 10 THEN 'High'
+            WHEN mw.actor_count BETWEEN 5 AND 10 THEN 'Medium'
+            ELSE 'Low'
+        END AS actor_level
+    FROM 
+        MoviesWithActors mw
+    WHERE 
+        mw.actor_count > 0
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    ham.title,
+    ham.production_year,
+    ham.actor_count,
+    ham.actor_level,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords
+FROM 
+    HighActorMovies ham
+LEFT JOIN 
+    MovieKeywords mk ON ham.movie_id = mk.movie_id
+WHERE 
+    ham.actor_level = 'High'
+ORDER BY 
+    ham.production_year DESC, ham.title;

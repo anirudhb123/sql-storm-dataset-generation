@@ -1,0 +1,72 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        SUM(ws_quantity) AS total_quantity,
+        ws_ship_mode_sk
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_ship_mode_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        SUM(ss.total_sales) AS total_sales_for_customer
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        store_sales ss ON ss.ss_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_gender, cd.cd_marital_status, cd.cd_education_status
+),
+promotion_summary AS (
+    SELECT 
+        p.p_promo_sk,
+        COUNT(ws.ws_order_number) AS orders_with_promotion
+    FROM 
+        web_sales ws
+    JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    GROUP BY 
+        p.p_promo_sk
+),
+sales_by_reason AS (
+    SELECT 
+        sr_reason_sk,
+        SUM(sr_return_amt) AS total_return_amount,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_reason_sk
+)
+SELECT 
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ci.cd_education_status,
+    SUM(ss.total_sales) AS total_sales,
+    SUM(p.orders_with_promotion) AS promotion_usage,
+    SUM(sbr.total_return_amount) AS total_return_amount,
+    SUM(sbr.return_count) AS total_return_count
+FROM 
+    customer_info ci
+LEFT JOIN 
+    sales_summary ss ON ci.c_customer_sk = ss.ws_sold_date_sk
+LEFT JOIN 
+    promotion_summary p ON ss.ws_ship_mode_sk = p.p_promo_sk
+LEFT JOIN 
+    sales_by_reason sbr ON ss.ws_order_number = sbr.sr_reason_sk
+GROUP BY 
+    ci.cd_gender, ci.cd_marital_status, ci.cd_education_status
+HAVING 
+    total_sales > 1000
+ORDER BY 
+    total_sales DESC;

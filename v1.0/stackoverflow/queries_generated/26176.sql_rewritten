@@ -1,0 +1,72 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        U.Location,
+        U.CreationDate,
+        (SELECT COUNT(*) FROM Posts P WHERE P.OwnerUserId = U.Id) AS PostCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.UserId = U.Id) AS CommentCount
+    FROM Users U
+    WHERE U.Reputation > 1000
+),
+PostEngagement AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Body,
+        P.CreationDate,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        P.FavoriteCount,
+        P.Score,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS Tags
+    FROM Posts P
+    JOIN LATERAL unnest(string_to_array(P.Tags, '<>')) AS tagId ON TRUE
+    JOIN Tags T ON T.Id = tagId::int
+    WHERE P.CreationDate >= (cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year')
+    AND P.Score > 0
+    GROUP BY P.Id
+),
+UserPostEngagement AS (
+    SELECT 
+        UR.UserId,
+        UR.DisplayName,
+        UR.Reputation,
+        UR.Views,
+        UR.UpVotes,
+        UR.DownVotes,
+        UR.Location,
+        PE.PostId,
+        PE.Title,
+        PE.ViewCount,
+        PE.CommentCount,
+        PE.FavoriteCount,
+        PE.Score
+    FROM UserReputation UR
+    JOIN Posts P ON P.OwnerUserId = UR.UserId
+    JOIN PostEngagement PE ON PE.PostId = P.Id
+)
+SELECT 
+    UPE.UserId,
+    UPE.DisplayName,
+    UPE.Reputation,
+    UPE.Views,
+    UPE.UpVotes,
+    UPE.DownVotes,
+    UPE.Location,
+    COUNT(UPE.PostId) AS TotalPosts,
+    SUM(UPE.ViewCount) AS TotalPostViews,
+    SUM(UPE.CommentCount) AS TotalComments,
+    SUM(UPE.FavoriteCount) AS TotalFavorites,
+    AVG(UPE.Score) AS AveragePostScore,
+    STRING_AGG(DISTINCT PE.Tags, ', ') AS AllTags
+FROM UserPostEngagement UPE
+JOIN PostEngagement PE ON PE.PostId = UPE.PostId
+GROUP BY UPE.UserId, UPE.DisplayName, UPE.Reputation, UPE.Views, UPE.UpVotes, UPE.DownVotes, UPE.Location
+ORDER BY TotalPosts DESC, TotalPostViews DESC
+LIMIT 10;

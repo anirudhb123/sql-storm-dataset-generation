@@ -1,0 +1,57 @@
+
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        1 AS depth,
+        NULL AS parent_id
+    FROM aka_name a
+    WHERE a.name IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ah.depth + 1 AS depth,
+        ah.actor_id AS parent_id
+    FROM aka_name a
+    JOIN actor_hierarchy ah ON a.person_id = ah.actor_id
+    WHERE a.name IS NOT NULL
+),
+title_info AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        MAX(CASE WHEN mt.kind = 'movie' THEN 1 ELSE 0 END) AS is_movie,
+        COUNT(mk.id) FILTER (WHERE mk.keyword IS NOT NULL) AS keyword_count
+    FROM aka_title at
+    LEFT JOIN kind_type kt ON at.kind_id = kt.id
+    LEFT JOIN movie_keyword mk ON at.id = mk.movie_id
+    GROUP BY at.title, at.production_year
+),
+cast_summary AS (
+    SELECT 
+        ci.movie_id,
+        ARRAY_AGG(DISTINCT an.name ORDER BY an.name) AS actors,
+        COUNT(ci.role_id) AS role_count
+    FROM cast_info ci
+    JOIN aka_name an ON ci.person_id = an.person_id
+    GROUP BY ci.movie_id
+)
+SELECT 
+    tt.title,
+    tt.production_year,
+    COUNT(DISTINCT ca.actor_id) AS total_actors,
+    SUM(CASE WHEN tt.is_movie = 1 THEN 1 ELSE 0 END) AS movie_count,
+    MAX(cs.role_count) AS max_roles,
+    STRING_AGG(DISTINCT an.actor_name, ', ') AS actor_names,
+    STRING_AGG(DISTINCT cs.actors, '; ') AS cast_list,
+    ROW_NUMBER() OVER (PARTITION BY tt.production_year ORDER BY COUNT(DISTINCT ca.actor_id) DESC) AS year_rank
+FROM title_info tt
+LEFT JOIN cast_summary cs ON tt.title = cs.movie_id
+LEFT JOIN actor_hierarchy ca ON ca.actor_id IN (SELECT UNNEST(cs.actors))
+WHERE tt.production_year IS NOT NULL
+GROUP BY tt.title, tt.production_year
+HAVING COUNT(DISTINCT ca.actor_id) > 5
+ORDER BY movie_count DESC, tt.production_year ASC;

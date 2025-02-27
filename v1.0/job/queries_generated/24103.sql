@@ -1,0 +1,78 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        1 AS hierarchy_level
+    FROM aka_title mt
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+
+    SELECT 
+        mt.id,
+        CONCAT('Sequel to: ', mh.movie_title) AS movie_title,
+        mt.production_year,
+        mh.hierarchy_level + 1
+    FROM movie_link ml
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+)
+
+, movie_cast AS (
+    SELECT 
+        mt.id AS movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM aka_title mt
+    LEFT JOIN cast_info ci ON mt.id = ci.movie_id
+    GROUP BY mt.id
+)
+
+, person_appearances AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(ma.movie_id) AS appearance_count
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN aka_title mt ON ci.movie_id = mt.id
+    GROUP BY ak.name
+    HAVING COUNT(ma.movie_id) > 5
+)
+
+SELECT 
+    mh.movie_title,
+    mh.production_year,
+    COALESCE(mc.cast_count, 0) AS total_cast,
+    pa.actor_name,
+    pa.appearance_count,
+    CASE 
+        WHEN mh.hierarchy_level > 1 THEN 'Sequel or Related'
+        ELSE 'Original'
+    END AS movie_type,
+    COUNT(DISTINCT ml.linked_movie_id) OVER (PARTITION BY mh.movie_id) AS linked_movies_count,
+    STRING_AGG(DISTINCT k.keyword, ', ') FILTER (WHERE k.keyword IS NOT NULL) AS keywords
+FROM movie_hierarchy mh
+LEFT JOIN movie_cast mc ON mh.movie_id = mc.movie_id
+LEFT JOIN person_appearances pa ON mc.movie_id = (SELECT DISTINCT movie_id FROM cast_info WHERE person_id = pa.actor_name)
+LEFT JOIN movie_keyword mk ON mh.movie_id = mk.movie_id
+LEFT JOIN keyword k ON mk.keyword_id = k.id
+LEFT JOIN movie_link ml ON mh.movie_id = ml.movie_id
+
+WHERE mh.production_year >= 2000
+AND mh.production_year <= EXTRACT(YEAR FROM CURRENT_DATE)  -- Dynamic year clause
+AND (mh.hierarchy_level IS NULL OR mh.hierarchy_level < 5)  -- Limit on hierarchy
+AND EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = mh.movie_id AND mi.info ILIKE '%award%')  -- Existence check for awards
+
+GROUP BY 
+    mh.movie_title, 
+    mh.production_year, 
+    mc.cast_count, 
+    pa.actor_name, 
+    pa.appearance_count, 
+    mh.hierarchy_level
+
+ORDER BY 
+    mh.production_year DESC, 
+    total_cast DESC, 
+    mh.movie_title;

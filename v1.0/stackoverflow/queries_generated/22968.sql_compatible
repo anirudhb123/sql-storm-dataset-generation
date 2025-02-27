@@ -1,0 +1,75 @@
+
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.Reputation, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.OwnerUserId
+),
+TopPostOwner AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        SUM(ps.CommentCount) AS TotalComments,
+        ROW_NUMBER() OVER (ORDER BY SUM(ps.CommentCount) DESC) AS Rank
+    FROM PostStatistics ps
+    JOIN Users us ON ps.OwnerUserId = us.Id
+    GROUP BY us.UserId, us.DisplayName
+    HAVING SUM(ps.CommentCount) > 10
+),
+QualifiedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.OwnerUserId,
+        ps.CommentCount,
+        up.Reputation AS OwnerReputation,
+        RANK() OVER (PARTITION BY ps.OwnerUserId ORDER BY ps.UpVotes - ps.DownVotes DESC) AS VoteRank
+    FROM PostStatistics ps
+    JOIN UserReputation up ON ps.OwnerUserId = up.UserId
+    WHERE up.Reputation > 1000
+),
+FinalResults AS (
+    SELECT 
+        tp.DisplayName,
+        COUNT(qp.PostId) AS QualifiedPostCount,
+        AVG(qp.OwnerReputation) AS AvgOwnerReputation,
+        SUM(qp.CommentCount) AS TotalComments,
+        SUM(qp.VoteRank) AS VoteRankSum
+    FROM TopPostOwner tp
+    LEFT JOIN QualifiedPosts qp ON tp.UserId = qp.OwnerUserId
+    GROUP BY tp.DisplayName
+)
+SELECT 
+    f.DisplayName,
+    COALESCE(f.QualifiedPostCount, 0) AS QualifiedPostCount,
+    COALESCE(f.AvgOwnerReputation, 0) AS AvgOwnerReputation,
+    COALESCE(f.TotalComments, 0) AS TotalComments,
+    CASE 
+        WHEN f.QualifiedPostCount > 10 THEN 'Gold'
+        WHEN f.QualifiedPostCount BETWEEN 5 AND 10 THEN 'Silver'
+        ELSE 'Bronze'
+    END AS BadgeTier
+FROM FinalResults f
+LEFT JOIN Users u ON f.DisplayName = u.DisplayName
+WHERE f.TotalComments IS NOT NULL
+ORDER BY f.TotalComments DESC, BadgeTier DESC;

@@ -1,0 +1,76 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_retailprice, 
+        p.p_size,
+        CASE 
+            WHEN p.p_size IS NULL THEN 'Unknown Size' 
+            ELSE CAST(p.p_size AS VARCHAR) 
+        END AS size_description
+    FROM 
+        part p 
+    WHERE 
+        p.p_retailprice IS NOT NULL
+        AND p.p_retailprice > (SELECT AVG(ps_supplycost) FROM partsupp)
+),
+CustomerOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_custkey,
+        COUNT(l.l_orderkey) AS total_lineitems
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN 
+        lineitem l ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        o.o_orderkey, c.c_custkey
+    HAVING 
+        COUNT(l.l_orderkey) > 5
+),
+RecentShipments AS (
+    SELECT 
+        l.l_orderkey,
+        MAX(l.l_shipdate) AS last_shipdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= CURRENT_DATE - INTERVAL '90 days'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    COALESCE(fs.size_description, 'N/A') AS part_size,
+    COUNT(DISTINCT co.o_orderkey) AS order_count,
+    SUM(rs.s_acctbal) AS total_supplier_balance,
+    STRING_AGG(DISTINCT n.n_name, ', ') AS nations_supplied
+FROM 
+    FilteredParts fs
+LEFT JOIN 
+    partsupp ps ON fs.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey AND rs.rnk = 1
+LEFT JOIN 
+    CustomerOrders co ON co.o_orderkey = ps.ps_partkey
+LEFT JOIN 
+    nation n ON n.n_nationkey = rs.s_nationkey
+WHERE 
+    (fs.p_size IS NOT NULL OR rs.s_acctbal > 5000)
+    AND (fs.p_retailprice * 0.9) > (SELECT AVG(fs2.p_retailprice) FROM FilteredParts fs2)
+GROUP BY 
+    fs.size_description
+HAVING 
+    SUM(CASE WHEN rs.s_acctbal IS NULL THEN 0 ELSE 1 END) > 0
+ORDER BY 
+    order_count DESC, total_supplier_balance DESC;

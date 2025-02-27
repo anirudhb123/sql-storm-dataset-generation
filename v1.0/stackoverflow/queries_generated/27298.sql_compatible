@@ -1,0 +1,81 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation AS OwnerReputation,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+TagAggregates AS (
+    SELECT
+        TRIM(REGEXP_REPLACE(unnest(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')), '<', '')) AS Tag) AS TagName,
+        COUNT(*) AS PostCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(u.Reputation) AS AverageReputation
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+MostActiveUsers AS (
+    SELECT
+        u.DisplayName,
+        COUNT(p.Id) AS PostsCreated,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS UpVotedPosts,
+        SUM(CASE WHEN p.Score < 0 THEN 1 ELSE 0 END) AS DownVotedPosts
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+    GROUP BY 
+        u.DisplayName
+    ORDER BY 
+        PostsCreated DESC
+    LIMIT 5
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Tags,
+    rp.OwnerDisplayName,
+    rp.OwnerReputation,
+    rp.CreationDate,
+    rp.Score,
+    ta.TagName AS PopularTag,
+    ta.PostCount AS TagPostCount,
+    ta.TotalScore AS TagTotalScore,
+    ta.AverageReputation AS TagAverageReputation,
+    mau.DisplayName AS MostActiveUser,
+    mau.PostsCreated,
+    mau.UpVotedPosts,
+    mau.DownVotedPosts
+FROM 
+    RankedPosts rp
+JOIN 
+    TagAggregates ta ON rp.Tags LIKE CONCAT('%<', ta.TagName, '>%')
+LEFT JOIN 
+    MostActiveUsers mau ON rp.OwnerDisplayName = mau.DisplayName
+WHERE 
+    rp.TagRank = 1
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate ASC;

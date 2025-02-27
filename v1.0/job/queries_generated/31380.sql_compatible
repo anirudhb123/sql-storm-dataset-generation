@@ -1,0 +1,59 @@
+
+WITH RECURSIVE MovieChain AS (
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        1 AS chain_level
+    FROM 
+        movie_link ml
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+    
+    UNION ALL
+    
+    SELECT 
+        ml.movie_id,
+        ml.linked_movie_id,
+        mc.chain_level + 1
+    FROM 
+        movie_link ml
+    INNER JOIN 
+        MovieChain mc ON ml.movie_id = mc.linked_movie_id
+    WHERE 
+        ml.link_type_id = (SELECT id FROM link_type WHERE link = 'sequel')
+)
+
+SELECT 
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT mci.person_id) AS cast_count,
+    ROUND(AVG(CASE 
+            WHEN ci.role_id IS NOT NULL THEN 1 
+            ELSE 0 
+        END), 2) AS average_roles_per_actor,
+    STRING_AGG(DISTINCT a.name, ', ') AS main_actors,
+    CASE 
+        WHEN COUNT(DISTINCT mci.movie_id) > 1 THEN 'Part of a Series'
+        ELSE 'Standalone'
+    END AS movie_type,
+    MAX(k.keyword) AS keyword_associated
+FROM 
+    title m
+LEFT JOIN 
+    complete_cast cc ON m.id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.person_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    MovieChain mc ON mc.movie_id = m.id
+GROUP BY 
+    m.id, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT mc.linked_movie_id) > 0
+ORDER BY 
+    m.production_year DESC, cast_count DESC;

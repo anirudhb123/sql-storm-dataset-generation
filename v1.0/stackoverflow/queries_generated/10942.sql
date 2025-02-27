@@ -1,0 +1,58 @@
+-- Performance Benchmarking Query
+
+-- This query assesses the performance by analyzing the relationships and aggregating data across multiple tables.
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN p.PostTypeId IN (6, 1) THEN 1 ELSE 0 END) AS TotalActivePosts,
+        SUM(v.VoteTypeId = 2) AS UpVotes,
+        SUM(v.VoteTypeId = 3) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryStats AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.UserId, 
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEdit
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 24) -- Includes title, body edits, and suggested edits
+    GROUP BY 
+        p.Id, ph.UserId
+)
+
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostCount,
+    ups.QuestionCount,
+    ups.AnswerCount,
+    ups.TotalActivePosts,
+    ups.UpVotes,
+    ups.DownVotes,
+    COALESCE(SUM(phs.EditCount), 0) AS TotalEdits,
+    COALESCE(MAX(phs.LastEdit), 'No Edits') AS LastEditDate
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    PostHistoryStats phs ON ups.UserId = phs.UserId
+GROUP BY 
+    ups.UserId, ups.DisplayName
+ORDER BY 
+    ups.PostCount DESC;

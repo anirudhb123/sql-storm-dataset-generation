@@ -1,0 +1,39 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_name, 
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        COUNT(DISTINCT c.c_custkey) AS total_customers,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        customer c ON s.s_nationkey = c.c_nationkey
+    GROUP BY 
+        s.s_name, p.p_name
+),
+TopSuppliers AS (
+    SELECT 
+        s_name, 
+        p_name, 
+        total_available_qty, 
+        total_customers
+    FROM 
+        RankedSuppliers 
+    WHERE 
+        supplier_rank <= 5
+)
+SELECT 
+    t.s_name AS supplier_name,
+    t.p_name AS part_name,
+    t.total_available_qty,
+    t.total_customers,
+    CONCAT(t.s_name, ' supplies ', t.p_name, ' with a total available quantity of ', t.total_available_qty, ' and is served by ', t.total_customers, ' customers.') AS supplier_info
+FROM 
+    TopSuppliers t
+ORDER BY 
+    t.total_available_qty DESC;

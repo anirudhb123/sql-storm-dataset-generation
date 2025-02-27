@@ -1,0 +1,44 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+PopularMovies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        actor_count,
+        actor_names,
+        RANK() OVER (ORDER BY actor_count DESC) AS rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    pm.movie_id,
+    pm.movie_title,
+    pm.production_year,
+    pm.actor_count,
+    STRING_AGG(pm.actor_names, ', ') AS actors
+FROM 
+    PopularMovies pm
+WHERE 
+    pm.rank <= 10
+GROUP BY 
+    pm.movie_id, pm.movie_title, pm.production_year, pm.actor_count
+ORDER BY 
+    pm.actor_count DESC;

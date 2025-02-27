@@ -1,0 +1,68 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank_per_brand,
+        SUM(ps.ps_availqty) AS total_available_quantity
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_brand
+), 
+SupplierRegion AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Balance' 
+            ELSE CAST(s.s_acctbal AS VARCHAR)
+        END AS account_balance
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'A%')
+), 
+AggregateOrders AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('O', 'F')
+    GROUP BY 
+        o.o_custkey
+)
+SELECT 
+    c.c_custkey,
+    c.c_name,
+    COALESCE(ao.order_count, 0) AS order_count,
+    COALESCE(ao.total_spent, 0.00) AS total_spent,
+    COUNT(DISTINCT rp.p_partkey) FILTER (WHERE rp.rank_per_brand <= 5) AS top_parts_by_brand,
+    sr.nation_name,
+    sr.account_balance
+FROM 
+    customer c
+LEFT JOIN 
+    AggregateOrders ao ON c.c_custkey = ao.o_custkey
+LEFT JOIN 
+    lineitem li ON c.c_custkey = (SELECT l.o_custkey FROM orders l WHERE l.o_orderkey = li.l_orderkey)
+LEFT JOIN 
+    RankedParts rp ON li.l_partkey = rp.p_partkey
+LEFT JOIN 
+    SupplierRegion sr ON li.l_suppkey = sr.s_suppkey
+WHERE 
+    c.c_acctbal IS NOT NULL AND c.c_acctbal > 100.00
+GROUP BY 
+    c.c_custkey, c.c_name, sr.nation_name, sr.account_balance
+HAVING 
+    COALESCE(SUM(ao.total_spent), 0) > (SELECT AVG(total_spent) FROM AggregateOrders)
+ORDER BY 
+    total_spent DESC;

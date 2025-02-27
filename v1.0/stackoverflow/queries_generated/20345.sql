@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT v.UserId) FILTER (WHERE v.VoteTypeId = 2) AS UpvoteCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year' 
+        AND p.Score IS NOT NULL
+    GROUP BY 
+        p.Id
+),
+RecentPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpvoteCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ScoreRank <= 10  -- Top 10 from each post type
+),
+CombinedTags AS (
+    SELECT 
+        p.Id AS PostId,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        UNNEST(string_to_array(SUBSTRING(p.Tags FROM 2 FOR LENGTH(p.Tags) - 2), '><')) AS TagName t
+    GROUP BY 
+        p.Id
+),
+FinalPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.CommentCount,
+        rp.UpvoteCount,
+        ct.Tags,
+        CASE
+            WHEN rp.Score > 10 THEN 'High Score'
+            WHEN rp.Score BETWEEN 1 AND 10 THEN 'Moderate Score'
+            ELSE 'Low Score'
+        END AS ScoreCategory
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        CombinedTags ct ON rp.PostId = ct.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.CommentCount,
+    fp.UpvoteCount,
+    COALESCE(fp.Tags, 'No tags') AS Tags,
+    fp.ScoreCategory,
+    CASE 
+        WHEN fp.CommentCount < 2 THEN 'Not much discussion'
+        WHEN fp.CommentCount BETWEEN 2 AND 5 THEN 'Moderate discussion'
+        ELSE 'Highly discussed'
+    END AS DiscussionLevel
+FROM 
+    FinalPosts fp
+WHERE 
+    fp.CommentCount IS NOT NULL
+ORDER BY 
+    fp.Score DESC, fp.CommentCount DESC;
+

@@ -1,0 +1,60 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_custkey, o.o_orderstatus
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_acctbal
+    HAVING 
+        COUNT(DISTINCT o.o_orderkey) > 5
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    SUM(ps.ps_availqty * CASE WHEN p.p_size > 10 THEN 1.2 ELSE 1 END) AS adjusted_qty,
+    COALESCE(NULLIF(AVG(ps.ps_supplycost), 0), 0) AS avg_supply_cost,
+    MAX(Rank.total_amount) OVER (PARTITION BY p.p_partkey) AS max_order_amount,
+    CASE 
+        WHEN h.order_count IS NOT NULL THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_segment
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    RankedOrders Rank ON Rank.o_orderkey = (SELECT MAX(o_orderkey) FROM orders WHERE o_orderkey <= Rank.o_orderkey)
+LEFT JOIN 
+    HighValueCustomers h ON h.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = Rank.o_orderkey)
+GROUP BY 
+    p.p_partkey, p.p_name, s.s_name, h.order_count
+HAVING 
+    SUM(ps.ps_availqty) > 100
+ORDER BY 
+    adjusted_qty DESC,
+    p.p_name ASC
+LIMIT 20;

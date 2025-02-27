@@ -1,0 +1,51 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss_store_sk,
+        ss_item_sk,
+        ss_quantity,
+        ss_net_paid,
+        RANK() OVER (PARTITION BY ss_store_sk ORDER BY ss_net_paid DESC) as rn
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN 2450800 AND 2450830 -- some arbitrary date range
+),
+CustomerReturns AS (
+    SELECT 
+        sr_item_sk,
+        SUM(sr_return_quantity) as total_returns,
+        SUM(sr_return_amt) as total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    s.s_store_id,
+    COALESCE(SUM(rs.ss_quantity), 0) AS total_items_sold,
+    COALESCE(SUM(cr.total_returns), 0) AS total_items_returned,
+    SUM(rs.ss_net_paid) AS total_sales,
+    AVG(rs.ss_net_paid) AS avg_sales_per_item,
+    MAX(rs.ss_net_paid) AS max_sales_per_item,
+    MIN(rs.ss_net_paid) AS min_sales_per_item,
+    CASE 
+        WHEN COUNT(DISTINCT rs.ss_item_sk) = 0 THEN 'No Sales' 
+        ELSE 'Sales Existed' 
+    END AS sales_status
+FROM 
+    store s 
+LEFT JOIN 
+    RankedSales rs ON s.s_store_sk = rs.ss_store_sk
+LEFT JOIN 
+    CustomerReturns cr ON rs.ss_item_sk = cr.sr_item_sk
+WHERE 
+    (s.s_state = 'CA' OR s.s_state IS NULL)
+    AND (rs.rn = 1 OR cr.total_returns IS NOT NULL)
+GROUP BY 
+    s.s_store_id
+HAVING 
+    total_sales > (SELECT AVG(ss_sales_price) FROM store_sales WHERE ss_sold_date_sk BETWEEN 2450800 AND 2450830)
+ORDER BY 
+    total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,48 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate >= '2023-01-01'
+
+    UNION ALL
+
+    SELECT oh.o_orderkey, o.o_orderdate, o.o_totalprice, o.o_custkey
+    FROM OrderHierarchy oh
+    JOIN orders o ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderstatus = 'O'
+), 
+SupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_available, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CustomerOrderStats AS (
+    SELECT c.c_custkey, COUNT(DISTINCT o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent,
+           DENSE_RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS spend_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT 
+    c.c_name, 
+    cs.total_spent AS total_spent,
+    cs.order_count,
+    ss.total_available,
+    ss.avg_supply_cost,
+    COALESCE(r.r_name, 'Unknown') AS region_name,
+    CASE 
+        WHEN cs.spend_rank <= 10 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM CustomerOrderStats cs
+JOIN customer c ON cs.c_custkey = c.c_custkey
+LEFT OUTER JOIN nation n ON c.c_nationkey = n.n_nationkey
+LEFT OUTER JOIN region r ON n.n_regionkey = r.r_regionkey
+JOIN SupplierStats ss ON ss.ps_partkey IN (
+    SELECT DISTINCT l.l_partkey
+    FROM lineitem l
+    WHERE l.l_orderkey IN (SELECT o.o_orderkey FROM OrderHierarchy o)
+)
+WHERE cs.total_spent IS NOT NULL AND cs.order_count > 0
+ORDER BY cs.total_spent DESC, c.c_name;

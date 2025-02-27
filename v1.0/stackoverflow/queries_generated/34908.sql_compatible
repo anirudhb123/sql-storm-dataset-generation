@@ -1,0 +1,57 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate, 1 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.Title, p.ParentId, p.CreationDate, r.Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+RecentPosts AS (
+    SELECT Id, Title, CreationDate, OwnerUserId
+    FROM Posts
+    WHERE CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+PostScoreSummary AS (
+    SELECT OwnerUserId, 
+           COUNT(*) AS TotalPosts, 
+           SUM(CASE WHEN Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+           SUM(CASE WHEN Score < 0 THEN 1 ELSE 0 END) AS NegativePosts
+    FROM Posts
+    GROUP BY OwnerUserId
+),
+UserBadges AS (
+    SELECT b.UserId, 
+           COUNT(*) AS BadgeCount, 
+           STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    WHERE b.Date >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY b.UserId
+),
+PostsWithUserBadges AS (
+    SELECT p.*, 
+           COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+           COALESCE(ub.BadgeNames, 'No Badges') AS BadgeNames
+    FROM Posts p
+    LEFT JOIN UserBadges ub ON p.OwnerUserId = ub.UserId
+)
+SELECT 
+    ph.Id AS PostId,
+    ph.Title AS PostTitle,
+    ph.CreationDate AS PostCreationDate,
+    pws.BadgeCount,
+    pws.BadgeNames,
+    COALESCE((SELECT SUM(v.BountyAmount) FROM Votes v WHERE v.PostId = ph.Id AND v.VoteTypeId = 8), 0) AS TotalBounty,
+    SUM(cr.Level) AS ContributionLevel
+FROM RecursivePostHierarchy cr
+JOIN PostsWithUserBadges pws ON cr.Id = pws.Id
+LEFT JOIN RecentPosts rp ON pws.Id = rp.Id
+WHERE pws.OwnerUserId IN (
+    SELECT DISTINCT OwnerUserId
+    FROM PostScoreSummary
+    WHERE TotalPosts > 10 AND PositivePosts > 5
+)
+GROUP BY ph.Id, ph.Title, ph.CreationDate, pws.BadgeCount, pws.BadgeNames
+ORDER BY TotalBounty DESC, ph.CreationDate DESC
+LIMIT 100;

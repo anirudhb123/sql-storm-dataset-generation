@@ -1,0 +1,44 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        r.r_name AS region_name, 
+        s.s_acctbal, 
+        ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+StringProcessedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        CONCAT('Order ', CAST(o.o_orderkey AS VARCHAR), ' placed on ', TO_CHAR(o.o_orderdate, 'YYYY-MM-DD')) AS order_description
+    FROM 
+        orders o
+)
+SELECT 
+    spp.s_suppkey, 
+    spp.s_name,
+    spp.region_name,
+    spo.order_description,
+    LENGTH(spo.order_description) AS description_length,
+    ROUND(SUM(p.ps_supplycost * l.l_quantity), 2) AS total_supply_cost
+FROM 
+    RankedSuppliers spp
+JOIN 
+    partsupp p ON spp.s_suppkey = p.ps_suppkey
+JOIN 
+    lineitem l ON p.ps_partkey = l.l_partkey
+JOIN 
+    StringProcessedOrders spo ON l.l_orderkey = spo.o_orderkey
+WHERE 
+    spp.rank <= 5
+GROUP BY 
+    spp.s_suppkey, spp.s_name, spp.region_name, spo.order_description, LENGTH(spo.order_description)
+ORDER BY 
+    total_supply_cost DESC, description_length DESC;

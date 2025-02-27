@@ -1,0 +1,68 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+TopSpenders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (SELECT AVG(o_totalprice) FROM orders)
+),
+PartSupplier AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        p.p_retailprice,
+        p.p_type,
+        CASE 
+            WHEN (p.p_retailprice - ps.ps_supplycost) < 0 THEN 'Loss'
+            ELSE 'Profit'
+        END AS profitability
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+)
+SELECT 
+    s.c_name AS customer_name,
+    sh.o_orderkey,
+    sh.o_orderdate,
+    s.total_spent,
+    ps.p_name AS part_name,
+    ps.profitability,
+    COUNT(DISTINCT sh.o_orderkey) OVER (PARTITION BY s.c_custkey) AS total_orders,
+    ROW_NUMBER() OVER (ORDER BY s.total_spent DESC) AS rank
+FROM 
+    SalesHierarchy sh
+JOIN 
+    TopSpenders s ON sh.c_custkey = s.c_custkey
+LEFT JOIN 
+    PartSupplier ps ON ps.p_retailprice > (SELECT AVG(p_retailprice) FROM part WHERE p_type = ps.p_type)
+WHERE 
+    sh.order_rank = 1
+ORDER BY 
+    s.total_spent DESC
+FETCH FIRST 10 ROWS ONLY;

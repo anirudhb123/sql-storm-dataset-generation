@@ -1,0 +1,44 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS price_rank,
+        o.o_orderdate,
+        o.o_orderstatus,
+        o.o_comment
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+),
+FilteredOrders AS (
+    SELECT 
+        r.o_orderkey,
+        r.c_name,
+        r.o_orderdate,
+        r.o_orderstatus,
+        r.o_comment
+    FROM 
+        RankedOrders r
+    WHERE 
+        r.price_rank <= 10 AND 
+        r.o_orderstatus = 'O'
+),
+StringProcessed AS (
+    SELECT 
+        o.o_orderkey,
+        CONCAT('Order by ', o.c_name, ' on ', TO_CHAR(o.o_orderdate, 'YYYY-MM-DD'), 
+               ' - Status: ', o.o_orderstatus, ' - Comment: ', o.o_comment) AS order_summary
+    FROM 
+        FilteredOrders o
+)
+SELECT 
+    order_summary,
+    LENGTH(order_summary) AS summary_length,
+    REGEXP_REPLACE(order_summary, '[^a-zA-Z0-9 ]', '') AS sanitized_summary,
+    SUBSTRING(order_summary, 1, 50) AS short_summary
+FROM 
+    StringProcessed
+ORDER BY 
+    summary_length DESC;

@@ -1,0 +1,61 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.orderkey,
+        o.totalprice,
+        o.orderdate,
+        ROW_NUMBER() OVER (PARTITION BY EXTRACT(YEAR FROM o.orderdate) ORDER BY o.totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.orderdate >= DATE '2022-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS average_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.partkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(sp.total_available, 0) AS total_available,
+        COALESCE(sp.average_cost, 0) AS average_cost,
+        (p.p_retailprice - COALESCE(sp.average_cost, 0)) AS profit_margin
+    FROM 
+        part p
+    LEFT JOIN 
+        SupplierParts sp ON p.p_partkey = sp.partkey
+    WHERE 
+        p.p_retailprice > 100.00
+)
+SELECT 
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    COUNT(DISTINCT o.orderkey) AS order_count,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END) AS total_returned,
+    SUM(hp.profit_margin) AS total_profit_margin
+FROM 
+    customer c
+JOIN 
+    nation n ON c.c_nationkey = n.n_nationkey
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    HighValueParts hp ON l.l_partkey = hp.p_partkey
+WHERE 
+    n.n_name IS NOT NULL 
+    AND (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL)
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 500.00
+ORDER BY 
+    customer_count DESC, total_profit_margin DESC;

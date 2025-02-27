@@ -1,0 +1,76 @@
+WITH RECURSIVE price_ranking AS (
+    SELECT 
+        ps_partkey,
+        ps_suppkey,
+        ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost ASC) AS price_rank
+    FROM 
+        partsupp
+),
+filtered_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' 
+        AND c.c_acctbal IS NOT NULL 
+        AND c.c_mktsegment NOT IN ('AUTOMOBILE', 'BUILDING')
+),
+nation_supplier AS (
+    SELECT 
+        n.n_name,
+        s.s_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        n.n_name, s.s_suppkey
+),
+final_results AS (
+    SELECT 
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        AVG(price_ranking.ps_supplycost) AS avg_supply_cost,
+        SUM(CASE WHEN orders.o_orderkey IS NOT NULL THEN orders.o_totalprice ELSE 0 END) AS total_order_value
+    FROM 
+        nation_supplier
+    LEFT JOIN 
+        region r ON r.r_regionkey = (SELECT n_regionkey FROM nation WHERE n_name = nation_supplier.n_nation)
+    LEFT JOIN 
+        filtered_orders orders ON orders.o_orderkey IN (
+            SELECT l_orderkey FROM lineitem 
+            WHERE l_partkey IN (SELECT ps_partkey FROM price_ranking WHERE price_rank = 1)
+        )
+    GROUP BY 
+        n.n_name
+)
+SELECT 
+    f.n_name,
+    f.supplier_count,
+    f.avg_supply_cost,
+    f.total_order_value,
+    CASE 
+        WHEN f.total_order_value IS NULL THEN 'No Sales'
+        WHEN f.total_order_value > 50000 THEN 'High Sales'
+        ELSE 'Regular Sales'
+    END AS sales_category
+FROM 
+    final_results f
+WHERE 
+    f.avg_supply_cost > (
+        SELECT AVG(ps_supplycost) FROM price_ranking
+    )
+ORDER BY 
+    f.total_order_value DESC, 
+    f.supplier_count ASC NULLS LAST;

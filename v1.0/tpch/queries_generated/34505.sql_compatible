@@ -1,0 +1,50 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_suppkey
+), 
+
+customer_orders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+), 
+
+part_inventory AS (
+    SELECT p.p_partkey, p.p_name, SUM(ps.ps_availqty) AS total_available, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+), 
+
+ranked_lineitems AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_quantity, l.l_extendedprice,
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rank_price
+    FROM lineitem l
+    WHERE l.l_discount > 0.1
+), 
+
+total_revenue AS (
+    SELECT SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+)
+
+SELECT s.s_name, c.c_name, co.total_spent, pi.total_available, 
+       (CASE WHEN pi.total_available IS NULL THEN 'Out of Stock' ELSE 'In Stock' END) AS stock_status,
+       tr.revenue,
+       STRING_AGG(DISTINCT CONCAT('Part: ', p.p_name, ' (', p.p_partkey, ')'), '; ') AS part_details
+FROM supplier_hierarchy s
+LEFT JOIN customer_orders co ON s.s_suppkey = co.c_custkey
+LEFT JOIN part_inventory pi ON s.s_suppkey = pi.p_partkey
+CROSS JOIN total_revenue tr
+LEFT JOIN ranked_lineitems l ON l.l_partkey = pi.p_partkey
+GROUP BY s.s_name, c.c_name, co.total_spent, pi.total_available, tr.revenue
+HAVING SUM(l.l_quantity) > 100
+ORDER BY co.total_spent DESC, pi.total_available ASC;

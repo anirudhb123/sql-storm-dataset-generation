@@ -1,0 +1,76 @@
+WITH RECURSIVE CustomerOrderCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS order_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+NationSupplierCTE AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(s.s_suppkey) AS number_of_suppliers
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+),
+PartSupplierCTE AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ps.ps_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS cost_rank
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+FrequentItems AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(l.l_quantity) > 100 -- Arbitrary threshold for frequent items
+)
+SELECT 
+    c.c_name,
+    COALESCE(o.total_spent, 0) AS total_spent,
+    ns.n_name AS nation_name,
+    ps.p_name AS popular_part,
+    fs.total_quantity AS frequent_quantity
+FROM 
+    CustomerOrderCTE o
+INNER JOIN 
+    customer c ON o.c_custkey = c.c_custkey
+LEFT JOIN 
+    NationSupplierCTE ns ON c.c_nationkey = ns.n_nationkey
+LEFT JOIN 
+    PartSupplierCTE ps ON ps.cost_rank = 1
+LEFT JOIN 
+    FrequentItems fs ON ps.p_partkey = fs.p_partkey
+WHERE 
+    o.order_rank <= 5 AND
+    (ns.number_of_suppliers IS NULL OR ns.number_of_suppliers > 5)
+ORDER BY 
+    total_spent DESC, 
+    frequent_quantity DESC;

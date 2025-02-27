@@ -1,0 +1,47 @@
+
+WITH TagActivity AS (
+    SELECT
+        t.TagName,
+        p.OwnerUserId,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        AVG(p.Score) AS AvgScore
+    FROM
+        Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%' )
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN Votes v ON v.PostId = p.Id
+    GROUP BY t.TagName, p.OwnerUserId
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT a.Id) AS TotalAcceptedAnswers
+    FROM
+        Users u
+    LEFT JOIN Posts a ON a.OwnerUserId = u.Id AND a.PostTypeId = 2 AND a.AcceptedAnswerId IS NOT NULL
+    GROUP BY u.Id, u.Reputation
+)
+SELECT
+    ta.TagName,
+    COUNT(DISTINCT ta.OwnerUserId) AS UniqueUserCount,
+    SUM(ta.PostCount) AS TotalPosts,
+    SUM(ta.QuestionCount) AS TotalQuestions,
+    SUM(ta.AnswerCount) AS TotalAnswers,
+    SUM(ta.CommentCount) AS TotalComments,
+    SUM(ta.UpVoteCount) AS TotalUpVotes,
+    SUM(ta.DownVoteCount) AS TotalDownVotes,
+    AVG(ta.AvgScore) AS AvgPostScore,
+    MAX(ur.Reputation) AS HighestReputation
+FROM
+    TagActivity ta
+JOIN UserReputation ur ON ta.OwnerUserId = ur.UserId
+GROUP BY
+    ta.TagName
+ORDER BY
+    TotalPosts DESC, UniqueUserCount DESC;

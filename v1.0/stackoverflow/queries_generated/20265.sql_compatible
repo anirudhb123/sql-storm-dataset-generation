@@ -1,0 +1,99 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.Id AS UserId,
+        U.DisplayName AS UserDisplayName,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS ScoreRank,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) OVER (PARTITION BY P.Id) AS UpVoteCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) OVER (PARTITION BY P.Id) AS DownVoteCount
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+),
+PostStatistics AS (
+    SELECT 
+        PostId,
+        Title,
+        UserId,
+        UserDisplayName,
+        CreationDate,
+        Score,
+        ViewCount,
+        ScoreRank,
+        UpVoteCount,
+        DownVoteCount,
+        CASE 
+            WHEN Score > 0 THEN 'Positive'
+            WHEN Score < 0 THEN 'Negative'
+            ELSE 'Neutral'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts
+    WHERE 
+        CreationDate > CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        PH.CreationDate AS CloseDate,
+        C.CloseReasonTypeId,
+        C.Comment AS CloseComment
+    FROM 
+        PostHistory PH
+    INNER JOIN 
+        (SELECT DISTINCT PostId FROM PostHistory WHERE PostHistoryTypeId = 10) AS Closed ON PH.PostId = Closed.PostId
+    LEFT JOIN 
+        CloseReasonTypes C ON CAST(PH.Comment AS INTEGER) = C.Id
+),
+FinalReport AS (
+    SELECT 
+        PS.Title,
+        PS.UserDisplayName,
+        PS.CreationDate,
+        PS.Score,
+        PS.ViewCount,
+        PS.UpVoteCount,
+        PS.DownVoteCount,
+        COALESCE(CP.CloseDate, 'No Closure') AS PostCloseDate,
+        COALESCE(CP.CloseReasonTypeId, -1) AS CloseReasonId,
+        COALESCE(CP.CloseComment, 'N/A') AS CloseComment
+    FROM 
+        PostStatistics PS
+    LEFT JOIN 
+        ClosedPosts CP ON PS.PostId = CP.PostId
+)
+SELECT 
+    F.Title,
+    F.UserDisplayName,
+    F.CreationDate,
+    F.Score,
+    F.ViewCount,
+    F.UpVoteCount,
+    F.DownVoteCount,
+    F.PostCloseDate,
+    F.CloseReasonId,
+    F.CloseComment,
+    CASE 
+        WHEN F.ScoreRank = 1 THEN 'Top Score in Category'
+        ELSE 'Not Top Score'
+    END AS ScoreStatus,
+    CASE 
+        WHEN F.CloseReasonId IN (1, 2, 3) THEN 'Question Closure Reason'
+        WHEN F.CloseReasonId = -1 THEN 'Post Active'
+        ELSE 'Other Closure'
+    END AS ClosureInsight
+FROM 
+    FinalReport F
+WHERE 
+    F.UpVoteCount > F.DownVoteCount
+ORDER BY 
+    F.Score DESC,
+    F.CreationDate DESC;

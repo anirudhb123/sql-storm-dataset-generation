@@ -1,0 +1,19 @@
+
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS TotalPosts,
+    COALESCE(SUM(p.Score), 0) AS TotalScore,
+    COALESCE(SUM(p.ViewCount), 0) AS TotalViewCount,
+    COALESCE(SUM(p.AnswerCount), 0) AS TotalAnswers,
+    COALESCE(SUM(p.CommentCount), 0) AS TotalComments,
+    AVG(CAST(p.CreationDate AS TIMESTAMP)) AS AverageCreationTime,
+    MIN(p.Score) AS MinScore,
+    MAX(p.Score) AS MaxScore
+FROM 
+    Posts p
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+GROUP BY 
+    pt.Name
+ORDER BY 
+    TotalPosts DESC;

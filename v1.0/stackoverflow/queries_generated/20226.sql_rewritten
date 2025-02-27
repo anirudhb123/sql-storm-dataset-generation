@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id
+),
+
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = p.Tags
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        pt.Name = 'Question'
+    GROUP BY 
+        t.TagName
+    HAVING 
+        COUNT(pt.PostId) > 10
+)
+
+SELECT 
+    up.UserId,
+    up.Reputation,
+    up.BadgeCount,
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    COALESCE(pt.PostCount, 0) AS PopularTagPostCount,
+    CASE 
+        WHEN rp.Score >= 50 THEN 'High Score'
+        WHEN rp.Score IS NULL THEN 'No Score'
+        ELSE 'Low Score'
+    END AS Score_Category
+FROM 
+    UserReputation up
+LEFT JOIN 
+    RankedPosts rp ON up.Reputation >= 200
+LEFT JOIN 
+    PopularTags pt ON POSITION(pt.TagName IN rp.Title) > 0
+WHERE 
+    up.BadgeCount > 0 
+    AND up.UserId IS NOT NULL
+ORDER BY 
+    up.Reputation DESC,
+    rp.ViewCount DESC
+LIMIT 100;

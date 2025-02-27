@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplyHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size > 10
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, p.p_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN SupplyHierarchy sh ON p.p_partkey = sh.p_partkey
+    WHERE sh.ps_availqty < 100
+),
+TotalOrderPrices AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_returnflag = 'N'
+    GROUP BY o.o_orderkey
+),
+RankedSuppliers AS (
+    SELECT s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+           RANK() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT r.n_name, sh.p_name, COUNT(DISTINCT so.o_orderkey) AS total_orders,
+       MAX(rs.total_supply_cost) AS highest_supply_cost,
+       AVG(rs.total_supply_cost) AS avg_supply_cost,
+       CASE WHEN AVG(rs.total_supply_cost) IS NULL THEN 'No Data' ELSE 'Data Available' END AS data_availability
+FROM nation r
+LEFT JOIN SupplyHierarchy sh ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = sh.p_partkey)
+LEFT JOIN TotalOrderPrices so ON sh.p_partkey = so.o_orderkey
+LEFT JOIN RankedSuppliers rs ON sh.s_name = rs.s_name
+WHERE sh.ps_availqty > 50 AND (sh.ps_supplycost IS NOT NULL OR sh.ps_supplycost < 100)
+GROUP BY r.n_name, sh.p_name
+HAVING COUNT(DISTINCT so.o_orderkey) > 0 OR MAX(rs.total_supply_cost) IS NOT NULL
+ORDER BY total_orders DESC, highest_supply_cost ASC;

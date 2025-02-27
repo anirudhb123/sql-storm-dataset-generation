@@ -1,0 +1,69 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) as title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id, 
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id, 
+        c.name AS company_name, 
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+CastInfoWithRoles AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ci.role_id,
+        rt.role AS role_name,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) as role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+)
+SELECT 
+    rt.title,
+    rt.production_year,
+    mk.keywords,
+    cd.company_name,
+    cd.company_type,
+    ciwr.role_name,
+    COUNT(ciwr.person_id) AS total_cast,
+    SUM(CASE WHEN ciwr.role_rank = 1 THEN 1 ELSE 0 END) AS lead_cast_count
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    MovieKeywords mk ON rt.id = mk.movie_id
+LEFT JOIN 
+    CompanyDetails cd ON rt.id = cd.movie_id
+LEFT JOIN 
+    CastInfoWithRoles ciwr ON rt.id = ciwr.movie_id
+WHERE 
+    rt.title IS NOT NULL 
+    AND cd.company_type IS NOT NULL
+GROUP BY 
+    rt.title, rt.production_year, mk.keywords, cd.company_name, cd.company_type, ciwr.role_name 
+ORDER BY 
+    rt.production_year DESC, rt.title;

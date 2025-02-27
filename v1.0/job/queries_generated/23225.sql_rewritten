@@ -1,0 +1,86 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies_per_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+ActorPerformance AS (
+    SELECT 
+        c.person_id,
+        COUNT(*) AS total_movies,
+        AVG(c.nr_order) AS avg_role_order
+    FROM 
+        cast_info c
+    JOIN 
+        RankedMovies rm ON c.movie_id = rm.movie_id
+    GROUP BY 
+        c.person_id
+),
+SignificantActors AS (
+    SELECT 
+        a.person_id,
+        an.name AS actor_name,
+        ap.total_movies,
+        ap.avg_role_order,
+        ROW_NUMBER() OVER (PARTITION BY ap.total_movies ORDER BY ap.avg_role_order ASC) AS performance_rank
+    FROM 
+        ActorPerformance ap
+    JOIN 
+        aka_name an ON ap.person_id = an.person_id
+),
+SelectedActors AS (
+    SELECT 
+        sa.actor_name,
+        sa.total_movies,
+        sa.avg_role_order,
+        sa.performance_rank
+    FROM 
+        SignificantActors sa
+    WHERE 
+        sa.performance_rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+)
+SELECT 
+    sa.actor_name,
+    sa.total_movies,
+    sa.avg_role_order,
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.actor_count,
+    md.keyword_count,
+    md.company_count
+FROM 
+    SelectedActors sa
+JOIN 
+    MovieDetails md ON sa.total_movies = md.actor_count
+WHERE 
+    md.actor_count > 0 OR sa.total_movies >= 0
+ORDER BY 
+    sa.avg_role_order DESC, md.production_year DESC;

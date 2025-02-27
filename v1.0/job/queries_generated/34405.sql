@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS depth
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        CONCAT(m.title, ' (Linked)') AS title,
+        m.production_year,
+        mh.depth + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    COUNT(DISTINCT mh.movie_id) AS movies_linked,
+    STRING_AGG(DISTINCT mh.title, ', ' ORDER BY mh.depth) AS linked_movies,
+    AVG(COALESCE(m.production_year, 0)) AS avg_production_year,
+    SUM(CASE WHEN d.role IS NOT NULL THEN 1 ELSE 0 END) AS role_count,
+    COALESCE(MAX(m.production_year), 'No Movies') AS latest_movie
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    role_type d ON ci.role_id = d.id
+LEFT JOIN 
+    aka_title m ON m.id = ci.movie_id
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    a.name
+HAVING 
+    COUNT(DISTINCT mh.movie_id) > 0
+ORDER BY 
+    movies_linked DESC, actor_name ASC
+LIMIT 10;

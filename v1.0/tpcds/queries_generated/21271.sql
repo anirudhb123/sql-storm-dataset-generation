@@ -1,0 +1,85 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr_customer_sk,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        SUM(sr_return_amt_inc_tax) AS total_returned_amt,
+        COUNT(DISTINCT sr_ticket_number) AS total_returned_transactions
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_customer_sk
+),
+HighReturnCustomers AS (
+    SELECT 
+        cr.sr_customer_sk,
+        cr.total_returned_quantity,
+        cr.total_returned_amt,
+        cr.total_returned_transactions,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating
+    FROM 
+        CustomerReturns cr
+    JOIN 
+        customer_demographics cd ON cr.sr_customer_sk = cd.cd_demo_sk
+    WHERE 
+        cr.total_returned_quantity > 5
+        AND (cd.cd_gender = 'F' OR cd.cd_marital_status = 'M')
+        AND cd.cd_credit_rating IS NOT NULL
+),
+ItemStats AS (
+    SELECT 
+        i.i_item_sk,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        SUM(ws.ws_quantity) AS total_sold_quantity,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE 
+        ws.ws_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales)
+    GROUP BY 
+        i.i_item_sk
+),
+SpecificPromotions AS (
+    SELECT 
+        p.p_promo_id, 
+        COUNT(DISTINCT CASE WHEN CURRENT_DATE BETWEEN d.d_date AND e.p_end_date_sk THEN e.p_item_sk END) AS active_items_count,
+        p.p_discount_active,
+        p.p_promo_name
+    FROM 
+        promotion p 
+    LEFT JOIN 
+        date_dim d ON p.p_start_date_sk = d.d_date_sk
+    LEFT JOIN 
+        date_dim e ON p.p_end_date_sk = e.d_date_sk
+    GROUP BY 
+        p.p_promo_id, p.p_promo_name, p.p_discount_active
+)
+SELECT 
+    c.c_first_name,
+    c.c_last_name,
+    COUNT(DISTINCT sr.sr_ticket_number) AS total_returns,
+    SUM(sr.sr_return_amt_inc_tax) AS total_return_amt,
+    AVG(i.avg_net_profit) AS avg_item_net_profit,
+    CASE 
+        WHEN COUNT(DISTINCT sr.sr_ticket_number) IS NULL THEN 'No Returns'
+        ELSE 'Returns Made'
+    END AS return_status,
+    STRING_AGG(DISTINCT p.p_promo_name) AS active_promotions
+FROM 
+    customer c
+JOIN 
+    HighReturnCustomers hrc ON c.c_customer_sk = hrc.sr_customer_sk
+LEFT JOIN 
+    store_returns sr ON sr.sr_customer_sk = c.c_customer_sk
+LEFT JOIN 
+    ItemStats i ON sr.sr_item_sk = i.i_item_sk
+LEFT JOIN 
+    SpecificPromotions p ON i.total_sold_quantity > 0
+GROUP BY 
+    c.c_first_name, c.c_last_name
+HAVING 
+    SUM(sr.sr_return_amt_inc_tax) > COALESCE(NULLIF(AVG(i.avg_net_profit), 0), 1);

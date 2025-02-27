@@ -1,0 +1,31 @@
+
+WITH RECURSIVE top_customers AS (
+    SELECT c_custkey, c_name, c_acctbal, ROW_NUMBER() OVER (ORDER BY c_acctbal DESC) AS rank
+    FROM customer
+), 
+high_value_orders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+customer_order_counts AS (
+    SELECT o.o_custkey, COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM orders o
+    GROUP BY o.o_custkey
+)
+SELECT 
+    tc.c_name,
+    COALESCE(c.order_count, 0) AS order_count,
+    RANK() OVER (ORDER BY SUM(ho.total_value) DESC) AS value_rank,
+    SUM(ho.total_value) AS total_order_value,
+    AVG(COALESCE(l.l_tax, 0)) AS avg_tax_rate,
+    MAX(CASE WHEN s.s_acctbal IS NULL THEN 'No Account Balance' ELSE 'Has Account Balance' END) AS account_balance_status
+FROM top_customers tc
+LEFT JOIN customer_order_counts c ON c.o_custkey = tc.c_custkey
+LEFT JOIN high_value_orders ho ON ho.o_custkey = tc.c_custkey
+LEFT JOIN supplier s ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+GROUP BY tc.c_name, c.order_count
+ORDER BY value_rank
+FETCH FIRST 10 ROWS ONLY;

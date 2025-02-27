@@ -1,0 +1,45 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS sale_rank
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk BETWEEN 2451545 AND 2451546 
+),
+WebReturns AS (
+    SELECT 
+        wr.wr_returning_customer_sk,
+        SUM(wr.wr_return_amt) AS total_return_amt,
+        COUNT(wr.wr_order_number) AS return_count
+    FROM web_returns wr
+    GROUP BY wr.wr_returning_customer_sk
+),
+TopSales AS (
+    SELECT 
+        r.web_site_sk,
+        SUM(r.ws_sales_price * r.ws_quantity) AS total_sales,
+        wr.total_return_amt,
+        wr.return_count,
+        (SUM(r.ws_sales_price * r.ws_quantity) - COALESCE(wr.total_return_amt, 0)) AS net_sales
+    FROM RankedSales r
+    LEFT JOIN WebReturns wr ON r.ws_order_number = wr.wr_order_number
+    WHERE r.sale_rank <= 10
+    GROUP BY r.web_site_sk, wr.total_return_amt, wr.return_count
+)
+SELECT 
+    ws.web_site_id,
+    ts.total_sales,
+    ts.total_return_amt,
+    ts.return_count,
+    ts.net_sales,
+    CASE 
+        WHEN ts.net_sales > 10000 THEN 'High Performer'
+        WHEN ts.net_sales BETWEEN 5000 AND 10000 THEN 'Medium Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM web_site ws
+JOIN TopSales ts ON ws.web_site_sk = ts.web_site_sk
+ORDER BY ts.net_sales DESC;

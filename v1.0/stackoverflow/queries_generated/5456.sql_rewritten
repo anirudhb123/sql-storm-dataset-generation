@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount, p.CommentCount
+),
+RecentUserInfo AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.LastAccessDate,
+        u.CreationDate AS UserCreationDate,
+        (SELECT COUNT(*) FROM Posts ps WHERE ps.OwnerUserId = u.Id) AS TotalPosts
+    FROM 
+        Users u
+    WHERE 
+        u.CreationDate >= DATEADD(year, -1, GETDATE())  
+)
+SELECT 
+    r.DisplayName,
+    r.Reputation,
+    r.LastAccessDate,
+    r.TotalPosts,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes
+FROM 
+    RecentUserInfo r
+JOIN 
+    RankedPosts rp ON r.UserId = rp.OwnerUserId
+WHERE 
+    rp.UserPostRank <= 5  
+ORDER BY 
+    r.Reputation DESC, rp.CreationDate DESC;

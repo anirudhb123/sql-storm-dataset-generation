@@ -1,0 +1,85 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS RecentEditRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.PostTypeId = 1  -- Considering only Questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+RecentEdits AS (
+    SELECT 
+        PostId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory
+    WHERE 
+        PostHistoryTypeId IN (4, 5, 6) -- Edit Title, Edit Body, Edit Tags
+    GROUP BY 
+        PostId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        SUM(b.Class) > 0
+),
+PostsWithDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.AnswerCount,
+        re.EditCount,
+        tu.DisplayName AS TopUserDisplayName,
+        tu.BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentEdits re ON rp.PostId = re.PostId
+    LEFT JOIN 
+        TopUsers tu ON rp.OwnerDisplayName = tu.DisplayName
+    WHERE 
+        rp.RecentEditRank = 1
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.CreationDate,
+    p.Score,
+    p.ViewCount,
+    p.OwnerDisplayName,
+    p.AnswerCount,
+    COALESCE(p.EditCount, 0) AS EditCount,
+    COALESCE(p.TopUserDisplayName, 'No Badges') AS TopUserDisplayName,
+    COALESCE(p.BadgeCount, 0) AS BadgeCount
+FROM 
+    PostsWithDetails p
+ORDER BY 
+    p.Score DESC, p.CreationDate ASC
+LIMIT 100;

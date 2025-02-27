@@ -1,0 +1,72 @@
+WITH RECURSIVE OrderCTE AS (
+    SELECT 
+        o_orderkey,
+        o_orderdate,
+        o_totalprice,
+        o_custkey,
+        0 AS level
+    FROM 
+        orders
+    WHERE 
+        o_orderdate >= '2022-01-01'
+    UNION ALL
+    SELECT 
+        o.orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_custkey,
+        level + 1
+    FROM 
+        orders o
+    INNER JOIN OrderCTE cte ON o.o_custkey = cte.o_custkey
+    WHERE 
+        cte.level < 5
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+)
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS nations_count,
+    AVG(sd.part_count) AS avg_parts,
+    MAX(hv.total_spent) AS max_spent,
+    SUM(CASE WHEN hv.total_spent IS NULL THEN 0 ELSE hv.total_spent END) AS total_high_value_spent
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    SupplierDetails sd ON n.n_nationkey = sd.s_nationkey
+LEFT JOIN 
+    HighValueOrders hv ON hv.c_custkey IN (
+        SELECT DISTINCT o.o_custkey
+        FROM OrderCTE o
+    )
+GROUP BY 
+    r.r_name
+ORDER BY 
+    r.r_name;

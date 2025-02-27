@@ -1,0 +1,67 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_orderdate >= DATE '1997-01-01'
+), SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+), LineItemStatistics AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity,
+        COUNT(*) AS item_count,
+        COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS return_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+), NationalRevenue AS (
+    SELECT 
+        n.n_name,
+        SUM(l.total_revenue) AS total_revenue_by_nation,
+        n.n_nationkey
+    FROM 
+        nation n
+    LEFT JOIN 
+        LineItemStatistics l ON l.l_orderkey IN (SELECT o.o_orderkey FROM RankedOrders o WHERE o.rn = 1)
+    GROUP BY 
+        n.n_name, n.n_nationkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(n.total_revenue_by_nation, 0) AS nation_revenue,
+    s.s_name,
+    s.total_supply_cost
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    NationalRevenue nr ON nr.n_nationkey = n.n_nationkey
+LEFT JOIN 
+    SupplierInfo s ON s.s_nationkey = n.n_nationkey
+WHERE 
+    EXISTS (SELECT 1 FROM RankedOrders o WHERE o.o_orderdate < DATE '1998-10-01')
+ORDER BY 
+    nation_revenue DESC, s.total_supply_cost ASC;

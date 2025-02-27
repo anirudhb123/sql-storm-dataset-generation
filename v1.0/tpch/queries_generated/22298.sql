@@ -1,0 +1,74 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(s.s_acctbal, 0) AS s_acctbal,
+        NULL AS parent_suppkey
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > 100.00
+    UNION ALL
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(s.s_acctbal, 0) + COALESCE(sh.s_acctbal, 0) AS s_acctbal,
+        sh.s_suppkey
+    FROM 
+        supplier s
+    JOIN 
+        supplier_hierarchy sh ON s.s_nationkey = sh.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+), 
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+), 
+part_summary AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    sh.s_suppkey,
+    sh.s_name,
+    sh.s_acctbal,
+    co.total_orders,
+    co.last_order_date,
+    ps.total_available,
+    ps.avg_supply_cost,
+    CASE 
+        WHEN co.total_orders IS NULL THEN 'No Orders'
+        ELSE 'Orders Found'
+    END AS order_status,
+    CONCAT('Supplier ', sh.s_name, ' has balance ', sh.s_acctbal) AS supplier_info
+FROM 
+    supplier_hierarchy sh
+LEFT JOIN 
+    customer_orders co ON sh.s_suppkey = co.c_custkey
+LEFT JOIN 
+    part_summary ps ON sh.s_suppkey = ps.p_partkey
+WHERE 
+    (sh.s_acctbal IS NULL OR sh.s_acctbal > 200)
+    AND (co.last_order_date >= DATEADD(day, -30, CURRENT_DATE) OR co.total_orders >= 5)
+ORDER BY 
+    sh.s_acctbal DESC,
+    co.total_orders ASC NULLS LAST
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;

@@ -1,0 +1,68 @@
+
+WITH CustomerReturns AS (
+    SELECT
+        coalesce(sr_customer_sk, cr_returning_customer_sk) AS customer_id,
+        SUM(coalesce(sr_return_quantity, cr_return_quantity)) AS total_returned,
+        SUM(coalesce(sr_return_amt, cr_return_amount)) AS total_return_amount
+    FROM
+        store_returns sr
+    FULL OUTER JOIN
+        catalog_returns cr ON sr_returning_customer_sk = cr_returning_customer_sk
+    GROUP BY
+        customer_id
+),
+HighValuedCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        cd.cd_purchase_estimate
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE
+        cd.cd_gender IS NOT NULL
+        AND cd.cd_purchase_estimate > 10000
+),
+ReturnStats AS (
+    SELECT
+        c.c_customer_sk,
+        COUNT(*) AS total_return_count,
+        SUM(CASE WHEN total_returned > 5 THEN 1 ELSE 0 END) AS frequent_returns
+    FROM
+        CustomerReturns cr
+    JOIN
+        HighValuedCustomers c ON cr.customer_id = c.c_customer_sk
+    GROUP BY
+        c.c_customer_sk
+)
+SELECT
+    c.c_customer_sk,
+    c.c_first_name,
+    c.c_last_name,
+    CASE
+        WHEN hvc.total_return_count IS NULL THEN 'No Returns'
+        WHEN hvc.frequent_returns > 0 THEN 'Frequent Returner'
+        ELSE 'Occasional Returner'
+    END AS return_status,
+    CASE 
+        WHEN hvc.frequent_returns IS NOT NULL AND hvc.frequent_returns > 3 THEN 'High Risk'
+        ELSE 'Low Risk'
+    END AS risk_category
+FROM
+    HighValuedCustomers c
+LEFT JOIN
+    ReturnStats hvc ON c.c_customer_sk = hvc.c_customer_sk
+WHERE
+    (c.c_last_name LIKE 'S%' OR c.c_first_name LIKE 'J%')
+    AND (c.c_birth_year IS NOT NULL)
+ORDER BY
+    risk_category DESC,
+    return_status ASC,
+    c.c_last_name,
+    c.c_first_name
+LIMIT 100;

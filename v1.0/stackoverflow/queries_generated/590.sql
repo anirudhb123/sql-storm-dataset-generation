@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        COALESCE(a.Score, 0) AS AcceptedAnswerScore,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    WHERE 
+        p.PostTypeId = 1
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)) AS UpvoteCount,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)) AS DownvoteCount,
+        AVG(COALESCE(v.BountyAmount, 0)) AS AvgBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id
+),
+PostHistoryLatest AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.Comment,
+        RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS Latest
+    FROM 
+        PostHistory ph
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    COALESCE(u.DisplayName, 'Deleted User') AS PostOwner,
+    ps.UserId,
+    ps.TotalPosts,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    ps.AvgBounty,
+    ph.UserDisplayName AS LastEditor,
+    ph.Comment AS LastEditComment,
+    ph.CreationDate AS LastEditDate,
+    p.ViewCount,
+    p.Score,
+    (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+    r.AcceptedAnswerScore,
+    (SELECT STRING_AGG(t.TagName, ', ' ORDER BY t.TagName) 
+     FROM Tags t 
+     WHERE t.Id IN (SELECT UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[]))) AS Tags
+FROM 
+    Posts p
+JOIN 
+    RankedPosts r ON p.Id = r.Id
+JOIN 
+    UserStats ps ON p.OwnerUserId = ps.UserId
+LEFT JOIN 
+    PostHistoryLatest ph ON p.Id = ph.PostId AND ph.Latest = 1
+WHERE 
+    p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+    AND p.Score > 5 
+    AND ps.Reputation > 50 
+ORDER BY 
+    p.CreationDate DESC, p.Score DESC
+LIMIT 100;

@@ -1,0 +1,58 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        ss_sold_date_sk,
+        SUM(ss_quantity) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY s_store_sk ORDER BY SUM(ss_quantity) DESC) AS sales_rank
+    FROM 
+        store_sales 
+    WHERE 
+        ss_sold_date_sk > (SELECT MAX(ss_sold_date_sk) - 30 FROM store_sales) 
+    GROUP BY 
+        s_store_sk, 
+        ss_sold_date_sk
+),
+top_stores AS (
+    SELECT 
+        s_store_sk,
+        total_sales
+    FROM 
+        sales_hierarchy
+    WHERE 
+        sales_rank <= 5
+),
+customer_data AS (
+    SELECT 
+        c.c_customer_sk, 
+        COUNT(DISTINCT c.c_customer_id) AS total_customers,
+        SUM(cd.cd_dep_count) AS total_dependents
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_marital_status = 'M'
+    GROUP BY 
+        c.c_customer_sk
+)
+SELECT 
+    s.s_store_id, 
+    SUM(ss.ss_net_profit) AS total_profit,
+    COALESCE(SUM(ws.ws_net_profit), 0) AS online_profit,
+    (SELECT COUNT(*) FROM customer_data) AS total_married_customers,
+    top_stores.total_sales
+FROM 
+    store s
+LEFT JOIN 
+    store_sales ss ON s.s_store_sk = ss.ss_store_sk
+LEFT JOIN 
+    web_sales ws ON ss.ss_item_sk = ws.ws_item_sk
+JOIN 
+    top_stores ON top_stores.s_store_sk = s.s_store_sk
+GROUP BY 
+    s.s_store_id, top_stores.total_sales
+HAVING 
+    total_profit > (SELECT AVG(total_sales) FROM sales_hierarchy)
+ORDER BY 
+    total_profit DESC;

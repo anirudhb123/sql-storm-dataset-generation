@@ -1,0 +1,46 @@
+
+WITH RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice,
+           ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM part p
+), SupplierStats AS (
+    SELECT s.s_suppkey, AVG(s.s_acctbal) AS avg_acctbal, COUNT(DISTINCT ps.ps_partkey) AS parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+    HAVING COUNT(DISTINCT ps.ps_partkey) > 1
+), OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           CASE WHEN o.o_orderstatus = 'F' THEN 'Completed' ELSE 'Pending' END AS order_status
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_orderstatus
+), NestedCustomer AS (
+    SELECT c.c_custkey, c.c_name,
+           (SELECT COUNT(*) FROM orders o WHERE o.o_custkey = c.c_custkey AND o.o_orderdate > '1997-01-01') AS recent_orders
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+)
+SELECT np.c_custkey, np.c_name,
+       COALESCE(rp.p_name, 'No Parts') AS part_name,
+       ss.avg_acctbal,
+       os.total_sales,
+       np.recent_orders
+FROM NestedCustomer np
+LEFT JOIN RankedParts rp ON np.c_custkey = (
+    SELECT s.n_nationkey FROM supplier s 
+    JOIN nation n ON s.s_nationkey = n.n_nationkey 
+    WHERE n.n_nationkey IN (
+        SELECT n_nationkey FROM nation WHERE n_name = 'USA'
+    )
+)
+LEFT JOIN SupplierStats ss ON ss.s_suppkey = (
+    SELECT MIN(s_suppkey) FROM supplier s WHERE s.s_acctbal IS NOT NULL
+)
+FULL OUTER JOIN OrderSummary os ON np.c_custkey = (
+    SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = os.o_orderkey
+)
+WHERE np.recent_orders IS NOT NULL
+  AND (os.total_sales > 1000 OR ss.parts_supplied > 5 OR ss.avg_acctbal IS NULL)
+  AND (rp.rank <= 3 OR rp.rank IS NULL)
+ORDER BY np.c_custkey DESC, os.total_sales DESC;

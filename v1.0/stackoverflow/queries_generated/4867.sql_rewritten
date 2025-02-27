@@ -1,0 +1,66 @@
+WITH PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVoteCount,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 8 THEN v.BountyAmount ELSE 0 END) AS TotalBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title
+),
+UserBadgeSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadgeCount,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadgeCount,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    pvs.PostId,
+    pvs.Title,
+    pvs.UpVoteCount,
+    pvs.DownVoteCount,
+    pvs.TotalBounty,
+    u.MovieDisplayName,
+    ubs.BadgeCount,
+    ubs.GoldBadgeCount,
+    ubs.SilverBadgeCount,
+    ubs.BronzeBadgeCount,
+    rp.Title AS RecentPostTitle
+FROM 
+    PostVoteSummary pvs
+JOIN 
+    Users u ON pvs.OwnerUserId = u.Id
+JOIN 
+    UserBadgeSummary ubs ON u.Id = ubs.UserId
+LEFT JOIN 
+    RecentPosts rp ON rp.OwnerUserId = u.Id AND rp.rn = 1
+WHERE 
+    pvs.UpVoteCount > 10
+    AND u.Reputation IS NOT NULL
+    AND (ubs.BadgeCount > 5 OR ubs.GoldBadgeCount > 0)
+ORDER BY 
+    pvs.UpVoteCount DESC, pvs.DownVoteCount ASC;

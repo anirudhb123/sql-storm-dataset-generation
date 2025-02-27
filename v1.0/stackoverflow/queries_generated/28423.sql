@@ -1,0 +1,56 @@
+WITH TagSummary AS (
+    SELECT 
+        TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) AS TagName,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 -- Only questions
+    GROUP BY 
+        TagName
+),
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users U
+    JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+MostActiveTags AS (
+    SELECT 
+        TAG.TagName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        TagSummary TAG
+    JOIN 
+        Posts P ON TAG.TagName = ANY(STRING_TO_ARRAY(SUBSTRING(P.Tags, 2, LENGTH(P.Tags) - 2), '><'))
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        TAG.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 5
+)
+SELECT 
+    T.TagName,
+    T.PostCount,
+    A.DisplayName AS TopAnswerer,
+    A.AnswerCount,
+    A.AcceptedAnswers AS AcceptedAnswerCount,
+    T.UpVotes,
+    T.DownVotes
+FROM 
+    MostActiveTags T
+LEFT JOIN 
+    TopUsers A ON A.AnswerCount = (SELECT MAX(AnswerCount) FROM TopUsers)
+ORDER BY 
+    T.PostCount DESC;

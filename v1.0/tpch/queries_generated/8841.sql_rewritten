@@ -1,0 +1,35 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY total_cost DESC
+    LIMIT 5
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING total_spent > 10000
+),
+LineItemSummary AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT
+    r.region_name,
+    cu.cust_name,
+    MAX(ls.net_revenue) AS max_revenue,
+    SUM(ls.net_revenue) AS total_revenue,
+    MAX(rs.total_cost) AS max_supplier_cost
+FROM Region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN CustomerOrders cu ON cu.c_custkey = n.n_nationkey
+JOIN LineItemSummary ls ON ls.l_orderkey = cu.order_count 
+JOIN RankedSuppliers rs ON rs.s_suppkey = ls.l_orderkey
+GROUP BY r.region_name, cu.cust_name
+ORDER BY total_revenue DESC, max_supplier_cost DESC
+LIMIT 10;

@@ -1,0 +1,37 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+SupplierStats AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+SalesData AS (
+    SELECT c.c_custkey, c.c_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT n.n_name, r.r_name, COALESCE(sd.total_sales, 0) AS total_sales, 
+       COALESCE(ss.total_supplycost, 0) AS total_supplycost,
+       oh.level AS order_level
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SalesData sd ON n.n_nationkey = sd.c_custkey
+LEFT JOIN SupplierStats ss ON sd.total_sales > 1000 
+LEFT JOIN OrderHierarchy oh ON n.n_nationkey = oh.o_custkey
+WHERE r.r_name IS NOT NULL
+ORDER BY total_sales DESC, total_supplycost DESC
+LIMIT 10;

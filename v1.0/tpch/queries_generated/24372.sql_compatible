@@ -1,0 +1,48 @@
+
+WITH RECURSIVE customer_tree AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal, 0 AS level
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+    UNION ALL
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, c.c_acctbal / NULLIF(ct.level + 1, 0), ct.level + 1
+    FROM customer c
+    JOIN customer_tree ct ON c.c_nationkey = ct.c_nationkey AND c.c_custkey <> ct.c_custkey
+),
+order_stats AS (
+    SELECT o.o_orderkey, o.o_totalprice, COUNT(l.l_orderkey) AS line_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey AND l.l_condition = 'Y'
+    GROUP BY o.o_orderkey, o.o_totalprice
+    HAVING SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) > 0
+),
+part_summary AS (
+    SELECT p.p_partkey, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM part p
+    INNER JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+nation_availability AS (
+    SELECT n.n_regionkey, SUM(ps.ps_availqty) AS total_avail
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY n.n_regionkey
+)
+SELECT
+    c.c_name,
+    nt.n_name,
+    pt.p_name,
+    os.o_orderkey,
+    os.line_count,
+    ps.avg_supplycost,
+    na.total_avail,
+    RANK() OVER (PARTITION BY nt.n_name ORDER BY os.o_totalprice DESC) AS price_rank,
+    CASE WHEN na.total_avail IS NULL THEN 'Unavailable' ELSE 'Available' END AS availability_status
+FROM customer_tree c
+JOIN nation nt ON c.c_nationkey = nt.n_nationkey
+JOIN order_stats os ON c.c_custkey = os.o_orderkey
+JOIN part_summary ps ON ps.p_partkey = os.o_orderkey
+FULL OUTER JOIN nation_availability na ON nt.n_regionkey = na.n_regionkey
+WHERE c.level < 5
+AND (ps.avg_supplycost BETWEEN 100.00 AND 500.00 OR ps.avg_supplycost IS NULL)
+ORDER BY c.c_name, price_rank;

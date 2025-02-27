@@ -1,0 +1,74 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.UserId, 
+        ph.CreationDate,
+        ph.Comment,
+        ph.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12) 
+),
+UserVoteCounts AS (
+    SELECT 
+        v.UserId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.UserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.Id AS UserId, 
+    u.DisplayName,
+    COALESCE(urb.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(urb.DownVotes, 0) AS TotalDownVotes,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    MAX(CASE WHEN rph.PostHistoryTypeId = 10 THEN rph.CreationDate END) AS LastClosedDate,
+    MAX(CASE WHEN rph.PostHistoryTypeId = 11 THEN rph.CreationDate END) AS LastReopenedDate,
+    MAX(CASE WHEN rph.PostHistoryTypeId = 12 THEN rph.CreationDate END) AS LastDeletedDate
+FROM 
+    Users u
+LEFT JOIN 
+    UserVoteCounts urb ON u.Id = urb.UserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    RecursivePostHistory rph ON u.Id = rph.UserId
+LEFT JOIN 
+    Posts p2 ON u.Id = p2.OwnerUserId
+GROUP BY 
+    u.Id, 
+    u.DisplayName, 
+    ub.GoldBadges, 
+    ub.SilverBadges, 
+    ub.BronzeBadges
+ORDER BY 
+    TotalPosts DESC, 
+    TotalUpVotes DESC
+OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;

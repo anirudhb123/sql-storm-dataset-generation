@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+TopScoringPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.OwnerDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.ScoreRank <= 10
+),
+PostInfo AS (
+    SELECT 
+        tsp.PostId,
+        tsp.Title,
+        tsp.Score,
+        tsp.CreationDate,
+        tsp.ViewCount,
+        tsp.AnswerCount,
+        tsp.OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        TopScoringPosts tsp
+    LEFT JOIN 
+        Comments c ON tsp.PostId = c.PostId
+    GROUP BY 
+        tsp.PostId, tsp.Title, tsp.Score, tsp.CreationDate, tsp.ViewCount, tsp.AnswerCount, tsp.OwnerDisplayName
+)
+SELECT 
+    pi.Title,
+    pi.Score,
+    pi.ViewCount,
+    pi.AnswerCount,
+    pi.CommentCount,
+    pi.OwnerDisplayName,
+    pt.Name AS PostTypeName,
+    EXTRACT(YEAR FROM pi.CreationDate) AS YearCreated
+FROM 
+    PostInfo pi
+JOIN 
+    PostTypes pt ON pi.PostTypeId = pt.Id
+ORDER BY 
+    pi.Score DESC, pi.ViewCount DESC;

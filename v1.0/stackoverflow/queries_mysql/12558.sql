@@ -1,0 +1,4 @@
+
+SELECT COUNT(*) AS TotalPosts
+FROM Posts
+GROUP BY NULL;

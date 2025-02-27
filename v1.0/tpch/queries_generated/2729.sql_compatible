@@ -1,0 +1,64 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey,
+        r.r_name AS region_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, r.r_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+)
+
+SELECT 
+    p.p_name,
+    COALESCE(s.total_supply_cost, 0) AS total_supply_cost,
+    cr.region_name,
+    cr.total_spent,
+    ro.o_orderdate,
+    ro.o_totalprice
+FROM 
+    part p
+LEFT JOIN 
+    SupplierSummary s ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+JOIN 
+    CustomerRegion cr ON cr.total_spent > 0
+LEFT JOIN 
+    RankedOrders ro ON ro.o_orderkey = ro.o_orderkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+ORDER BY 
+    s.total_supply_cost DESC, 
+    cr.region_name ASC, 
+    ro.o_orderdate DESC;

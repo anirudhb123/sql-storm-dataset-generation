@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY u.Reputation ORDER BY p.Score DESC) AS Rank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')))
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.Reputation
+),
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS CloseCount,
+        MAX(ph.CreationDate) AS LastClosedDate,
+        STRING_AGG(DISTINCT ctr.Name, ', ') AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        CloseReasonTypes ctr ON ph.Comment::int = ctr.Id 
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+),
+FinalBenchmark AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        COALESCE(cph.CloseCount, 0) AS CloseCount,
+        COALESCE(cph.LastClosedDate, NULL) AS LastClosedDate,
+        COALESCE(cph.CloseReasons, 'No close reasons') AS CloseReasons,
+        rp.TagList
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        ClosedPostHistory cph ON rp.PostId = cph.PostId
+)
+SELECT 
+    PostId,
+    Title,
+    CreationDate,
+    Score,
+    ViewCount,
+    CloseCount,
+    LastClosedDate,
+    CloseReasons,
+    TagList
+FROM 
+    FinalBenchmark
+WHERE 
+    Rank <= 5 
+ORDER BY 
+    ViewCount DESC, Score DESC;

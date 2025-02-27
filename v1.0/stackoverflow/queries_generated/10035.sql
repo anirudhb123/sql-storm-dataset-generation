@@ -1,0 +1,15 @@
+-- Performance benchmarking query to analyze the number of posts per user along with their average reputation
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COUNT(p.Id) AS PostCount,
+    AVG(u.Reputation) AS AverageReputation
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+GROUP BY 
+    u.Id, u.DisplayName
+ORDER BY 
+    PostCount DESC
+LIMIT 100;

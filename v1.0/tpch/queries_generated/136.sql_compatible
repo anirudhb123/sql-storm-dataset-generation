@@ -1,0 +1,46 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY s.s_suppkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY 
+        s.s_name, s.s_suppkey
+),
+CustomerPriority AS (
+    SELECT 
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM 
+        customer c
+    WHERE 
+        c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2 WHERE c2.c_nationkey = c.c_nationkey)
+)
+SELECT 
+    r.r_name AS region,
+    ns.n_name AS nation,
+    COALESCE(ss.s_name, 'No Suppliers') AS supplier_name,
+    cs.c_name AS customer_name,
+    cs.c_acctbal AS customer_account_balance,
+    ss.total_supply_cost,
+    ss.total_orders
+FROM 
+    region r
+JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    SupplierStats ss ON ns.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE ss.s_name = s.s_name LIMIT 1)
+LEFT JOIN 
+    CustomerPriority cs ON ns.n_nationkey = cs.c_nationkey AND cs.cust_rank <= 5
+ORDER BY 
+    region, nation, total_supply_cost DESC, customer_account_balance DESC;

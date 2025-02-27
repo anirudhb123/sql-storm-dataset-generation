@@ -1,0 +1,67 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY Tags ORDER BY p.Score DESC) AS rank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1 
+), 
+TopScoringPosts AS (
+    SELECT 
+        Id, 
+        Title, 
+        CreationDate, 
+        Score, 
+        ViewCount, 
+        CommentCount
+    FROM 
+        RankedPosts
+    WHERE 
+        rank = 1
+), 
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        COUNT(v.Id) AS TotalVotes,
+        AVG(COALESCE(c.Score, 0)) AS AvgCommentScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT
+    up.DisplayName,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    u.TotalBounties,
+    u.TotalVotes,
+    u.AvgCommentScore,
+    COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostLinks
+FROM 
+    TopScoringPosts p
+JOIN 
+    UserEngagement u ON u.UserId = p.OwnerUserId
+LEFT JOIN 
+    PostLinks pl ON p.Id = pl.PostId
+WHERE 
+    p.Score > 10
+GROUP BY 
+    up.DisplayName, p.Title, p.Score, p.ViewCount, u.TotalBounties, u.TotalVotes, u.AvgCommentScore
+ORDER BY 
+    p.Score DESC, u.TotalVotes DESC
+LIMIT 50;

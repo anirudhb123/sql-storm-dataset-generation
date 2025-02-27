@@ -1,0 +1,73 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(pt.PostId) AS UsageCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(p.Tags, ',')::int[])
+    JOIN 
+        Posts pt ON pt.Id = p.Id
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 10
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    us.DisplayName,
+    us.Reputation,
+    us.PostCount,
+    us.QuestionCount,
+    us.AnswerCount,
+    us.TotalScore,
+    us.AvgViewCount,
+    us.TotalUpVotes,
+    us.TotalDownVotes,
+    rt.TagName AS PopularTag,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    rp.ViewCount AS RecentPostViewCount,
+    rp.OwnerDisplayName AS RecentPostOwner
+FROM 
+    UserStats us
+CROSS JOIN 
+    (SELECT TagName FROM PopularTags) rt
+CROSS JOIN 
+    (SELECT Title, CreationDate, ViewCount, OwnerDisplayName FROM RecentPosts) rp
+ORDER BY 
+    us.Reputation DESC, rt.UsageCount DESC, rp.CreationDate DESC
+LIMIT 50;

@@ -1,0 +1,75 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        0 AS Level
+    FROM Posts P
+    WHERE P.ParentId IS NULL  
+    UNION ALL
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        Level + 1
+    FROM Posts P
+    INNER JOIN RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+PostVoteSummary AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(V.Id) AS TotalVotes,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.OwnerUserId
+),
+UserBadgeSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+),
+PostHistoryLatest AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LatestChangeDate,
+        PH.UserId AS LastEditorUserId
+    FROM PostHistory PH
+    GROUP BY PH.PostId, PH.UserId
+),
+FinalSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(BS.BadgeCount, 0) AS BadgeCount,
+        COALESCE(PS.TotalVotes, 0) AS TotalVotes,
+        COALESCE(PS.UpVotes, 0) AS UpVotes,
+        COALESCE(PS.DownVotes, 0) AS DownVotes,
+        COUNT(RPH.PostId) AS QuestionCount,
+        SUM(CASE WHEN PH.UserId IS NOT NULL THEN 1 ELSE 0 END) AS PostsEdited
+    FROM Users U
+    LEFT JOIN UserBadgeSummary BS ON U.Id = BS.UserId
+    LEFT JOIN PostVoteSummary PS ON U.Id = PS.OwnerUserId
+    LEFT JOIN RecursivePostHierarchy RPH ON U.Id = RPH.OwnerUserId
+    LEFT JOIN PostHistoryLatest PH ON PH.LastEditorUserId = U.Id
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    FS.UserId,
+    FS.DisplayName,
+    FS.BadgeCount,
+    FS.TotalVotes,
+    FS.UpVotes,
+    FS.DownVotes,
+    FS.QuestionCount,
+    FS.PostsEdited
+FROM FinalSummary FS
+WHERE FS.BadgeCount > 0 OR FS.TotalVotes > 0
+ORDER BY FS.QuestionCount DESC, FS.TotalVotes DESC;

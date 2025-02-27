@@ -1,0 +1,61 @@
+
+WITH PartStats AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        SUM(ps.ps_availqty) AS total_avail_qty, 
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, 
+        p.p_name
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, 
+        s.s_name
+),
+TopRegions AS (
+    SELECT 
+        r.r_name, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name
+    HAVING 
+        COUNT(DISTINCT s.s_suppkey) > 5
+)
+SELECT 
+    p.p_name, 
+    ps.total_avail_qty, 
+    ps.avg_supply_cost, 
+    ss.total_supply_value, 
+    tr.r_name AS top_region
+FROM 
+    PartStats ps
+JOIN 
+    SupplierStats ss ON ss.total_supply_value > 10000
+JOIN 
+    TopRegions tr ON ps.unique_suppliers > 0
+WHERE 
+    ps.total_avail_qty > 500
+ORDER BY 
+    ps.avg_supply_cost DESC, 
+    ps.total_avail_qty ASC;

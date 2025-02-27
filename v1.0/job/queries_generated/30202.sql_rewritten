@@ -1,0 +1,90 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1 
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+MovieInfo AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY_AGG(DISTINCT mk.keyword) AS keywords,
+        COALESCE(COUNT(CASE WHEN mi.info_type_id IN (1, 2) THEN 1 END), 0) AS info_count, 
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS row_num,
+        mh.level
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON mk.movie_id = m.id
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = m.id
+    LEFT JOIN 
+        MovieHierarchy mh ON mh.movie_id = m.id
+    GROUP BY 
+        m.id, m.title, mh.level
+),
+
+ActorStats AS (
+    SELECT 
+        a.id AS actor_id,
+        ak.name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order END) AS avg_order
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ci.person_id = ak.person_id
+    GROUP BY 
+        ak.id, ak.name
+),
+
+FinalResult AS (
+    SELECT 
+        mi.title,
+        mi.production_year,
+        mi.keywords,
+        mi.info_count,
+        as.actor_id,
+        as.name AS actor_name,
+        as.movie_count,
+        as.avg_order,
+        mh.level
+    FROM 
+        MovieInfo mi
+    LEFT JOIN 
+        ActorStats as ON mi.movie_id = as.movie_id  
+    WHERE 
+        mi.info_count >= 1
+    ORDER BY 
+        mi.production_year DESC, movie_count DESC
+)
+
+SELECT 
+    COUNT(*) AS total_movies,
+    AVG(info_count) AS avg_info_count,
+    MAX(movie_count) AS max_actor_movies,
+    MIN(avg_order) AS min_avg_order
+FROM 
+    FinalResult
+WHERE 
+    level = 1;

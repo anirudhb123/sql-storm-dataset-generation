@@ -1,0 +1,45 @@
+
+WITH sales_data AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_ext_sales_price) AS total_sales_amount,
+        AVG(ws.ws_net_profit) AS average_net_profit,
+        DATE_FORMAT(dd.d_date, '%Y-%m') AS sales_month,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        ci.c_birth_year
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    JOIN 
+        inventory inv ON ws.ws_item_sk = inv.inv_item_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE 
+        dd.d_year = 2021
+        AND ws.ws_sales_price > 20.00
+    GROUP BY 
+        ws.ws_item_sk, sales_month, cd.cd_gender, cd.cd_marital_status, ci.c_birth_year
+)
+SELECT 
+    sd.sales_month,
+    sd.cd_gender,
+    sd.cd_marital_status,
+    COUNT(sd.ws_item_sk) as unique_items_sold,
+    SUM(sd.total_quantity_sold) as total_quantity_sold,
+    SUM(sd.total_sales_amount) as total_sales_amount,
+    AVG(sd.average_net_profit) as average_net_profit
+FROM 
+    sales_data sd
+GROUP BY 
+    sd.sales_month, sd.cd_gender, sd.cd_marital_status
+ORDER BY 
+    sd.sales_month, unique_items_sold DESC;

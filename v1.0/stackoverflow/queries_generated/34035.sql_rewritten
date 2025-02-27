@@ -1,0 +1,100 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id AS TagId,
+        TagName,
+        Count,
+        1 AS Level
+    FROM 
+        Tags
+    WHERE 
+        IsRequired = 1
+    UNION ALL
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        r.Level + 1
+    FROM 
+        Tags t
+    INNER JOIN 
+        RecursiveTagHierarchy r ON t.ExcerptPostId = r.TagId
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        COALESCE(SUM(CASE WHEN c.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVoteCount,
+        COALESCE(SUM(c.Id IS NOT NULL), 0) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastEditDate,
+        COUNT(DISTINCT ph.UserId) AS EditorCount,
+        STRING_AGG(DISTINCT ph.UserDisplayName, ', ') AS Editors
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.ViewCount,
+    p.Score,
+    COALESCE(pm.UpVoteCount, 0) AS PostUpVotes,
+    COALESCE(pm.DownVoteCount, 0) AS PostDownVotes,
+    COALESCE(pm.CommentCount, 0) AS PostCommentCount,
+    COALESCE(uh.UpVoteCount, 0) AS UserUpVotes,
+    COALESCE(uh.DownVoteCount, 0) AS UserDownVotes,
+    uh.CommentCount AS UserCommentCount,
+    th.TagName,
+    th.Level,
+    pha.LastEditDate,
+    pha.EditorCount,
+    pha.Editors
+FROM 
+    PostMetrics pm
+JOIN 
+    Posts p ON p.Id = pm.PostId
+LEFT JOIN 
+    UserActivity uh ON uh.UserId = p.OwnerUserId
+LEFT JOIN 
+    RecursiveTagHierarchy th ON th.TagId IN (
+        SELECT unnest(string_to_array(p.Tags, '><'))::int
+    )
+LEFT JOIN 
+    PostHistoryAnalysis pha ON pha.PostId = p.Id
+ORDER BY 
+    p.ViewCount DESC,
+    pm.Score DESC;

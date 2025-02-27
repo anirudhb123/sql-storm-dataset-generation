@@ -1,0 +1,56 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        STRING_AGG(DISTINCT a.name, ', ' ORDER BY a.name) AS actor_names,
+        STRING_AGG(DISTINCT c.kind, ', ' ORDER BY c.kind) AS company_types,
+        STRING_AGG(DISTINCT k.keyword, ', ' ORDER BY k.keyword) AS movie_keywords
+    FROM 
+        title t
+        JOIN cast_info ci ON t.id = ci.movie_id
+        JOIN aka_name a ON ci.person_id = a.person_id
+        JOIN movie_companies mc ON t.id = mc.movie_id
+        JOIN company_type c ON mc.company_type_id = c.id
+        JOIN movie_keyword mk ON t.id = mk.movie_id
+        JOIN keyword k ON mk.keyword_id = k.id
+    WHERE 
+        t.production_year >= 2000
+        AND a.name IS NOT NULL 
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+actor_movie_count AS (
+    SELECT 
+        a.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+        JOIN aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        a.person_id
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 10
+),
+highest_production_year AS (
+    SELECT 
+        MAX(production_year) AS max_year
+    FROM 
+        title
+)
+
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.actor_names,
+    md.company_types,
+    md.movie_keywords,
+    a.person_id,
+    a.movie_count
+FROM 
+    movie_details md
+    JOIN actor_movie_count a ON md.actor_names LIKE '%' || a.person_id || '%'
+WHERE 
+    md.production_year = (SELECT max_year FROM highest_production_year)
+ORDER BY 
+    md.movie_title ASC;

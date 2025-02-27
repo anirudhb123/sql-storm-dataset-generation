@@ -1,0 +1,60 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        SUM(ws_net_paid) AS Total_By_Date,
+        ROW_NUMBER() OVER (PARTITION BY ws_sold_date_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_sold_date_sk
+    HAVING SUM(ws_net_paid) > 100000
+),
+CustomerCTE AS (
+    SELECT 
+        c_customer_sk,
+        c_first_name,
+        c_last_name,
+        cd_gender,
+        cd_marital_status,
+        cd_credit_rating,
+        ROW_NUMBER() OVER (PARTITION BY cd_gender ORDER BY cd_dep_count DESC) AS rn
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd_credit_rating IS NOT NULL
+),
+WarehouseSales AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ss_net_paid) AS Warehouse_Sales
+    FROM store_sales ss
+    JOIN warehouse w ON ss.ss_store_sk = w.w_warehouse_sk
+    GROUP BY w.w_warehouse_id
+),
+JoinedSales AS (
+    SELECT 
+        ws.ws_sold_date_sk,
+        cs.cs_order_number,
+        ws.ws_net_paid,
+        c.first_name,
+        c.last_name,
+        w.Warehouse_Sales
+    FROM web_sales ws
+    JOIN catalog_sales cs ON ws.ws_order_number = cs.cs_order_number
+    LEFT JOIN CustomerCTE c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN WarehouseSales w ON w.warehouse_id = 'W01'
+)
+SELECT 
+    js.ws_sold_date_sk,
+    js.cs_order_number,
+    COALESCE(SUM(js.ws_net_paid), 0) AS Total_Sales,
+    SUM(w.Warehouse_Sales) AS Total_Warehouse_Sales,
+    CASE 
+        WHEN SUM(js.ws_net_paid) IS NULL THEN 'No Sales'
+        ELSE 'Sales Exists'
+    END AS Status
+FROM JoinedSales js
+LEFT JOIN SalesCTE s ON js.ws_sold_date_sk = s.ws_sold_date_sk
+WHERE js.ws_net_paid IS NOT NULL
+GROUP BY js.ws_sold_date_sk, js.cs_order_number
+HAVING SUM(js.ws_net_paid) > 5000
+ORDER BY Total_Sales DESC
+LIMIT 10;

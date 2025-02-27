@@ -1,0 +1,86 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        rt.role AS actor_role,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY t.production_year DESC, t.title) AS rn
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON ci.movie_id = t.id
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorInfo AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        ak.md5sum AS actor_md5,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        MAX(CASE WHEN ci.note IS NOT NULL THEN 'Notable Role' ELSE 'Regular Role' END) AS role_type
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.id, ak.name, ak.md5sum
+),
+MovieCompanies AS (
+    SELECT 
+        mc.movie_id,
+        COALESCE(cn.name, 'Unknown Company') AS company_name,
+        STRING_AGG(DISTINCT ct.kind, ', ' ORDER BY ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+),
+ActorMovies AS (
+    SELECT 
+        ai.actor_id,
+        ai.actor_name,
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ai.movie_count,
+        ai.role_type,
+        mc.company_name,
+        mc.company_types,
+        CASE 
+            WHEN rm.rn = 1 THEN 'Latest Headliner'
+            WHEN rm.rn <= 5 THEN 'Featured'
+            ELSE 'Supporting'
+        END AS movie_starring_level
+    FROM 
+        ActorInfo ai
+    JOIN 
+        RankedMovies rm ON ai.movie_count > 0
+    LEFT JOIN 
+        MovieCompanies mc ON rm.movie_id = mc.movie_id
+    WHERE 
+        ai.role_type = 'Notable Role'
+)
+SELECT 
+    am.actor_id,
+    am.actor_name,
+    am.title,
+    am.production_year,
+    am.movie_count,
+    am.movie_starring_level,
+    am.company_name,
+    am.company_types
+FROM 
+    ActorMovies am
+WHERE 
+    am.movie_starring_level IN ('Latest Headliner', 'Featured')
+ORDER BY 
+    am.production_year DESC, 
+    am.actor_name ASC;

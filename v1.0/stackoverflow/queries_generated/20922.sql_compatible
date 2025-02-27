@@ -1,0 +1,118 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(COALESCE(p.ViewCount, 0)) AS AvgViewCount,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS Rank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        AvgViewCount,
+        AvgScore,
+        Rank
+    FROM 
+        UserActivity
+    WHERE 
+        TotalPosts > 0
+    AND 
+        Reputation > 100
+    ORDER BY 
+        Reputation DESC
+    LIMIT 10
+),
+
+PostAnalytics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        pt.Name AS PostTypeName,
+        (
+            SELECT COUNT(*) 
+            FROM Comments c 
+            WHERE c.PostId = p.Id
+        ) AS CommentCount,
+        (
+            SELECT COUNT(*) 
+            FROM Votes v 
+            WHERE v.PostId = p.Id AND v.VoteTypeId = 2
+        ) AS UpVotes,
+        (
+            SELECT COUNT(*) 
+            FROM Votes v 
+            WHERE v.PostId = p.Id AND v.VoteTypeId = 3
+        ) AS DownVotes,
+        COALESCE(p.OwnerDisplayName, 'Community User') AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Votes pp ON p.Id = pp.PostId
+    WHERE 
+        p.CreationDate >= DATEADD(year, -1, '2024-10-01')
+    AND 
+        (p.ViewCount > 100 OR p.Score > 0)
+),
+
+UserPosts AS (
+    SELECT 
+        pu.UserId,
+        pu.DisplayName AS UserName,
+        COUNT(p.Id) AS UserPostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(COALESCE(vs.UpVotes, 0)) AS TotalUpVotes,
+        SUM(COALESCE(vs.DownVotes, 0)) AS TotalDownVotes
+    FROM 
+        TopUsers pu
+    LEFT JOIN 
+        Posts p ON pu.UserId = p.OwnerUserId
+    LEFT JOIN (
+        SELECT 
+            v.PostId,
+            COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+            COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+        FROM 
+            Votes v
+        GROUP BY 
+            v.PostId
+    ) vs ON p.Id = vs.PostId
+    GROUP BY 
+        pu.UserId, pu.DisplayName
+)
+
+SELECT 
+    up.UserName,
+    up.UserPostCount,
+    up.TotalViews,
+    up.TotalUpVotes,
+    up.TotalDownVotes,
+    pa.Title,
+    pa.PostTypeName,
+    pa.CommentCount
+FROM 
+    UserPosts up
+JOIN 
+    PostAnalytics pa ON up.UserPostCount > 0
+ORDER BY 
+    up.UserPostCount DESC, up.TotalViews DESC;

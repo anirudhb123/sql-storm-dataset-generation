@@ -1,0 +1,70 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COUNT(DISTINCT t.TagName) AS UniqueTags,
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes,
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><') as t(TagName)
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+UserStats AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        UniqueTags,
+        TotalUpvotes,
+        TotalDownvotes,
+        COALESCE(b.GoldBadges, 0) AS GoldBadges,
+        COALESCE(b.SilverBadges, 0) AS SilverBadges,
+        COALESCE(b.BronzeBadges, 0) AS BronzeBadges
+    FROM 
+        UserPostStats u
+    LEFT JOIN 
+        UserBadges b ON u.UserId = b.UserId
+)
+SELECT 
+    UserId,
+    DisplayName,
+    TotalPosts,
+    TotalQuestions,
+    TotalAnswers,
+    UniqueTags,
+    TotalUpvotes,
+    TotalDownvotes,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank,
+    RANK() OVER (ORDER BY TotalUpvotes - TotalDownvotes DESC) AS VoteRank
+FROM 
+    UserStats
+WHERE 
+    TotalPosts > 0
+ORDER BY 
+    PostRank, VoteRank;

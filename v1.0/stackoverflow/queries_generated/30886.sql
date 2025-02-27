@@ -1,0 +1,88 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+PostMetrics AS (
+    SELECT 
+        ph.PostId,
+        ph.Title,
+        ph.AcceptedAnswerId,
+        ph.OwnerUserId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount,
+        SUM(v.VoteTypeId = 3) AS DownVoteCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        MIN(p.CreationDate) AS FirstPostDate,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        RecursivePostHierarchy ph
+    LEFT JOIN 
+        Comments c ON ph.PostId = c.PostId
+    LEFT JOIN 
+        Votes v ON ph.PostId = v.PostId 
+    LEFT JOIN 
+        Badges b ON ph.OwnerUserId = b.UserId
+    GROUP BY 
+        ph.PostId, ph.Title, ph.AcceptedAnswerId, ph.OwnerUserId
+),
+PostStatistics AS (
+    SELECT 
+        pm.OwnerUserId,
+        COUNT(pm.PostId) AS TotalPosts,
+        SUM(pm.CommentCount) AS TotalComments,
+        SUM(pm.UpVoteCount) AS TotalUpVotes,
+        SUM(pm.DownVoteCount) AS TotalDownVotes,
+        MIN(pm.FirstPostDate) AS FirstPost,
+        MAX(pm.LastPostDate) AS LastPost
+    FROM 
+        PostMetrics pm
+    GROUP BY 
+        pm.OwnerUserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ps.TotalPosts,
+    ps.TotalComments,
+    ps.TotalUpVotes,
+    ps.TotalDownVotes,
+    ps.FirstPost,
+    ps.LastPost,
+    CASE 
+        WHEN ps.TotalPosts IS NULL THEN 'No posts'
+        ELSE 
+            CASE 
+                WHEN ps.TotalPosts > 100 THEN 'Super Active'
+                WHEN ps.TotalPosts BETWEEN 50 AND 100 THEN 'Active'
+                ELSE 'Casual'
+            END
+    END AS ActivityLevel,
+    COALESCE(b.Count, 0) AS TotalBadges
+FROM 
+    Users u
+LEFT JOIN 
+    PostStatistics ps ON u.Id = ps.OwnerUserId
+LEFT JOIN 
+    (SELECT UserId, COUNT(*) AS Count FROM Badges GROUP BY UserId) b ON u.Id = b.UserId
+ORDER BY 
+    ps.TotalPosts DESC NULLS LAST;

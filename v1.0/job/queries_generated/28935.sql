@@ -1,0 +1,42 @@
+WITH ActorAwards AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name AS actor_name,
+        COUNT(DISTINCT aw.id) AS awards_count
+    FROM aka_name ak
+    LEFT JOIN cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN title t ON ci.movie_id = t.id
+    LEFT JOIN movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN info_type it ON mi.info_type_id = it.id
+    LEFT JOIN awards aw ON t.id = aw.movie_id
+    WHERE it.info ILIKE '%award%'
+    GROUP BY ak.id, ak.name
+),
+TopActors AS (
+    SELECT 
+        actor_id,
+        actor_name,
+        awards_count
+    FROM ActorAwards
+    WHERE awards_count > 0
+    ORDER BY awards_count DESC
+    LIMIT 10
+),
+ActorsWithMovies AS (
+    SELECT 
+        ta.actor_id,
+        ta.actor_name,
+        t.id AS movie_id,
+        t.title AS movie_title,
+        t.production_year
+    FROM TopActors ta
+    JOIN cast_info ci ON ta.actor_id = ci.person_id
+    JOIN title t ON ci.movie_id = t.id
+)
+SELECT 
+    aw.actor_id,
+    aw.actor_name,
+    STRING_AGG(CONCAT(aw.movie_title, ' (', aw.production_year, ')'), ', ') AS movies
+FROM ActorsWithMovies aw
+GROUP BY aw.actor_id, aw.actor_name
+ORDER BY aw.actor_name;

@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.AnswerCount,
+        p.ViewCount,
+        p.Body,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+TagCounts AS (
+    SELECT 
+        TRIM(value) AS Tag,
+        COUNT(*) AS PostCount
+    FROM 
+        RankedPosts
+    CROSS JOIN UNNEST(STRING_TO_ARRAY(Tags, ',')) AS value  
+    WHERE 
+        value IS NOT NULL
+    GROUP BY 
+        TRIM(value)
+    HAVING 
+        COUNT(*) > 1 
+),
+AggregatedData AS (
+    SELECT 
+        tc.Tag,
+        AVG(rp.ViewCount) AS AvgViews,
+        SUM(rp.AnswerCount) AS TotalAnswers,
+        COUNT(rp.PostId) AS TotalPosts
+    FROM 
+        TagCounts tc
+    JOIN 
+        RankedPosts rp ON rp.Tags LIKE '%' || tc.Tag || '%'
+    GROUP BY 
+        tc.Tag
+)
+SELECT 
+    ad.Tag,
+    ad.AvgViews,
+    ad.TotalAnswers,
+    ad.TotalPosts,
+    STRING_AGG(DISTINCT rp.Title, '; ') AS SamplePostTitles
+FROM 
+    AggregatedData ad
+LEFT JOIN 
+    RankedPosts rp ON rp.Tags LIKE '%' || ad.Tag || '%'
+GROUP BY 
+    ad.Tag, ad.AvgViews, ad.TotalAnswers, ad.TotalPosts
+ORDER BY 
+    ad.TotalPosts DESC, ad.AvgViews DESC;

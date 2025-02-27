@@ -1,0 +1,81 @@
+
+WITH RankedReturns AS (
+    SELECT
+        sr_customer_sk,
+        sr_return_amt,
+        ROW_NUMBER() OVER (PARTITION BY sr_customer_sk ORDER BY sr_returned_date_sk DESC) AS rn
+    FROM
+        store_returns
+    WHERE
+        sr_returned_date_sk IS NOT NULL
+),
+CustomerAddressDetails AS (
+    SELECT
+        ca.ca_address_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        CASE 
+            WHEN ca.ca_city IS NULL THEN 'Unknown City'
+            ELSE ca.ca_city
+        END AS resolved_city
+    FROM
+        customer_address ca
+    WHERE
+        ca.ca_state IN ('CA', 'TX', 'NY')
+),
+StoreSalesDetails AS (
+    SELECT
+        ss.ss_item_sk,
+        SUM(ss.ss_quantity) AS total_sold,
+        SUM(ss.ss_net_paid) AS total_revenue
+    FROM
+        store_sales ss
+    GROUP BY
+        ss.ss_item_sk
+),
+SelectedCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        cd.cd_gender,
+        ca.resolved_city,
+        cd.cd_buy_potential
+    FROM
+        customer c
+    LEFT JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN
+        CustomerAddressDetails ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE
+        (cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL)
+        AND (cd.cd_purchase_estimate >= 100 OR cd.cd_gender = 'F')
+),
+FinalResult AS (
+    SELECT
+        sc.c_customer_sk,
+        sc.cd_gender,
+        sc.resolved_city,
+        COALESCE(rr.sr_return_amt, 0) AS last_return_amount,
+        ss.total_revenue
+    FROM
+        SelectedCustomers sc
+    LEFT JOIN
+        RankedReturns rr ON sc.c_customer_sk = rr.sr_customer_sk AND rr.rn = 1
+    LEFT JOIN
+        StoreSalesDetails ss ON ss.ss_item_sk IN (
+            SELECT sr_item_sk FROM store_returns WHERE sr_customer_sk = sc.c_customer_sk
+        )
+)
+SELECT
+    *,
+    CASE
+        WHEN total_revenue IS NULL THEN 'No Sales'
+        WHEN last_return_amount > total_revenue THEN 'High Return Ratio'
+        ELSE 'Normal'
+    END AS customer_status
+FROM
+    FinalResult
+WHERE
+    resolved_city IS NOT NULL
+ORDER BY
+    total_revenue DESC NULLS LAST;

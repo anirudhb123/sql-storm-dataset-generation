@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        p.Score,
+        p.ViewCount,
+        u.DisplayName AS OwnerName,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS CombinedTags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag ON tag IS NOT NULL
+    JOIN 
+        Tags t ON t.TagName = tag
+    WHERE 
+        p.PostTypeId = 1 -- Only questions
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+TopRankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerName,
+        rp.CommentCount,
+        rp.CombinedTags,
+        rp.Score,
+        rp.ViewCount
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+),
+PostDetails AS (
+    SELECT
+        trp.PostId,
+        trp.Title,
+        trp.OwnerName,
+        trp.CommentCount,
+        trp.Score,
+        trp.ViewCount,
+        ph.UserDisplayName AS LastEditedBy,
+        ph.CreationDate AS LastEditDate,
+        ph.Comment AS EditComment,
+        ph.Text AS NewTextValue
+    FROM 
+        TopRankedPosts trp
+    LEFT JOIN 
+        PostHistory ph ON trp.PostId = ph.PostId AND ph.CreationDate = (
+            SELECT MAX(CreationDate)
+            FROM PostHistory
+            WHERE PostId = trp.PostId
+        )
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.OwnerName,
+    pd.CommentCount,
+    pd.Score,
+    pd.ViewCount,
+    pd.LastEditedBy,
+    TO_CHAR(pd.LastEditDate, 'YYYY-MM-DD HH24:MI:SS') AS LastEditDate,
+    pd.EditComment,
+    pd.NewTextValue,
+    REPLACE(REPLACE(pd.NewTextValue, '<p>', ''), '</p>', '') AS CleanedBody
+FROM 
+    PostDetails pd
+WHERE 
+    pd.Score > 5 -- Filter based on score
+ORDER BY 
+    pd.Score DESC, pd.ViewCount DESC;

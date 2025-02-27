@@ -1,0 +1,48 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        NULL::integer AS parent_movie_id,
+        1 AS level
+    FROM title m
+    WHERE m.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.movie_id AS parent_movie_id,
+        mh.level + 1
+    FROM title m
+    JOIN movie_link ml ON ml.linked_movie_id = m.id
+    JOIN movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    mh.title AS "Movie Title",
+    mh.production_year AS "Release Year",
+    COALESCE(cast_actors.actor_count, 0) AS "Actor Count",
+    STRING_AGG(DISTINCT cn.name, ', ') AS "Production Companies",
+    COUNT(DISTINCT mk.keyword) AS "Keywords",
+    AVG(mi.info) FILTER (WHERE mi.info_type_id IN (1, 2)) AS "Average Info Type 1 and 2" -- Assume info_type_id 1 and 2 corresponds to certain types of info
+FROM movie_hierarchy mh
+LEFT JOIN (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count
+    FROM cast_info ci
+    GROUP BY ci.movie_id
+) cast_actors ON cast_actors.movie_id = mh.movie_id
+LEFT JOIN movie_companies mc ON mc.movie_id = mh.movie_id
+LEFT JOIN company_name cn ON cn.id = mc.company_id AND cn.country_code NOT LIKE 'USA' -- Exclude USA companies
+LEFT JOIN movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN movie_info mi ON mi.movie_id = mh.movie_id AND mi.info_type_id IS NOT NULL
+GROUP BY mh.movie_id, mh.title, mh.production_year, cast_actors.actor_count
+ORDER BY mh.production_year DESC, mh.title
+HAVING COUNT(DISTINCT mk.keyword) > 5 -- Only movies with more than 5 keywords
+   AND AVG(mi.info) IS NOT NULL -- Ensure info average is not NULL
+   AND STRING_AGG(DISTINCT cn.name, ', ') IS NOT NULL -- Ensure we have production company names
+LIMIT 100;

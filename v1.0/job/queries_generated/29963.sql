@@ -1,0 +1,71 @@
+WITH MovieTitles AS (
+    SELECT 
+        a.id AS title_id,
+        a.title,
+        a.production_year,
+        k.keyword AS movie_keyword
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+ActorNames AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name,
+        pc.note AS role,
+        a.title_id
+    FROM 
+        aka_name ak
+    INNER JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    INNER JOIN 
+        MovieTitles a ON ci.movie_id = a.title_id
+    LEFT JOIN 
+        role_type pc ON ci.role_id = pc.id
+),
+CompanyData AS (
+    SELECT 
+        mc.movie_id,
+        cn.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY cn.name) AS company_rank
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+FullMovieInfo AS (
+    SELECT 
+        mt.title,
+        mt.production_year,
+        an.name AS actor_name,
+        an.role,
+        cd.company_name,
+        cd.company_type,
+        mt.movie_keyword
+    FROM 
+        MovieTitles mt
+    LEFT JOIN 
+        ActorNames an ON mt.title_id = an.title_id
+    LEFT JOIN 
+        CompanyData cd ON mt.title_id = cd.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    actor_name,
+    role,
+    company_name,
+    company_type,
+    movie_keyword
+FROM 
+    FullMovieInfo
+WHERE 
+    movie_keyword IS NOT NULL
+ORDER BY 
+    production_year DESC, title;

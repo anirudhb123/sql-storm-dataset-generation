@@ -1,0 +1,62 @@
+WITH TotalSales AS (
+    SELECT 
+        l_partkey, 
+        SUM(l_extendedprice * (1 - l_discount)) AS total_price,
+        COUNT(DISTINCT o_orderkey) AS order_count,
+        AVG(l_quantity) AS avg_quantity
+    FROM 
+        lineitem 
+    JOIN 
+        orders ON lineitem.l_orderkey = orders.o_orderkey
+    WHERE 
+        lineitem.l_shipdate >= '1996-01-01' 
+        AND orders.o_orderstatus = 'O'
+    GROUP BY 
+        l_partkey
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        si.s_suppkey,
+        si.s_name,
+        si.total_supply_cost,
+        ROW_NUMBER() OVER (ORDER BY si.total_supply_cost DESC) AS rn
+    FROM 
+        SupplierInfo si
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ts.s_name AS top_supplier,
+    ts.total_supply_cost,
+    ts.rn
+FROM 
+    part p
+LEFT JOIN 
+    TopSuppliers ts ON p.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = ts.s_suppkey ORDER BY ps.ps_availqty DESC LIMIT 1)
+WHERE 
+    (SELECT COUNT(*) FROM lineitem l WHERE l.l_partkey = p.p_partkey) > 10
+ORDER BY 
+    ts.rn 
+LIMIT 5
+UNION ALL
+SELECT 
+    NULL AS p_partkey,
+    'Total' AS p_name,
+    SUM(ts.total_supply_cost) AS total_supplier_cost,
+    0 AS rn
+FROM 
+    TopSuppliers ts
+WHERE 
+    ts.rn <= 5;

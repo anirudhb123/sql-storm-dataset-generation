@@ -1,0 +1,101 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COUNT(DISTINCT ps.ps_partkey) AS part_count, 
+        AVG(s.s_acctbal) OVER (PARTITION BY n.n_nationkey) AS avg_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, 
+        s.s_name, 
+        n.n_nationkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= (CURRENT_DATE - INTERVAL '1 year')
+    GROUP BY 
+        c.c_custkey, 
+        c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > (
+            SELECT AVG(o2.o_totalprice) 
+            FROM orders o2 
+            WHERE o2.o_orderdate >= (CURRENT_DATE - INTERVAL '1 year')
+        )
+),
+MaxPartSupplier AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        MAX(ps.ps_availqty) AS max_avail
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, 
+        ps.ps_suppkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey, 
+        l.l_partkey, 
+        l.l_suppkey, 
+        l.l_quantity * (1 - l.l_discount) AS net_price,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_extendedprice DESC) AS rank
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipmode IN ('AIR', 'GROUND')
+        AND l.l_returnflag = 'N'
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(DISTINCT o.o_orderkey) AS order_count, 
+        SUM(o.o_totalprice) AS total_spent, 
+        AVG(o.o_totalprice) OVER (PARTITION BY c.c_custkey) AS avg_order_value,
+        rank() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    cu.c_custkey, 
+    cu.c_name, 
+    COALESCE(SUM(li.net_price), 0) AS total_lineitem_value,
+    MAX(s.part_count) OVER (PARTITION BY cu.c_custkey) AS supplier_parts_count,
+    CASE 
+        WHEN cu.total_spent > 10000 THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_segment
+FROM 
+    HighValueCustomers hi
+JOIN 
+    FilteredLineItems li ON hi.c_custkey = li.l_orderkey
+LEFT JOIN 
+    RankedSuppliers s ON li.l_suppkey = s.s_suppkey
+JOIN 
+    CustomerOrderStats cu ON hi.c_custkey = cu.c_custkey
+GROUP BY 
+    cu.c_custkey, 
+    cu.c_name
+HAVING 
+    COUNT(DISTINCT li.l_orderkey) > 5
+ORDER BY 
+    total_lineitem_value DESC, 
+    supplier_parts_count ASC;

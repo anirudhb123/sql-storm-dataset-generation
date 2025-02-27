@@ -1,0 +1,67 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.movie_id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COALESCE(comp.kind, 'Unknown') AS company_type,
+    RANK() OVER (PARTITION BY mt.id ORDER BY person_info.info_type_id) AS actor_rank,
+    COUNT(DISTINCT mk.keyword) OVER (PARTITION BY mt.id) AS keyword_count,
+    SUBSTRING(ak.name FROM 1 FOR 10) AS name_prefix,
+    CASE 
+        WHEN ak.name IS NULL THEN 'No Actor'
+        WHEN ak.name LIKE '%Smith%' THEN 'Featured Actor'
+        ELSE 'Regular Actor'
+    END AS actor_status
+
+FROM 
+    cast_info ci
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.movie_id
+LEFT JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN 
+    company_type comp ON mc.company_type_id = comp.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+WHERE 
+    mt.production_year > 2000
+    AND ak.name IS NOT NULL
+    AND (ci.note IS NULL OR ci.note NOT LIKE '%cameo%')
+    AND (mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'feature') 
+         OR mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'short'))
+
+ORDER BY 
+    mt.production_year DESC,
+    actor_rank,
+    actor_name;
+
+-- Performance Benchmarking statistics can be captured through execution metrics

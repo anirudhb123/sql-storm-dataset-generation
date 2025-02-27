@@ -1,0 +1,45 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+), 
+order_summary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+), 
+top_customers AS (
+    SELECT c.c_custkey, c.c_name, os.total_spent, os.rank
+    FROM order_summary os
+    JOIN customer c ON os.c_custkey = c.c_custkey
+    WHERE os.rank <= 5
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    COUNT(DISTINCT l.l_orderkey) AS number_of_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    COALESCE(r.r_name, 'Unknown') AS region_name,
+    sh.level AS supplier_level
+FROM part p
+JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN nation n ON sh.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE l.l_shipdate >= DATE '2023-01-01' 
+AND l.l_shipdate < DATE '2023-10-01'
+GROUP BY p.p_partkey, p.p_name, r.r_name, sh.level
+HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > (SELECT AVG(total_spent) FROM top_customers)
+ORDER BY total_revenue DESC;

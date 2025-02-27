@@ -1,0 +1,66 @@
+
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        U.Id AS UserId,
+        U.DisplayName AS UserDisplayName,
+        U.Reputation,
+        U.CreationDate AS UserCreationDate,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id) AS VoteCount,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id) AS TotalComments
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= '2023-10-01 12:34:56'::timestamp - INTERVAL '1 year' 
+    ORDER BY 
+        P.CreationDate DESC
+),
+UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName AS UserDisplayName,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        SUM(V.BountyAmount) AS TotalBountyEarned
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate AS PostCreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.UserId,
+    PS.UserDisplayName,
+    PS.Reputation AS UserReputation,
+    PS.UserCreationDate,
+    PS.VoteCount,
+    PS.TotalComments,
+    US.TotalPosts AS UserTotalPosts,
+    US.TotalBadges AS UserTotalBadges,
+    US.TotalBountyEarned
+FROM 
+    PostStats PS
+JOIN 
+    UserStats US ON PS.UserId = US.UserId
+ORDER BY 
+    PS.Score DESC, PS.ViewCount DESC;

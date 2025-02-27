@@ -1,0 +1,63 @@
+WITH ActorInfo AS (
+    SELECT 
+        ak.name AS actor_name,
+        p.gender,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        name p ON ak.md5sum = p.md5sum
+    GROUP BY 
+        ak.name, p.gender
+),
+MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        COUNT(DISTINCT mi.info) AS info_count
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    GROUP BY 
+        t.title, t.production_year, k.keyword
+),
+ActorMovieDetails AS (
+    SELECT 
+        ai.actor_name,
+        ai.gender,
+        md.movie_title,
+        md.production_year,
+        md.movie_keyword,
+        ai.movie_count,
+        md.info_count
+    FROM 
+        ActorInfo ai
+    JOIN 
+        cast_info ci ON ai.actor_name = (SELECT ak.name FROM aka_name ak WHERE ak.person_id = ci.person_id)
+    JOIN 
+        MovieDetails md ON ci.movie_id = (SELECT t.id FROM title t WHERE t.title = md.movie_title)
+)
+SELECT 
+    amd.actor_name,
+    amd.gender,
+    amd.movie_title,
+    amd.production_year,
+    amd.movie_keyword,
+    amd.movie_count,
+    amd.info_count
+FROM 
+    ActorMovieDetails amd
+WHERE 
+    amd.movie_count > 5
+ORDER BY 
+    amd.production_year DESC, amd.movie_count DESC;
+
+This query benchmarks string processing by aggregating data related to actors and movies, focusing on those actors who have participated in more than five movies. The complexity arises from multiple joins and the use of CTEs that involve groupings and aggregations, demonstrating varied string manipulations with actor names, movie titles, and keywords to generate a descriptive and informative output.

@@ -1,0 +1,80 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN B.Id IS NOT NULL THEN 1 ELSE 0 END) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        QuestionCount,
+        AnswerCount,
+        BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, PostCount DESC) AS Rank
+    FROM 
+        UserStats
+),
+MostVotedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    WHERE 
+        P.PostTypeId = 1
+    GROUP BY 
+        P.Id, P.Title, P.ViewCount
+),
+TopPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        ViewCount, 
+        UpvoteCount, 
+        DownvoteCount,
+        ROW_NUMBER() OVER (ORDER BY UpvoteCount DESC, ViewCount DESC) AS Rank
+    FROM 
+        MostVotedPosts
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.BadgeCount,
+    T.PostId,
+    T.Title AS TopPostTitle,
+    T.ViewCount AS TopPostViews,
+    T.UpvoteCount AS TopPostUpvotes,
+    T.DownvoteCount AS TopPostDownvotes
+FROM 
+    TopUsers U
+LEFT JOIN 
+    TopPosts T ON U.UserId = T.UserId 
+WHERE 
+    U.Rank <= 10 AND (T.Rank <= 5 OR T.Rank IS NULL)
+ORDER BY 
+    U.Reputation DESC, T.UpvoteCount DESC;

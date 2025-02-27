@@ -1,0 +1,50 @@
+
+WITH SalesSummary AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ss_ext_sales_price) AS total_sales,
+        SUM(ss_ext_discount_amt) AS total_discount,
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count,
+        EXTRACT(YEAR FROM d.d_date) AS sales_year,
+        EXTRACT(MONTH FROM d.d_date) AS sales_month
+    FROM 
+        store_sales 
+    JOIN 
+        store s ON store_sk = s_store_sk 
+    JOIN 
+        warehouse w ON s.s_warehouse_sk = w.w_warehouse_sk 
+    JOIN 
+        date_dim d ON d.d_date_sk = ss_sold_date_sk 
+    GROUP BY 
+        w.w_warehouse_id, sales_year, sales_month
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        COUNT(DISTINCT c.c_customer_id) AS customer_count
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk 
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+) 
+SELECT 
+    ss.w_warehouse_id,
+    ss.sales_year,
+    ss.sales_month,
+    ss.total_sales,
+    ss.total_discount,
+    ss.transaction_count,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.avg_purchase_estimate,
+    cd.customer_count
+FROM 
+    SalesSummary ss 
+JOIN 
+    CustomerDemographics cd ON cd.customer_count > 0 
+ORDER BY 
+    ss.total_sales DESC, ss.w_warehouse_id, ss.sales_year, ss.sales_month;

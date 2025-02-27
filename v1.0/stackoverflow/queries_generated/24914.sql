@@ -1,0 +1,95 @@
+WITH UserReputation AS (
+    SELECT 
+        Id, 
+        Reputation,
+        CASE 
+            WHEN Reputation IS NULL THEN 'No Reputation'
+            WHEN Reputation < 100 THEN 'Novice'
+            WHEN Reputation BETWEEN 100 AND 1000 THEN 'Intermediate'
+            ELSE 'Expert'
+        END AS ReputationCategory,
+        RANK() OVER (ORDER BY Reputation DESC) AS ReputationRank
+    FROM Users
+), RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(v.VoteCount, 0) AS TotalVotes,
+        COUNT(c.Id) AS CommentCount,
+        FIRST_VALUE(p.Body) OVER (PARTITION BY p.Id ORDER BY p.LastActivityDate DESC) AS LatestBody
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount
+        FROM Votes 
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY p.Id, p.Title, p.CreationDate, p.OwnerUserId, v.VoteCount
+), PostHistoryAnalytics AS (
+    SELECT 
+        ph.PostId,
+        MIN(ph.CreationDate) AS FirstHistoryChange,
+        MAX(ph.CreationDate) AS LatestHistoryChange,
+        COUNT(*) AS HistoryChangeCount,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY ph.PostId
+), UserPostDetails AS (
+    SELECT 
+        up.Id AS UserId,
+        up.Reputation,
+        COUNT(DISTINCT rp.PostId) AS TotalPosts,
+        SUM(rp.TotalVotes) AS TotalVotesReceived,
+        STRING_AGG(DISTINCT rp.Title, '; ') AS RecentPostTitles
+    FROM UserReputation up
+    LEFT JOIN RecentPosts rp ON up.Id = rp.OwnerUserId
+    GROUP BY up.Id, up.Reputation
+), RankedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.TotalVotes,
+        rp.CommentCount,
+        pha.FirstHistoryChange,
+        pha.LatestHistoryChange,
+        pha.HistoryChangeCount,
+        up.TotalPosts AS UserPostCount,
+        up.TotalVotesReceived AS UserVotes,
+        up.Reputation AS UserReputation
+    FROM RecentPosts rp
+    LEFT JOIN PostHistoryAnalytics pha ON rp.PostId = pha.PostId
+    LEFT JOIN UserPostDetails up ON rp.OwnerUserId = up.UserId
+    WHERE rp.TotalVotes > 0 -- Include only posts that have received votes
+), FilteredPosts AS (
+    SELECT 
+        *,
+        NTILE(5) OVER (ORDER BY TotalVotes DESC) AS VotePercentile
+    FROM RankedPosts
+    WHERE CommentCount > 5 -- Filter to include only posts with more than 5 comments
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.TotalVotes,
+    fp.CommentCount,
+    fp.FirstHistoryChange,
+    fp.LatestHistoryChange,
+    fp.HistoryChangeCount,
+    fp.UserPostCount,
+    fp.UserVotes,
+    fp.UserReputation,
+    CASE 
+        WHEN fp.UserVotes IS NULL THEN 'No Votes'
+        WHEN fp.UserVotes > 100 THEN 'Highly Influential User'
+        ELSE 'Moderate User'
+    END AS UserInfluence,
+    (SELECT AVG(UserReputation) FROM UserPostDetails) AS AverageUserReputation
+FROM FilteredPosts fp
+WHERE UserReputation > (SELECT AVG(UserReputation) FROM UserPostDetails) -- Only include posts from above-average reputation users
+ORDER BY fp.TotalVotes DESC, fp.CommentCount DESC;

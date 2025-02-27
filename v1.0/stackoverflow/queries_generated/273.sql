@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        p.Title AS ClosedPostTitle,
+        ph.CreationDate AS ClosedDate,
+        ph.Comment AS CloseReason
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    up.DisplayName,
+    up.UpVotes,
+    up.DownVotes,
+    COUNT(DISTINCT rp.Id) AS PostCount,
+    MAX(rp.Score) AS MaxScore,
+    COUNT(DISTINCT cp.ClosedPostId) AS ClosedPostsCount,
+    STRING_AGG(DISTINCT cp.ClosedPostTitle, ', ') AS ClosedPostTitles
+FROM 
+    UserStatistics up
+LEFT JOIN 
+    RankedPosts rp ON up.UserId = rp.OwnerUserId AND rp.PostRank <= 5
+LEFT JOIN 
+    ClosedPosts cp ON rp.Id = cp.ClosedPostId
+WHERE 
+    (up.UpVotes - up.DownVotes) > 10 AND up.BadgeCount > 0
+GROUP BY 
+    up.UserId, up.DisplayName
+HAVING 
+    COUNT(DISTINCT rp.Id) > 3
+ORDER BY 
+    up.UpVotes DESC, MaxScore DESC;

@@ -1,0 +1,60 @@
+
+WITH customer_summary AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        cd.cd_dep_employed_count,
+        cd.cd_dep_college_count,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+top_customers AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate
+    FROM customer_summary c
+    WHERE c.rank <= 5
+),
+sales_data AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_net_paid) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    GROUP BY ws.ws_bill_customer_sk
+),
+returns_data AS (
+    SELECT 
+        sr.sr_customer_sk,
+        SUM(sr.sr_return_amt) AS total_returns,
+        COUNT(sr.sr_ticket_number) AS return_count
+    FROM store_returns sr
+    GROUP BY sr.sr_customer_sk
+)
+SELECT 
+    tc.c_customer_id,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.cd_gender,
+    tc.cd_marital_status,
+    COALESCE(sd.total_sales, 0) AS total_sales,
+    COALESCE(rd.total_returns, 0) AS total_returns,
+    (COALESCE(sd.total_sales, 0) - COALESCE(rd.total_returns, 0)) AS net_spent
+FROM top_customers tc
+LEFT JOIN sales_data sd ON tc.c_customer_id = sd.ws_bill_customer_sk
+LEFT JOIN returns_data rd ON tc.c_customer_id = rd.sr_customer_sk
+WHERE (tc.cd_gender = 'F' AND tc.cd_marital_status = 'S')
+   OR (tc.cd_gender = 'M' AND tc.cd_marital_status = 'M')
+ORDER BY net_spent DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,87 @@
+WITH RECURSIVE TagHierarchy AS (
+    SELECT 
+        Id AS TagId,
+        TagName,
+        Count,
+        1 AS Level,
+        ARRAY[TagName] AS Path
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly = 0
+        
+    UNION ALL
+    
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        th.Level + 1,
+        th.Path || t.TagName
+    FROM 
+        Tags t
+    JOIN 
+        PostLinks pl ON t.Id = pl.RelatedPostId
+    JOIN 
+        TagHierarchy th ON pl.PostId = th.TagId
+),
+
+UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.ViewCount,
+        p.AnswerCount,
+        ARRAY_AGG(DISTINCT th.TagName) AS Tags,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        TagHierarchy th ON p.Tags LIKE '%' || th.TagName || '%'
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    ue.DisplayName,
+    ue.PostsCreated,
+    ue.UpVotesReceived,
+    ue.DownVotesReceived,
+    ps.Title,
+    ps.Body,
+    ps.ViewCount,
+    ps.AnswerCount,
+    ps.Tags,
+    ps.CommentCount
+FROM 
+    UserEngagement ue
+JOIN 
+    PostStatistics ps ON ue.UserId = ps.PostId
+ORDER BY 
+    ue.UpVotesReceived DESC, 
+    ps.ViewCount DESC
+LIMIT 10;

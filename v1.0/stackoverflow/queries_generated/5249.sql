@@ -1,0 +1,54 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(SUM(vt.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(vt.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 ELSE 0 END) OVER (PARTITION BY p.Id), 0) AS CloseVotes,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes vt ON p.Id = vt.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount
+), PostStats AS (
+    SELECT 
+        PostId,
+        Title,
+        ViewCount,
+        UpVotes,
+        DownVotes,
+        CloseVotes,
+        Rank,
+        CASE 
+            WHEN CloseVotes > 0 THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus,
+        CASE 
+            WHEN UpVotes > DownVotes THEN 'Positive'
+            WHEN UpVotes < DownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteStatus
+    FROM 
+        RankedPosts
+)
+SELECT 
+    ps.Title,
+    ps.ViewCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CloseVotes,
+    ps.PostStatus,
+    ps.VoteStatus
+FROM 
+    PostStats ps
+WHERE 
+    ps.Rank <= 10
+ORDER BY 
+    ps.ViewCount DESC;

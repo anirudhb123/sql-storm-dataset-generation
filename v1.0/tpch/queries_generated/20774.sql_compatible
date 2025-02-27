@@ -1,0 +1,70 @@
+
+WITH RECURSIVE price_analysis AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        ps_availqty, 
+        ps_supplycost, 
+        ROW_NUMBER() OVER (PARTITION BY ps_partkey ORDER BY ps_supplycost) AS rank
+    FROM 
+        partsupp
+    WHERE 
+        ps_availqty > 0
+),
+high_value_suppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        supplier s
+    JOIN 
+        lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+),
+customer_activity AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent,
+        MAX(o.o_orderdate) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 5 AND 
+        MAX(o.o_orderdate) >= DATE '1998-10-01' - INTERVAL '1 YEAR'
+)
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    pa.ps_supplycost,
+    s.s_name AS supplier_name,
+    c.c_name AS customer_name,
+    ca.total_spent,
+    CASE 
+        WHEN pa.rank = 1 THEN 'Best Supplier'
+        ELSE 'Other Supplier'
+    END AS supplier_rank,
+    COALESCE(ca.last_order_date, DATE '1900-01-01') AS last_order_recorded
+FROM 
+    part p
+LEFT JOIN 
+    price_analysis pa ON p.p_partkey = pa.ps_partkey
+LEFT JOIN 
+    high_value_suppliers s ON pa.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    customer_activity ca ON s.s_suppkey = ca.c_custkey
+WHERE 
+    p.p_size BETWEEN 1 AND 25
+    AND (p.p_retailprice > (SELECT AVG(p_retailprice) FROM part) OR FALSE)
+    AND (ca.total_spent IS NULL OR ca.total_spent >= 500)
+ORDER BY 
+    p.p_partkey, pa.ps_supplycost DESC NULLS LAST;

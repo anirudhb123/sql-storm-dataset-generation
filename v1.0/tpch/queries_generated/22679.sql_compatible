@@ -1,0 +1,64 @@
+
+WITH RankedPartSupplier AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        RANK() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost DESC) AS rank_supplycost
+    FROM 
+        partsupp ps
+),
+TotalOrderValue AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_custkey
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        s.s_acctbal
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    p.p_name,
+    COALESCE(MAX(si.s_name), 'No Supplier') AS supplier_name,
+    COALESCE(AVG(rps.ps_supplycost), 0) AS avg_supplycost,
+    COALESCE(MAX(tov.total_value), 0) AS max_customer_order_value,
+    COUNT(DISTINCT rps.ps_suppkey) AS num_suppliers,
+    CASE 
+        WHEN AVG(rps.ps_supplycost) IS NULL THEN 'No Costs Found'
+        ELSE 'Cost Data Present'
+    END AS cost_status
+FROM 
+    part p
+LEFT JOIN 
+    RankedPartSupplier rps ON p.p_partkey = rps.ps_partkey AND rps.rank_supplycost = 1
+LEFT JOIN 
+    SupplierInfo si ON rps.ps_suppkey = si.s_suppkey
+LEFT JOIN 
+    TotalOrderValue tov ON si.s_suppkey = tov.o_custkey
+WHERE 
+    p.p_size IN (SELECT DISTINCT p_size FROM part WHERE p_retailprice > 100.00)
+    AND (p.p_comment IS NULL OR p.p_comment LIKE '%specific%')
+GROUP BY 
+    p.p_name
+HAVING 
+    COUNT(DISTINCT rps.ps_suppkey) > 0 OR SUM(tov.total_value) > 10000
+ORDER BY 
+    p.p_partkey DESC
+LIMIT 50;

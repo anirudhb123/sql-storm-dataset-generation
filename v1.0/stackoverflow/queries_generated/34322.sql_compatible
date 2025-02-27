@@ -1,0 +1,78 @@
+
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        1 AS Depth,
+        p.AcceptedAnswerId,
+        p.ViewCount,
+        p.Score
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    UNION ALL
+    SELECT 
+        p2.Id,
+        p2.Title,
+        p2.OwnerUserId,
+        p2.CreationDate,
+        rp.Depth + 1,
+        p2.AcceptedAnswerId,
+        p2.ViewCount,
+        p2.Score
+    FROM 
+        Posts p2
+    JOIN 
+        Posts p3 ON p3.ParentId = p2.Id
+    JOIN 
+        RecursivePosts rp ON p3.OwnerUserId = rp.OwnerUserId
+), 
+AggregatedScores AS (
+    SELECT 
+        rp.OwnerUserId,
+        COUNT(*) AS PostCount,
+        SUM(rp.Score) AS TotalScore,
+        SUM(rp.ViewCount) AS TotalViews
+    FROM 
+        RecursivePosts rp
+    GROUP BY 
+        rp.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COALESCE(ub.BadgeCount, 0) AS BadgeCount,
+    COALESCE(ag.PostCount, 0) AS PostCount,
+    COALESCE(ag.TotalScore, 0) AS TotalScore,
+    COALESCE(ag.TotalViews, 0) AS TotalViews,
+    CASE 
+        WHEN ub.LastBadgeDate IS NOT NULL AND ag.TotalScore > 100 THEN 'Achievement Unlocked'
+        ELSE 'No Achievements'
+    END AS AchievementStatus
+FROM 
+    Users u
+LEFT JOIN 
+    AggregatedScores ag ON u.Id = ag.OwnerUserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    (COALESCE(ag.PostCount, 0) > 5 OR COALESCE(ag.TotalScore, 0) > 50) 
+    AND (u.Reputation > 1000 OR u.Views > 500)
+ORDER BY 
+    TotalScore DESC, 
+    BadgeCount DESC;

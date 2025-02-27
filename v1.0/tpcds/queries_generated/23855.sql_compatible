@@ -1,0 +1,72 @@
+
+WITH CustomerStats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_credit_rating,
+        COALESCE(NULLIF(cd.cd_purchase_estimate, 0), 1) AS adjusted_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY COALESCE(NULLIF(cd.cd_purchase_estimate, 0), 1) DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_marital_status = 'M'
+    AND cd.cd_credit_rating IS NOT NULL
+), DateRange AS (
+    SELECT d.d_date
+    FROM date_dim d
+    WHERE d.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+    AND d.d_weekend = 'Y'
+), WarehouseInfo AS (
+    SELECT 
+        w.w_warehouse_sk,
+        w.w_warehouse_name,
+        COUNT(*) AS inventory_count
+    FROM warehouse w
+    JOIN inventory i ON w.w_warehouse_sk = i.inv_warehouse_sk
+    GROUP BY w.w_warehouse_sk, w.w_warehouse_name
+), SpecificItems AS (
+    SELECT i.i_item_sk, i.i_item_id, i.i_current_price, i.i_category
+    FROM item i
+    WHERE i.i_current_price > 
+        (SELECT AVG(i2.i_current_price) FROM item i2 WHERE i2.i_category = 'Electronics')
+    AND i.i_rec_end_date IS NULL
+), ReturnsSummary AS (
+    SELECT 
+        sr_store_sk, 
+        SUM(sr_return_qty) AS total_returned_qty,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns sr
+    WHERE sr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY sr_store_sk
+)
+SELECT 
+    cs.c_customer_sk,
+    cs.c_first_name,
+    cs.c_last_name,
+    cs.cd_gender,
+    si.i_item_id,
+    si.i_current_price,
+    SUM(ws.ws_net_paid_inc_tax) AS total_spent,
+    COUNT(DISTINCT ws.ws_order_number) AS order_count,
+    (CASE 
+        WHEN SUM(ws.ws_net_paid_inc_tax) > 1000 THEN 'High Value'
+        ELSE 'Low Value'
+    END) AS customer_value,
+    wi.w_warehouse_name,
+    wi.inventory_count,
+    d.d_date
+FROM CustomerStats cs
+JOIN web_sales ws ON cs.c_customer_sk = ws.ws_bill_customer_sk
+JOIN SpecificItems si ON ws.ws_item_sk = si.i_item_sk
+JOIN WarehouseInfo wi ON ws.ws_warehouse_sk = wi.w_warehouse_sk
+CROSS JOIN DateRange d
+LEFT JOIN ReturnsSummary rs ON rs.sr_store_sk = ws.ws_store_sk
+WHERE cs.rank <= 10 
+AND (rs.total_returned_qty IS NULL OR rs.total_returned_qty < 5)
+GROUP BY 
+    cs.c_customer_sk, cs.c_first_name, cs.c_last_name, cs.cd_gender,
+    si.i_item_id, si.i_current_price, wi.w_warehouse_name, wi.inventory_count, d.d_date
+HAVING SUM(ws.ws_net_paid_inc_tax) IS NOT NULL
+ORDER BY total_spent DESC;

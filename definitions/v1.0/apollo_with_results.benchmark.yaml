@@ -1,0 +1,11 @@
+title: SQLStorm v1.0 Apollo Benchmark (24h)
+repetitions: 1
+warmup: 0
+timeout: 10
+fetch_result: true
+global_timeout: 86400
+output: results/v1.0/apollo_with_results
+systems:
+  - title: Apollo
+    dbms: apollo
+    settings: { }

@@ -1,0 +1,44 @@
+WITH ranked_cast AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ci.person_role_id,
+        RANK() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS actor_rank,
+        na.name AS actor_name
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name na ON ci.person_id = na.person_id
+),
+movie_credits AS (
+    SELECT 
+        mt.title, 
+        mt.production_year,
+        COUNT(DISTINCT rc.person_id) AS total_actors,
+        ARRAY_AGG(DISTINCT rc.actor_name ORDER BY rc.actor_rank) AS actor_list
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        ranked_cast rc ON mt.id = rc.movie_id
+    WHERE 
+        mt.kind_id IN (SELECT id FROM kind_type WHERE kind ILIKE 'movie')
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+)
+SELECT 
+    mc.title,
+    mc.production_year,
+    mc.total_actors,
+    mc.actor_list,
+    mi.info AS movie_info
+FROM 
+    movie_credits mc
+LEFT JOIN 
+    movie_info mi ON mc.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Plot')
+WHERE 
+    mc.total_actors IS NOT NULL
+    AND (mc.production_year < 2000 OR mc.title ILIKE '%Com%')
+ORDER BY 
+    mc.production_year DESC NULLS LAST,
+    mc.total_actors DESC;
+

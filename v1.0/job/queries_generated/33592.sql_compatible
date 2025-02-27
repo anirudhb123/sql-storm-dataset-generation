@@ -1,0 +1,65 @@
+
+WITH RECURSIVE movie_series AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.season_nr,
+        t.episode_nr,
+        1 AS level
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE '%Series%')
+
+    UNION ALL
+
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.season_nr,
+        t.episode_nr,
+        ms.level + 1
+    FROM 
+        aka_title t
+    JOIN 
+        movie_series ms ON t.episode_of_id = ms.title_id
+)
+
+SELECT 
+    DISTINCT a.name AS actor_name,
+    k.keyword AS movie_keyword,
+    ARRAY_AGG(DISTINCT m.title) AS movies_in_series,
+    COUNT(DISTINCT m.id) OVER (PARTITION BY a.id) AS movie_count,
+    COALESCE(cn.name, 'Independent') AS company_name
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    title m ON ci.movie_id = m.id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_companies mc ON m.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+WHERE 
+    a.name IS NOT NULL 
+    AND m.production_year >= 2000 
+    AND m.production_year <= 2023
+    AND k.keyword IS NOT NULL
+    AND EXISTS (
+        SELECT 1
+        FROM complete_cast cc
+        WHERE cc.movie_id = m.id AND cc.subject_id = ci.person_id
+    )
+GROUP BY 
+    a.id, a.name, k.keyword, cn.name
+HAVING 
+    COUNT(DISTINCT m.id) > 5
+ORDER BY 
+    movie_count DESC;

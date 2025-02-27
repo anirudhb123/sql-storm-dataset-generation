@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_within_year
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id = (SELECT id FROM kind_type WHERE kind = 'feature')
+),
+FilteredCompanies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY mc.movie_id ORDER BY c.name) AS row_num
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        c.country_code IS NOT NULL
+),
+CombinedData AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        c.company_name,
+        c.company_type,
+        CASE 
+            WHEN c.company_type IS NOT NULL THEN COUNT(DISTINCT c.company_name) OVER (PARTITION BY m.movie_id)
+            ELSE 0 
+        END AS company_count
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        FilteredCompanies c ON m.movie_id = c.movie_id
+)
+SELECT 
+    cd.movie_id,
+    cd.title,
+    cd.production_year,
+    cd.company_name,
+    cd.company_type,
+    cd.company_count
+FROM 
+    CombinedData cd
+WHERE 
+    cd.rank_within_year <= 5
+    AND (cd.company_count IS NULL OR cd.company_count > 1)
+ORDER BY 
+    cd.production_year DESC, 
+    cd.movie_id ASC
+LIMIT 100
+OFFSET 0;

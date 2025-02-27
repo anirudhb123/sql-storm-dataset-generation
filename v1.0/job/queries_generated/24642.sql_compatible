@@ -1,0 +1,53 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.name AS Actor,
+        t.title AS MovieTitle,
+        t.production_year AS ProductionYear,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY t.production_year DESC) AS MovieRank
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        a.name IS NOT NULL
+        AND t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        Actor,
+        MovieTitle,
+        ProductionYear
+    FROM 
+        RankedMovies
+    WHERE 
+        MovieRank <= 5
+)
+SELECT 
+    fm.Actor,
+    STRING_AGG(fm.MovieTitle, ', ') AS MovieTitles, 
+    MIN(fm.ProductionYear) AS EarliestYear,
+    MAX(fm.ProductionYear) AS LatestYear,
+    COUNT(DISTINCT fm.MovieTitle) AS UniqueMovies,
+    CASE 
+        WHEN COUNT(DISTINCT fm.MovieTitle) > 2 THEN 'Prolific Actor'
+        ELSE 'Emerging Talent'
+    END AS ActorType
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_info mi ON mi.movie_id IN (SELECT DISTINCT movie_id FROM aka_title WHERE title LIKE '%' || fm.MovieTitle || '%')
+WHERE 
+    mi.info IS NOT NULL OR mi.note IS NULL
+GROUP BY 
+    fm.Actor
+HAVING 
+    MAX(fm.ProductionYear) > (
+        SELECT AVG(ProductionYear)
+        FROM RankedMovies
+        WHERE MovieTitle IS NOT NULL
+    )
+ORDER BY 
+    UniqueMovies DESC, LatestYear DESC;

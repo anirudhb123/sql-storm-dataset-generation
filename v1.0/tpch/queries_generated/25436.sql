@@ -1,0 +1,44 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supply_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopRegions AS (
+    SELECT 
+        n.n_regionkey,
+        r.r_name,
+        SUM(rs.total_supply_cost) AS total_region_cost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.supply_rank <= 3
+    GROUP BY 
+        n.n_regionkey, r.r_name
+)
+SELECT 
+    r.r_name,
+    TRIM(TO_CHAR(t.total_region_cost, 'FM999999990.00')) AS formatted_total_cost,
+    COUNT(DISTINCT rs.s_suppkey) AS supplier_count
+FROM 
+    TopRegions t
+JOIN 
+    region r ON t.n_regionkey = r.r_regionkey
+JOIN 
+    RankedSuppliers rs ON rs.s_nationkey = r.r_regionkey
+GROUP BY 
+    r.r_name, t.total_region_cost
+ORDER BY 
+    total_region_cost DESC;

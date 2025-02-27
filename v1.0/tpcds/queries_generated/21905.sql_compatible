@@ -1,0 +1,59 @@
+
+WITH RankedSales AS (
+    SELECT 
+        c.c_customer_id,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        RANK() OVER (PARTITION BY c.c_customer_id ORDER BY ws.ws_sales_price DESC) AS sales_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        c.c_current_addr_sk IS NOT NULL
+), 
+AggregateSales AS (
+    SELECT 
+        c.c_customer_id AS customer_id, 
+        COUNT(ws_order_number) AS total_orders,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price) AS total_spent
+    FROM 
+        RankedSales
+    WHERE 
+        sales_rank <= 5
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    a.customer_id,
+    COALESCE(a.total_orders, 0) AS total_orders,
+    COALESCE(a.total_quantity, 0) AS total_quantity,
+    COALESCE(a.total_spent, 0) AS total_spent,
+    CASE 
+        WHEN a.total_spent > 1000 THEN 'High Value'
+        WHEN a.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS customer_value,
+    EXISTS (
+        SELECT 1 
+        FROM store s 
+        WHERE s.s_store_sk = (
+            SELECT ss.ss_store_sk 
+            FROM store_sales ss 
+            WHERE ss.ss_customer_sk = c.c_customer_sk 
+            GROUP BY ss.ss_store_sk 
+            ORDER BY SUM(ss.ss_sales_price) DESC 
+            LIMIT 1
+        )
+    ) AS has_store_sales
+FROM 
+    AggregateSales a
+FULL OUTER JOIN 
+    customer c ON a.customer_id = c.c_customer_id
+WHERE 
+    c.c_birth_year IS NOT NULL
+ORDER BY 
+    a.total_spent DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY;

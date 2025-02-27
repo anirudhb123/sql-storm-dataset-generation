@@ -1,0 +1,133 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        AcceptedAnswerId,
+        ParentId,
+        CreationDate,
+        Score,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.AcceptedAnswerId,
+        p.ParentId,
+        p.CreationDate,
+        p.Score,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+),
+
+UserScores AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        SUM(u.UpVotes - u.DownVotes) AS ReputationChange
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+PostAudit AS (
+    SELECT 
+        ph.PostId,
+        p.CreationDate,
+        p.Title,
+        ph.UserDisplayName,
+        COUNT(DISTINCT ph.Id) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        CASE 
+            WHEN COUNT(DISTINCT ph.Id) > 0 THEN 'edited'
+            ELSE 'no edits'
+        END AS EditStatus
+    FROM 
+        PostHistory ph
+    JOIN 
+        Posts p ON ph.PostId = p.Id 
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6)  
+    GROUP BY 
+        ph.PostId, p.CreationDate, p.Title, ph.UserDisplayName
+),
+
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalBounty,
+        ReputationChange,
+        RANK() OVER (ORDER BY TotalBounty DESC) AS BountyRank
+    FROM 
+        UserScores
+    WHERE 
+        TotalBounty > 0
+),
+
+AggregatedData AS (
+    SELECT 
+        rph.Id AS QuestionId,
+        rph.Title AS QuestionTitle,
+        rph.CreationDate AS QuestionDate,
+        u.Id AS UserId,
+        u.DisplayName AS UserName,
+        pu.EditCount,
+        pu.LastEditDate,
+        pu.EditStatus,
+        tu.TotalBounty,
+        tu.ReputationChange,
+        rph.Score,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+    FROM 
+        RecursivePostHierarchy rph
+    JOIN 
+        Users u ON rph.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostAudit pu ON rph.Id = pu.PostId
+    LEFT JOIN 
+        Comments c ON rph.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON rph.Id = pl.PostId
+    LEFT JOIN 
+        TopUsers tu ON u.Id = tu.UserId
+    GROUP BY 
+        rph.Id, rph.Title, rph.CreationDate, u.Id, u.DisplayName, pu.EditCount, pu.LastEditDate, pu.EditStatus, tu.TotalBounty, tu.ReputationChange, rph.Score
+    HAVING 
+        COUNT(DISTINCT c.Id) > 0 OR pu.EditCount > 0
+)
+
+SELECT 
+    a.QuestionId,
+    a.QuestionTitle,
+    a.QuestionDate,
+    a.UserName,
+    a.EditCount,
+    a.LastEditDate,
+    a.EditStatus,
+    a.TotalBounty,
+    a.ReputationChange,
+    a.Score,
+    a.CommentCount,
+    a.RelatedPostCount,
+    ROW_NUMBER() OVER (ORDER BY a.Score DESC) AS Rank
+FROM 
+    AggregatedData a
+WHERE 
+    a.EditStatus = 'edited'
+ORDER BY 
+    a.Score DESC
+LIMIT 10;

@@ -1,0 +1,56 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title, 
+        t.production_year,
+        COUNT(DISTINCT kc.keyword) AS keyword_count,
+        AVG(NULLIF(mi.info_length, 0)) AS avg_info_length
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword kc ON mk.keyword_id = kc.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+), FilteredMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        keyword_count, 
+        avg_info_length
+    FROM 
+        RankedMovies
+    WHERE 
+        production_year >= 2000 AND 
+        keyword_count > 3 AND 
+        avg_info_length > 50
+)
+SELECT 
+    fm.movie_id, 
+    fm.title, 
+    fm.production_year, 
+    an.name AS leading_actor,
+    COUNT(*) AS cast_members
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    cast_info ci ON fm.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name an ON ci.person_id = an.person_id
+LEFT JOIN 
+    char_name cn ON an.name = cn.name
+LEFT JOIN 
+    role_type rt ON ci.role_id = rt.id
+WHERE 
+    rt.role = 'leading'
+GROUP BY 
+    fm.movie_id, fm.title, fm.production_year, an.name
+ORDER BY 
+    fm.production_year DESC, 
+    cast_members DESC
+LIMIT 10;

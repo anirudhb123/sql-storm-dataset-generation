@@ -1,0 +1,68 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score, 
+        p.ViewCount, 
+        p.AnswerCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+    AND 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostDetails AS (
+    SELECT 
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        us.UserId,
+        us.TotalBounty,
+        us.BadgeCount
+    FROM 
+        RankedPosts rp
+    JOIN 
+        Users us ON rp.OwnerUserId = us.Id
+    WHERE 
+        rp.ScoreRank <= 5
+)
+SELECT 
+    pd.Title,
+    pd.CreationDate,
+    pd.Score,
+    pd.TotalBounty,
+    pd.BadgeCount,
+    CASE 
+        WHEN pd.TotalBounty > 100 THEN 'High Bounty'
+        WHEN pd.TotalBounty BETWEEN 50 AND 100 THEN 'Medium Bounty'
+        ELSE 'Low Bounty'
+    END AS BountyCategory,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         Comments c 
+     WHERE 
+         c.PostId = (SELECT Id FROM Posts WHERE Title = pd.Title LIMIT 1)
+    ) AS CommentCount
+FROM 
+    PostDetails pd
+ORDER BY 
+    pd.Score DESC, 
+    pd.CreationDate DESC;

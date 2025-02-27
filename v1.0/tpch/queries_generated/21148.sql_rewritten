@@ -1,0 +1,48 @@
+WITH RECURSIVE NationHierarchy AS (
+    SELECT n_nationkey, n_name, n_regionkey, 1 AS level
+    FROM nation 
+    WHERE n_nationkey = 1 
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, n.n_regionkey, nh.level + 1
+    FROM nation n
+    JOIN NationHierarchy nh ON n.n_regionkey = nh.n_regionkey
+    WHERE nh.level < 10
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_price
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+),
+SupplierPartSummary AS (
+    SELECT ps.ps_partkey, ps.ps_suppkey, SUM(ps.ps_availqty) AS total_availqty, 
+           AVG(ps.ps_supplycost) AS avg_supplycost, 
+           STRING_AGG(s.s_name, ', ') AS suppliers
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+LineitemDetails AS (
+    SELECT l.l_orderkey, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returns,
+           RANK() OVER (PARTITION BY l.l_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT 
+    nh.n_name,
+    COUNT(DISTINCT co.c_custkey) AS customer_count,
+    SUM(COALESCE(od.total_sales, 0)) AS total_sales_value,
+    MAX(COALESCE(pss.avg_supplycost, 0)) AS max_supply_cost,
+    MIN(CASE WHEN ro.rank_price = 1 THEN ro.o_totalprice END) AS highest_order_price,
+    COUNT(DISTINCT CASE WHEN ld.total_returns > 0 THEN ld.l_orderkey END) AS returns_count
+FROM nation n
+LEFT JOIN NationHierarchy nh ON n.n_nationkey = nh.n_nationkey
+LEFT JOIN customer co ON co.c_nationkey = n.n_nationkey
+LEFT JOIN RankedOrders ro ON ro.o_orderkey = co.c_custkey
+LEFT JOIN LineitemDetails ld ON ld.l_orderkey = ro.o_orderkey
+LEFT JOIN SupplierPartSummary pss ON pss.ps_partkey = ld.l_orderkey
+WHERE n.r_regionkey IS NOT NULL 
+GROUP BY nh.n_name
+HAVING SUM(COALESCE(od.total_sales, 0)) > 10000
+ORDER BY customer_count DESC;

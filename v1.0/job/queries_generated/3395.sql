@@ -1,0 +1,53 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+top_movies AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year
+    FROM 
+        ranked_movies r
+    WHERE 
+        r.year_rank <= 10
+),
+cast_details AS (
+    SELECT 
+        c.id AS cast_id,
+        p.name AS person_name,
+        t.title AS movie_title,
+        t.production_year,
+        c.nr_order,
+        COALESCE(c.note, 'No Note') AS cast_note
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    WHERE 
+        c.nr_order = 1
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    cd.person_name,
+    cd.cast_note,
+    COUNT(DISTINCT cd.cast_id) OVER (PARTITION BY tm.movie_id) AS total_cast,
+    string_agg(DISTINCT cd.cast_note, '; ') OVER (PARTITION BY tm.movie_id) AS all_cast_notes
+FROM 
+    top_movies tm
+LEFT JOIN 
+    cast_details cd ON tm.movie_id = cd.movie_id
+WHERE 
+    tm.production_year > 2000
+ORDER BY 
+    tm.production_year DESC, tm.title;

@@ -1,0 +1,4 @@
+SELECT min(n.name) AS voicing_actress, min(t.title) AS jap_engl_voiced_movie
+FROM aka_name AS an, char_name AS chn, cast_info AS ci, company_name AS cn, info_type AS it, movie_companies AS mc, movie_info AS mi, name AS n, role_type AS rt, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND t.id = ci.movie_id AND mc.movie_id = ci.movie_id AND mc.movie_id = mi.movie_id AND mi.movie_id = ci.movie_id AND cn.id = mc.company_id AND it.id = mi.info_type_id AND n.id = ci.person_id AND rt.id = ci.role_id AND n.id = an.person_id AND ci.person_id = an.person_id AND chn.id = ci.person_role_id
+AND an.id > 645182 AND t.phonetic_code IN ('D3135', 'K2546', 'N2436', 'R4315', 'X5351') AND mi.info < 'FACT: The cruiser used in the beginning of the movie, U.S.S. St. Paul CA-73, did not enter service until 1945. It had twin 3" gun mounts in place of quad 40mm by the time the movie was filmed. Also the 3" has radar dishes clearly visible on each mount.';

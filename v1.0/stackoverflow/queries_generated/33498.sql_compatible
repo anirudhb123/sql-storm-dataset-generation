@@ -1,0 +1,104 @@
+
+WITH RecursiveTagHierarchy AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        0 AS Level
+    FROM 
+        Tags
+    WHERE 
+        IsModeratorOnly = 0
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        Level + 1
+    FROM 
+        Tags t
+    INNER JOIN 
+        RecursiveTagHierarchy rth ON t.ExcerptPostId = rth.Id
+),
+UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(p.Score), 0) AS TotalScore,
+        COALESCE(COUNT(DISTINCT p.Id), 0) AS TotalPosts,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.Id) AS ChangeCount,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 10) 
+    GROUP BY 
+        ph.PostId
+),
+UserPostDetails AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        p.Id AS PostId,
+        p.Title,
+        phs.ChangeCount,
+        phs.LastChangeDate,
+        p.Score AS PostScore,
+        COALESCE(SUM(c.Score), 0) AS TotalComments,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Users u
+    INNER JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistorySummary phs ON p.Id = phs.PostId
+    WHERE 
+        p.CreationDate > CURRENT_TIMESTAMP - INTERVAL '1 year'
+    GROUP BY 
+        u.Id, u.DisplayName, p.Id, p.Title, phs.ChangeCount, phs.LastChangeDate
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.Reputation,
+    ups.TotalScore,
+    ups.TotalPosts,
+    ups.TotalBounties,
+    ups.PostId,
+    ups.Title,
+    ups.ChangeCount,
+    ups.LastChangeDate,
+    ups.PostScore,
+    ups.TotalComments,
+    rth.TagName AS RelatedTag,
+    CASE 
+        WHEN ups.RecentPostRank = 1 THEN 'Most Recent Post'
+        ELSE NULL 
+    END AS PostStatus
+FROM 
+    UserPostStatistics ups
+LEFT JOIN 
+    RecursiveTagHierarchy rth ON ups.UserId = rth.Id
+WHERE 
+    ups.TotalPosts > 5
+ORDER BY 
+    ups.TotalScore DESC, 
+    ups.RecentPostRank ASC;

@@ -1,0 +1,39 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 1000
+),
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_suppkey, ps.ps_supplycost,
+           RANK() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS cost_rank
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+)
+SELECT s.s_name, r.r_name, COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_order_value,
+       COALESCE(SUM(ps.ps_availqty), 0) AS total_available_quantity,
+       cs.total_spent
+FROM supplier s
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN lineitem l ON s.s_suppkey = l.l_suppkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN (
+    SELECT c.c_custkey AS custkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+) cs ON cs.custkey = s.s_suppkey
+LEFT JOIN PartSupplier ps ON ps.ps_suppkey = s.s_suppkey
+WHERE o.o_orderstatus IN ('F', 'O')
+  AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+GROUP BY s.s_name, r.r_name, cs.total_spent
+HAVING COUNT(DISTINCT o.o_orderkey) > 10
+   OR (COALESCE(SUM(ps.ps_availqty), 0) > 100 AND cs.total_spent IS NOT NULL)
+ORDER BY avg_order_value DESC
+LIMIT 10;

@@ -1,0 +1,95 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY 
+        ci.person_id
+    HAVING 
+        COUNT(DISTINCT ci.movie_id) > 5
+),
+company_movie_counts AS (
+    SELECT 
+        mc.company_id,
+        COUNT(DISTINCT mc.movie_id) AS num_movies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.company_id
+    HAVING 
+        COUNT(DISTINCT mc.movie_id) > 2
+),
+keyword_scores AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(DISTINCT mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+title_info AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ct.kind AS company_type,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rn
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+final_output AS (
+    SELECT 
+        ta.title_id,
+        ta.title,
+        ta.production_year,
+        COUNT(DISTINCT c.person_id) AS total_actors,
+        COALESCE(k.keyword_count, 0) AS total_keywords,
+        CASE 
+            WHEN k.keyword_count > 10 THEN 'High'
+            WHEN k.keyword_count BETWEEN 5 AND 10 THEN 'Medium'
+            ELSE 'Low'
+        END AS keyword_relevance,
+        cc.num_movies AS companies_movies_count
+    FROM 
+        title_info ta
+    LEFT JOIN 
+        keyword_scores k ON ta.title_id = k.movie_id
+    LEFT JOIN 
+        complete_cast cc ON ta.title_id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON ta.title_id = c.movie_id
+    WHERE 
+        (ta.production_year > 2000 AND keyword_relevance = 'High')
+        OR (cc.num_movies > 5)
+    GROUP BY 
+        ta.title_id, ta.title, ta.production_year, k.keyword_count, cc.num_movies
+)
+
+SELECT 
+    title_id,
+    title,
+    production_year,
+    total_actors,
+    total_keywords,
+    keyword_relevance,
+    companies_movies_count
+FROM 
+    final_output
+WHERE 
+    total_actors > ALL (SELECT movie_count FROM actor_hierarchy)
+ORDER BY 
+    production_year DESC, total_actors DESC;

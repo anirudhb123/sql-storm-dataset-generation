@@ -1,0 +1,68 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_order_number,
+        ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws_item_sk ORDER BY ws_sales_price DESC) AS price_rank,
+        COUNT(*) OVER (PARTITION BY ws_item_sk) as total_sales
+    FROM 
+        web_sales 
+    WHERE 
+        ws_sales_price IS NOT NULL
+),
+ItemSales AS (
+    SELECT 
+        i.i_item_id,
+        i.i_product_name,
+        SUM(rs.ws_sales_price) AS total_revenue,
+        AVG(ws_sales_price) AS avg_price,
+        MAX(rs.ws_sales_price) AS max_price,
+        MIN(rs.ws_sales_price) AS min_price
+    FROM 
+        item i
+    LEFT JOIN 
+        RankedSales rs ON i.i_item_sk = rs.ws_item_sk
+    WHERE 
+        rs.price_rank = 1 AND TOTAL_sales > 5 
+    GROUP BY 
+        i.i_item_id, i.i_product_name
+),
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        hd.hd_buy_potential,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_demographics cd
+    JOIN 
+        household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN 
+        customer c ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, hd.hd_buy_potential, cd.cd_income_band_sk
+)
+SELECT 
+    IDS.i_product_name,
+    IDS.total_revenue,
+    CD.cd_gender,
+    CD.cd_marital_status,
+    COALESCE(CD.customer_count, 0) AS customer_count,
+    CASE 
+        WHEN ID.total_revenue > (SELECT AVG(total_revenue) FROM ItemSales) 
+             THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS revenue_comparison
+FROM 
+    ItemSales IDS
+LEFT JOIN 
+    CustomerDemographics CD ON ID.i_product_name LIKE '%A%' OR ID.i_product_name LIKE '%B%'
+WHERE 
+    ((CD.cd_gender = 'F' AND ID.total_revenue IS NOT NULL) OR CD.cd_gender IS NULL)
+ORDER BY 
+    IDS.total_revenue DESC,
+    CD.cd_marital_status ASC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

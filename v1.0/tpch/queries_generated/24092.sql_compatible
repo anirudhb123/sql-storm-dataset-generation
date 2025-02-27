@@ -1,0 +1,77 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyValue,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_regionkey
+),
+RecentOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        DENSE_RANK() OVER (ORDER BY o.o_orderdate DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '6 months'
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(o.o_totalprice), 0) AS TotalSpent,
+        COUNT(o.o_orderkey) AS OrderCount
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey 
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SubQueryExample AS (
+    SELECT 
+        p.p_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS SupplierCount,
+        MAX(l.l_shipdate) AS LatestShipDate
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey
+)
+SELECT 
+    r.r_regionkey AS region_key,
+    COALESCE(RS.s_name, 'No Supplier') AS BestSupplier,
+    RS.TotalSupplyValue,
+    COALESCE(CO.TotalSpent, 0) AS CustomerTotalSpent,
+    COALESCE(CO.OrderCount, 0) AS CustomerOrderCount,
+    P.p_partkey,
+    P.SupplierCount,
+    P.LatestShipDate
+FROM 
+    region r
+LEFT JOIN 
+    (SELECT * FROM RankedSuppliers WHERE rn = 1) RS ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = RS.s_nationkey)
+LEFT JOIN 
+    CustomerOrders CO ON CO.c_custkey = (SELECT c.c_custkey FROM customer c ORDER BY c.c_acctbal DESC LIMIT 1)
+LEFT JOIN 
+    (SELECT p.p_partkey, s.SupplierCount, s.LatestShipDate FROM SubQueryExample s) P ON P.p_partkey IN (SELECT p.p_partkey FROM part p ORDER BY p.p_retailprice DESC LIMIT 5)
+WHERE 
+    RS.TotalSupplyValue IS NOT NULL
+    OR CO.TotalSpent > 1000
+    OR P.SupplierCount > 0
+ORDER BY 
+    r.region_name, CustomerTotalSpent DESC, LatestShipDate DESC;

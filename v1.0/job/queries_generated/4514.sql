@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(mk.keyword_id) DESC) AS KW_Rank
+    FROM
+        aka_title t
+    JOIN
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        t.title, t.production_year, k.keyword
+),
+MovieDetails AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        ARRAY_AGG(c.name) AS cast_names,
+        t.kind AS title_kind,
+        c2.name AS company_name
+    FROM
+        aka_title m
+    LEFT JOIN
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN
+        company_name c2 ON mc.company_id = c2.id
+    GROUP BY
+        m.id, m.title, t.kind, c2.name
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.cast_names,
+    COALESCE(kw.keyword, 'No Keywords') AS keyword,
+    CASE 
+        WHEN md.title_kind IS NOT NULL THEN 'Exists'
+        ELSE 'Not Available'
+    END AS availability,
+    COUNT(CASE WHEN ci.id IS NOT NULL THEN 1 END) AS cast_count
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    RankedMovies kw ON md.title = kw.title AND md.production_year = kw.production_year
+LEFT JOIN 
+    complete_cast ci ON md.movie_id = ci.movie_id
+GROUP BY 
+    md.title, md.production_year, md.cast_names, availability
+HAVING 
+    COUNT(DISTINCT md.cast_names) > 5
+ORDER BY 
+    md.production_year DESC, cast_count DESC;

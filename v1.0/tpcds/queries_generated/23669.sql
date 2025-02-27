@@ -1,0 +1,64 @@
+
+WITH CustomerPurchases AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        SUM(ws.ws_sales_price) AS total_web_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        customer c 
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+),
+HighValueCustomers AS (
+    SELECT 
+        cp.c_customer_id,
+        cp.total_web_sales,
+        cp.total_orders,
+        CASE 
+            WHEN cp.total_web_sales IS NULL THEN 'No Sales'
+            WHEN cp.total_web_sales > 10000 THEN 'High Value'
+            ELSE 'Low Value'
+        END AS value_status
+    FROM 
+        CustomerPurchases cp
+    WHERE 
+        cp.sales_rank <= 10
+),
+AddressCounts AS (
+    SELECT 
+        ca.ca_address_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.ca_address_sk
+)
+SELECT 
+    hvc.c_customer_id,
+    hvc.total_web_sales,
+    hvc.total_orders,
+    hvc.value_status,
+    ac.customer_count,
+    COALESCE(ac.customer_count, 0) AS effective_customer_count,
+    CASE 
+        WHEN hvc.total_orders IS NULL THEN 'Unknown'
+        WHEN hvc.total_orders > 5 THEN 'Frequent Buyer'
+        ELSE 'Occasional Buyer'
+    END AS buying_habit
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    AddressCounts ac ON hvc.c_customer_id = ac.ca_address_sk
+WHERE 
+    hvc.value_status != 'No Sales'
+ORDER BY 
+    hvc.total_web_sales DESC, 
+    hvc.total_orders ASC
+OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY;
+```

@@ -1,0 +1,37 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, o.o_orderdate, o.o_orderpriority, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN DATE '2023-01-01' AND DATE '2023-12-31'
+),
+PopularSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 1000000
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS TotalSpent, COUNT(o.o_orderkey) AS OrderCount
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 500
+    GROUP BY c.c_custkey, c.c_name
+),
+FinalReport AS (
+    SELECT ro.o_orderkey, ro.o_orderstatus, ro.o_totalprice, 
+           co.c_name, co.TotalSpent, co.OrderCount,
+           ps.TotalCost, ns.n_name
+    FROM RankedOrders ro
+    JOIN CustomerOrderSummary co ON ro.o_custkey = co.c_custkey
+    JOIN PopularSuppliers ps ON ps.s_suppkey = (SELECT TOP 1 ps2.ps_suppkey 
+                                                  FROM partsupp ps2 
+                                                  JOIN lineitem l ON ps2.ps_partkey = l.l_partkey 
+                                                  WHERE l.l_orderkey = ro.o_orderkey)
+    JOIN nation ns ON co.c_nationkey = ns.n_nationkey
+    WHERE ro.OrderRank <= 10
+)
+SELECT f.o_orderkey, f.o_orderstatus, f.o_totalprice, f.c_name, 
+       f.TotalSpent, f.OrderCount, f.TotalCost, f.n_name
+FROM FinalReport f
+ORDER BY f.TotalSpent DESC, f.o_orderkey ASC;

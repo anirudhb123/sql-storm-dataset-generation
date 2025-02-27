@@ -1,0 +1,66 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreatedDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreatedDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreatedDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        p.Id, p.Title, p.CreatedDate, p.OwnerUserId, p.PostTypeId
+),
+BestPosts AS (
+    SELECT 
+        PostId, 
+        Title, 
+        CreatedDate, 
+        OwnerUserId, 
+        PostTypeId, 
+        CommentCount, 
+        UpVotes, 
+        DownVotes,
+        RANK() OVER (ORDER BY UpVotes DESC) AS UpVotesRank
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 10
+)
+SELECT 
+    bp.Title,
+    u.DisplayName AS Author,
+    bp.CommentCount,
+    bp.UpVotes,
+    bp.DownVotes,
+    CASE 
+        WHEN bp.UpVotes IS NOT NULL AND bp.DownVotes IS NOT NULL 
+            THEN (bp.UpVotes - bp.DownVotes)
+        ELSE NULL 
+    END AS NetScore,
+    (SELECT 
+         STRING_AGG(t.TagName, ', ')
+     FROM 
+         Tags t
+     INNER JOIN 
+         Posts pt ON pt.Tags LIKE '%' || t.TagName || '%'
+     WHERE 
+         pt.Id = bp.PostId) AS RelatedTags
+FROM 
+    BestPosts bp
+INNER JOIN 
+    Users u ON bp.OwnerUserId = u.Id
+WHERE 
+    bp.CommentCount > 5
+ORDER BY 
+    bp.UpVotesRank;

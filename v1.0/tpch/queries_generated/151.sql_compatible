@@ -1,0 +1,52 @@
+
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        AVG(s.s_acctbal) AS avg_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        ss.s_suppkey,
+        ss.s_name,
+        ss.total_cost,
+        ss.avg_acctbal,
+        n.n_name,
+        ROW_NUMBER() OVER (ORDER BY ss.total_cost DESC) AS supplier_rank
+    FROM 
+        SupplierStats ss
+    JOIN 
+        nation n ON ss.s_nationkey = n.n_nationkey
+    WHERE 
+        ss.rn = 1
+)
+SELECT 
+    c.c_name,
+    COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_sales,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    ts.n_name AS supplier_nation
+FROM 
+    customer c
+LEFT JOIN 
+    orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN 
+    lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    TopSuppliers ts ON l.l_suppkey = ts.s_suppkey
+WHERE 
+    o.o_orderdate >= DATE '1997-01-01' 
+    AND (c.c_acctbal IS NULL OR c.c_acctbal > 1000)
+GROUP BY 
+    c.c_name, ts.n_name
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) IS NOT NULL
+ORDER BY 
+    total_sales DESC, c.c_name;

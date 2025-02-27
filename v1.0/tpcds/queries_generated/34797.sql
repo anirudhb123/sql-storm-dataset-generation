@@ -1,0 +1,58 @@
+
+WITH RECURSIVE customer_sales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+    
+    UNION ALL
+
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_sales + ws.ws_ext_sales_price
+    FROM 
+        customer_sales cs
+    JOIN 
+        web_sales ws ON cs.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        ws.ws_net_paid > 0
+)
+SELECT 
+    c.c_customer_sk,
+    COALESCE(c_demographics.cd_marital_status, 'Unknown') AS marital_status,
+    COALESCE(c_demographics.cd_gender, 'Unknown') AS gender,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_ext_sales_price) AS total_spent,
+    RANK() OVER (ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+FROM 
+    customer c
+LEFT JOIN 
+    customer_demographics c_demographics ON c.c_current_cdemo_sk = c_demographics.cd_demo_sk
+LEFT JOIN 
+    web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+GROUP BY 
+    c.c_customer_sk, c_demographics.cd_marital_status, c_demographics.cd_gender
+HAVING 
+    total_spent > (SELECT AVG(total_sales) FROM customer_sales)
+ORDER BY 
+    total_spent DESC
+LIMIT 100;
+
+SELECT 
+    'Total Unique Customers: ' AS metric,
+    COUNT(DISTINCT c.c_customer_sk) 
+FROM 
+    customer c 
+WHERE 
+    c.c_current_hdemo_sk IS NOT NULL
+UNION ALL 
+SELECT 
+    'Total Unique Items Sold: ' AS metric,
+    COUNT(DISTINCT ws.ws_item_sk)
+FROM 
+    web_sales ws;

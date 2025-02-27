@@ -1,0 +1,30 @@
+WITH SupplierInfo AS (
+    SELECT s.s_name, s.s_nationkey, s.s_acctbal, n.n_name AS nation_name
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+), CustomerInfo AS (
+    SELECT c.c_name, c.c_nationkey, c.c_acctbal, n.n_name AS nation_name
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+), OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus, SUM(l.l_quantity) AS total_quantity
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus
+), JoinedData AS (
+    SELECT si.s_name AS supplier_name, ci.c_name AS customer_name, od.o_orderkey, od.o_totalprice, od.o_orderdate, od.o_orderstatus, od.total_quantity
+    FROM SupplierInfo si
+    CROSS JOIN CustomerInfo ci
+    JOIN OrderDetails od ON 1=1  
+)
+SELECT 
+    supplier_name,
+    customer_name,
+    COUNT(DISTINCT o_orderkey) AS order_count,
+    AVG(o_totalprice) AS avg_order_price,
+    SUM(total_quantity) AS total_quantity_ordered,
+    MAX(o_orderdate) AS latest_order_date
+FROM JoinedData
+GROUP BY supplier_name, customer_name
+HAVING AVG(o_totalprice) > 1000
+ORDER BY total_quantity_ordered DESC, supplier_name, customer_name;

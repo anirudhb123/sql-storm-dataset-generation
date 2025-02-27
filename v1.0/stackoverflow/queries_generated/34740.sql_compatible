@@ -1,0 +1,99 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.PostTypeId,
+        a.ParentId,
+        Level + 1
+    FROM 
+        Posts a
+    INNER JOIN RecursivePostHierarchy q ON a.ParentId = q.PostId
+    WHERE 
+        a.PostTypeId = 2 
+),
+BadgedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    HAVING 
+        COUNT(b.Id) > 0
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+FinalPostStats AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Level,
+        ps.UpVotes,
+        ps.DownVotes,
+        ps.CommentCount,
+        bu.DisplayName,
+        bu.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY r.PostId ORDER BY r.Level) AS RowNum
+    FROM 
+        RecursivePostHierarchy r
+    LEFT JOIN 
+        PostStats ps ON r.PostId = ps.PostId
+    LEFT JOIN 
+        Users u ON r.PostId = u.Id 
+    LEFT JOIN
+        BadgedUsers bu ON u.Id = bu.UserId
+)
+
+SELECT 
+    fps.PostId,
+    fps.Title,
+    fps.Level,
+    fps.UpVotes,
+    fps.DownVotes,
+    fps.CommentCount,
+    fps.DisplayName AS BadgeOwner,
+    fps.Reputation AS OwnerReputation,
+    CASE 
+        WHEN fps.Reputation > 1000 THEN 'Experienced'
+        WHEN fps.Reputation IS NULL THEN 'Unknown Reputation'
+        ELSE 'Novice' 
+    END AS UserLevel
+FROM 
+    FinalPostStats fps
+WHERE 
+    fps.RowNum = 1 
+ORDER BY 
+    fps.UpVotes DESC, fps.CommentCount DESC
+FETCH FIRST 10 ROWS ONLY;

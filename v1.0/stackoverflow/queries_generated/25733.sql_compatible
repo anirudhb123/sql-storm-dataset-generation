@@ -1,0 +1,82 @@
+
+WITH UserAggregates AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        COUNT(P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(COALESCE(V.BountyAmount, 0)) AS TotalBounty 
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+RecentPostHistory AS (
+    SELECT 
+        PH.UserId,
+        PH.PostId, 
+        PH.CreationDate,
+        PH.Comment, 
+        P.Title,
+        PH.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS rn
+    FROM 
+        PostHistory PH 
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11, 12) 
+),
+UserWithRecentActivity AS (
+    SELECT 
+        UA.UserId, 
+        UA.DisplayName,
+        UA.Reputation,
+        UA.TotalPosts,
+        UA.TotalComments,
+        UA.QuestionsCount,
+        UA.AnswersCount,
+        UA.TotalBounty,
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate AS RecentActivityDate,
+        RP.Comment,
+        RP.PostHistoryTypeId 
+    FROM 
+        UserAggregates UA
+    LEFT JOIN 
+        RecentPostHistory RP ON UA.UserId = RP.UserId
+    WHERE 
+        RP.rn = 1 
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.TotalPosts,
+    U.TotalComments,
+    U.QuestionsCount,
+    U.AnswersCount,
+    U.TotalBounty,
+    COALESCE(RP.Title, 'No recent activity') AS RecentPostTitle,
+    COALESCE(RP.RecentActivityDate, 'N/A') AS RecentActivityDate,
+    CASE 
+        WHEN RP.PostHistoryTypeId = 10 THEN 'Closed'
+        WHEN RP.PostHistoryTypeId = 11 THEN 'Reopened'
+        WHEN RP.PostHistoryTypeId = 12 THEN 'Deleted'
+        ELSE 'No Recent Activity'
+    END AS RecentActivityType
+FROM 
+    UserWithRecentActivity U
+ORDER BY 
+    U.Reputation DESC, 
+    U.TotalPosts DESC;

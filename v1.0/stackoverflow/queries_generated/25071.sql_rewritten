@@ -1,0 +1,63 @@
+WITH UserPostStats AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.DisplayName, 
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount, 
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.Score > 0 THEN 1 ELSE 0 END) AS PositiveScoreCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopTags AS (
+    SELECT 
+        T.TagName, 
+        COUNT(P.Id) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = P.Tags::int
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+),
+PostHistories AS (
+    SELECT 
+        PH.PostId, 
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(PH.Id) AS EditCount
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        PH.PostId
+)
+
+SELECT 
+    UPS.UserId,
+    UPS.DisplayName,
+    UPS.PostCount,
+    UPS.QuestionCount,
+    UPS.AnswerCount,
+    UPS.PositiveScoreCount,
+    T.TagName,
+    PH.LastEditDate,
+    PH.EditCount
+FROM 
+    UserPostStats UPS
+CROSS JOIN 
+    TopTags T
+JOIN 
+    PostHistories PH ON PH.PostId = UPS.PostCount
+WHERE 
+    UPS.PostCount > 0
+ORDER BY 
+    UPS.PositiveScoreCount DESC, 
+    T.PostCount DESC;

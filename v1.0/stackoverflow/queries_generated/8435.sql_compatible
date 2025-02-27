@@ -1,0 +1,28 @@
+
+WITH RankedPosts AS (
+    SELECT p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, 
+           ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank
+    FROM Posts p
+    WHERE p.PostTypeId = 1 AND p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+ActiveUsers AS (
+    SELECT u.Id, u.DisplayName, u.Reputation, u.Views, 
+           COUNT(b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.LastAccessDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 month'
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.Views
+),
+TopUsers AS (
+    SELECT au.Id, au.DisplayName, au.Reputation, au.Views, 
+           RANK() OVER (ORDER BY au.Reputation DESC) AS ReputationRank
+    FROM ActiveUsers au
+    WHERE au.Reputation > 1000
+)
+SELECT ru.Id AS UserId, ru.DisplayName, rp.Title, rp.Score, rp.ViewCount, 
+       tu.ReputationRank, tu.Reputation, tu.Views, tu.BadgeCount
+FROM RankedPosts rp
+JOIN Users ru ON rp.OwnerUserId = ru.Id
+JOIN TopUsers tu ON ru.Id = tu.Id
+WHERE rp.UserRank <= 3
+ORDER BY tu.ReputationRank, rp.Score DESC, rp.ViewCount DESC;

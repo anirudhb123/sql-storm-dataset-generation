@@ -1,0 +1,74 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        COALESCE(aka.name, 'Unknown') AS director_name,
+        GREATEST(mt.production_year, 2023) - mt.production_year AS age,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id AND cn.country_code IS NOT NULL
+    LEFT JOIN 
+        aka_name aka ON mc.movie_id = aka.movie_id AND aka.id IN (
+            SELECT 
+                id 
+            FROM 
+                cast_info ci 
+            WHERE 
+                ci.movie_id = mt.id 
+                AND ci.person_role_id = (SELECT id FROM role_type WHERE role = 'Director')
+        )
+    WHERE 
+        mt.production_year >= 2000  
+
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        bt.title,
+        bt.production_year,
+        COALESCE(aka2.name, 'Unknown') AS director_name,
+        GREATEST(bt.production_year, 2023) - bt.production_year AS age,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        title bt ON ml.linked_movie_id = bt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    LEFT JOIN 
+        movie_companies mc2 ON bt.id = mc2.movie_id
+    LEFT JOIN 
+        company_name cn2 ON mc2.company_id = cn2.id AND cn2.country_code IS NOT NULL
+    LEFT JOIN 
+        aka_name aka2 ON mc2.movie_id = aka2.movie_id AND aka2.id IN (
+            SELECT 
+                id 
+            FROM 
+                cast_info ci 
+            WHERE 
+                ci.movie_id = bt.id 
+                AND ci.person_role_id = (SELECT id FROM role_type WHERE role = 'Director')
+        )
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.director_name,
+    mh.age,
+    COUNT(*) OVER (PARTITION BY mh.director_name) AS number_of_movies,
+    AVG(mh.age) OVER (PARTITION BY mh.director_name) AS avg_movie_age
+FROM 
+    movie_hierarchy mh
+WHERE 
+    mh.director_name IS NOT NULL
+ORDER BY 
+    mh.director_name, 
+    mh.production_year DESC
+LIMIT 100;

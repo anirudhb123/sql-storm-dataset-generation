@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate ASC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(p.ViewCount) AS AvgViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id
+),
+TopTaggedPosts AS (
+    SELECT 
+        t.TagName,
+        p.Id AS PostId,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id IN (SELECT CAST(UNNEST(string_to_array(p.Tags, '><')) AS INTEGER))
+    GROUP BY 
+        t.TagName, p.Id
+),
+CombinedResults AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.ViewCount,
+        r.CreationDate,
+        u.UserId,
+        u.QuestionCount,
+        u.AnswerCount,
+        u.AvgViewCount,
+        u.CommentCount,
+        tt.TagName,
+        tt.TagCount
+    FROM 
+        RankedPosts r
+    JOIN 
+        UserPostStats u ON r.PostId = u.UserId
+    LEFT JOIN 
+        TopTaggedPosts tt ON r.PostId = tt.PostId
+)
+SELECT 
+    cr.PostId,
+    cr.Title,
+    cr.ViewCount,
+    cr.CreationDate,
+    COALESCE(cr.TagName, 'No Tags') AS TagName,
+    COALESCE(cr.TagCount, 0) AS TagCount,
+    cr.QuestionCount,
+    cr.AnswerCount,
+    cr.AvgViewCount,
+    cr.CommentCount
+FROM 
+    CombinedResults cr
+WHERE 
+    cr.PostRank = 1 
+ORDER BY 
+    cr.ViewCount DESC, cr.CreationDate DESC
+LIMIT 100;

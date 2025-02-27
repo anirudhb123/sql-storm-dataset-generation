@@ -1,0 +1,67 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(tp.TagName) AS UsageCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 5
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) 
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.PostCount,
+    ups.QuestionCount,
+    ups.AnswerCount,
+    ups.TotalViews,
+    ups.AverageScore,
+    ups.LastPostDate,
+    pt.EditCount,
+    pt.LastEditDate,
+    STRING_AGG(pt.TagName, ', ') AS PopularTags
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    PostHistoryStats pt ON ups.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = pt.PostId)
+LEFT JOIN 
+    PopularTags t ON TRUE
+GROUP BY 
+    ups.UserId, ups.DisplayName, pt.EditCount, pt.LastEditDate
+HAVING 
+    ups.PostCount > 0
+ORDER BY 
+    ups.TotalViews DESC, ups.AverageScore DESC;

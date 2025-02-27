@@ -1,0 +1,53 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersCount,
+        SUM(CASE WHEN p.PostTypeId IN (3, 4, 5) THEN 1 ELSE 0 END) AS WikiPostsCount,
+        AVG(p.Score) AS AvgScore,
+        AVG(p.ViewCount) AS AvgViewCount,
+        MAX(p.CreationDate) AS LastPostDate
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    ups.UserId,
+    ups.DisplayName,
+    ups.TotalPosts,
+    ups.QuestionsCount,
+    ups.AnswersCount,
+    ups.WikiPostsCount,
+    ups.AvgScore,
+    ups.AvgViewCount,
+    ups.LastPostDate,
+    pvs.TotalVotes,
+    pvs.UpVotes,
+    pvs.DownVotes
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    PostVoteStats pvs ON ups.UserId IN (SELECT OwnerUserId FROM Posts)
+WHERE 
+    ups.TotalPosts > 0
+ORDER BY 
+    ups.TotalPosts DESC, ups.UserId;

@@ -1,0 +1,62 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(a.Id) AS AnswerCount,
+        COALESCE(MAX(v.CreationDate), p.CreationDate) AS LastActivity,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY COALESCE(MAX(v.CreationDate), p.CreationDate) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id
+    LEFT JOIN 
+        PostLinks pl ON pl.PostId = p.Id
+    LEFT JOIN 
+        Tags t ON pl.RelatedPostId = t.ExcerptPostId
+    LEFT JOIN 
+        Votes v ON v.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName, p.Title, p.Body, p.CreationDate
+),
+TopPosts AS (
+    SELECT 
+        PostId, Title, Body, CreationDate, Author, Tags, AnswerCount, LastActivity
+    FROM 
+        RankedPosts
+    WHERE 
+        Rank <= 5
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.Body,
+    tp.CreationDate,
+    tp.Author,
+    tp.Tags,
+    tp.AnswerCount,
+    tp.LastActivity,
+    ph.Comment AS EditComment,
+    pht.Name AS PostHistoryType
+FROM 
+    TopPosts tp
+LEFT JOIN 
+    PostHistory ph ON tp.PostId = ph.PostId
+LEFT JOIN 
+    PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+WHERE 
+    ph.CreationDate = (
+        SELECT MAX(CreationDate)
+        FROM PostHistory 
+        WHERE PostId = tp.PostId
+    )
+ORDER BY 
+    tp.CreationDate DESC;

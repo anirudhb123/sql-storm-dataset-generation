@@ -1,0 +1,75 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        U.DisplayName AS Author,
+        P.Score,
+        P.ViewCount,
+        RANK() OVER (ORDER BY P.Score DESC, P.CreationDate DESC) AS PostRank,
+        P.Tags
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1 AND 
+        P.Score > 0 AND 
+        P.CreationDate >= DATE '2024-10-01' - INTERVAL '1 year'
+),
+ActiveUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON V.PostId = P.Id
+    WHERE 
+        U.LastAccessDate >= DATE '2024-10-01' - INTERVAL '1 month'
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(PT.PostId) AS PostCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts PT ON PT.Tags LIKE '%' || T.TagName || '%'
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    RP.PostId,
+    RP.Title,
+    RP.CreationDate,
+    RP.Author,
+    RP.Score,
+    RP.ViewCount,
+    AU.DisplayName AS ActiveUser,
+    AU.PostCount AS UserPostCount,
+    AU.UpVotes AS UserUpVotes,
+    AU.DownVotes AS UserDownVotes,
+    TT.TagName AS TopTag,
+    TT.PostCount AS TopTagPostCount
+FROM 
+    RankedPosts RP
+JOIN 
+    ActiveUsers AU ON RP.Author = AU.DisplayName
+JOIN 
+    TopTags TT ON RP.Tags LIKE '%' || TT.TagName || '%'
+WHERE 
+    RP.PostRank <= 10
+ORDER BY 
+    RP.Score DESC, RP.CreationDate DESC, AU.PostCount DESC;

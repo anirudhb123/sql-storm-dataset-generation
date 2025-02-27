@@ -1,0 +1,93 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        SUM(COALESCE(V.VoteCount, 0)) AS TotalVotes,
+        MIN(U.CreationDate) AS AccountAge,
+        MAX(U.LastAccessDate) AS LastActive
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(*) AS VoteCount 
+        FROM 
+            Votes 
+        GROUP BY 
+            PostId
+    ) V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+ActivityRanked AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        CommentCount,
+        TotalVotes,
+        AccountAge,
+        LastActive,
+        ROW_NUMBER() OVER (PARTITION BY Reputation < 100 ORDER BY PostCount DESC, CommentCount DESC) AS Rank
+    FROM 
+        UserActivity
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS UsageCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, '><')::int[])
+    WHERE 
+        P.CreationDate > cast('2024-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        T.TagName
+    HAVING 
+        COUNT(DISTINCT P.Id) > 10
+),
+UserTags AS (
+    SELECT 
+        UA.UserId,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        ActivityRanked UA
+    JOIN 
+        Posts P ON UA.UserId = P.OwnerUserId
+    JOIN 
+        Tags T ON T.Id = ANY(string_to_array(P.Tags, '><')::int[])
+    GROUP BY 
+        UA.UserId
+    HAVING 
+        COUNT(DISTINCT T.TagName) > 3
+)
+SELECT 
+    AR.DisplayName,
+    AR.Reputation,
+    AR.PostCount,
+    AR.CommentCount,
+    PT.TagName,
+    COALESCE(UT.Tags, '{}') AS UserTags,
+    CASE 
+        WHEN AR.Rank IS NULL THEN 'Newbie'
+        ELSE 'Expert'
+    END AS UserCategory
+FROM 
+    ActivityRanked AR
+LEFT JOIN 
+    PopularTags PT ON AR.PostCount > (SELECT AVG(PostCount) FROM ActivityRanked)
+LEFT JOIN 
+    UserTags UT ON AR.UserId = UT.UserId
+WHERE 
+    AR.Reputation IS NOT NULL
+ORDER BY 
+    AR.PostCount DESC, AR.Reputation DESC;

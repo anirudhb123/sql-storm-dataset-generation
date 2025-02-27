@@ -1,0 +1,74 @@
+WITH TagStats AS (
+    SELECT 
+        LOWER(TRIM(SUBSTRING(Tags, 2, LENGTH(Tags) - 2))) AS Tag,
+        COUNT(*) AS PostCount,
+        SUM(ViewCount) AS TotalViews,
+        AVG(Score) AS AverageScore,
+        COUNT(DISTINCT OwnerUserId) AS UniqueUsers
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  -- Only questions
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag, 
+        PostCount,
+        TotalViews,
+        AverageScore,
+        UniqueUsers,
+        RANK() OVER (ORDER BY TotalViews DESC) AS ViewRank,
+        RANK() OVER (ORDER BY AverageScore DESC) AS ScoreRank
+    FROM 
+        TagStats
+),
+UserEngagement AS (
+    SELECT 
+        U.DisplayName,
+        U.Reputation,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS QuestionsAsked,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS AnswersGiven,
+        SUM(COALESCE(C.CommentCount, 0)) AS TotalComments,
+        SUM(V.VoteTypeId = 2) AS UpVotesReceived,
+        SUM(V.VoteTypeId = 3) AS DownVotesReceived
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        U.Id
+),
+EngagementRanked AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY QuestionsAsked DESC, AnswersGiven DESC, TotalComments DESC) AS EngagementRank
+    FROM 
+        UserEngagement
+)
+SELECT 
+    TT.Tag,
+    TT.PostCount,
+    TT.TotalViews,
+    TT.AverageScore,
+    TT.UniqueUsers,
+    ER.DisplayName AS TopEngagedUser,
+    ER.Reputation,
+    ER.QuestionsAsked,
+    ER.AnswersGiven,
+    ER.TotalComments,
+    ER.UpVotesReceived,
+    ER.DownVotesReceived
+FROM 
+    TopTags TT
+JOIN 
+    EngagementRanked ER ON ER.EngagementRank = 1
+WHERE 
+    TT.ViewRank <= 10  -- Top 10 tags by views
+ORDER BY 
+    TT.TotalViews DESC;

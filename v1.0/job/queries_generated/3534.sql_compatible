@@ -1,0 +1,50 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+ActorMovies AS (
+    SELECT 
+        a.name AS actor_name,
+        a.id AS actor_id,
+        ti.title,
+        ti.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY ti.production_year DESC) AS actor_rank
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    JOIN aka_title ti ON ci.movie_id = ti.movie_id
+),
+CompanyMovies AS (
+    SELECT 
+        cn.name AS company_name,
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM movie_companies mc
+    JOIN company_name cn ON mc.company_id = cn.id
+    GROUP BY cn.name, mc.movie_id
+),
+FilteredActors AS (
+    SELECT 
+        am.actor_name,
+        COUNT(DISTINCT am.title) AS movie_count
+    FROM ActorMovies am
+    WHERE am.actor_rank <= 3
+    GROUP BY am.actor_name
+)
+SELECT 
+    fa.actor_name,
+    fa.movie_count,
+    ct.kind AS company_type,
+    cm.total_companies
+FROM FilteredActors fa
+LEFT JOIN CompanyMovies cm ON fa.movie_count > 1
+JOIN kind_type ct ON ct.id = (SELECT km.k_id FROM movie_info km WHERE km.movie_id = cm.movie_id LIMIT 1)
+WHERE fa.movie_count > (
+    SELECT AVG(movie_count) FROM FilteredActors
+) OR cm.total_companies IS NULL
+ORDER BY fa.movie_count DESC, cm.total_companies ASC;

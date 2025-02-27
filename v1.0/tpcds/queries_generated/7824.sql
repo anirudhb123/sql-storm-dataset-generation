@@ -1,0 +1,54 @@
+
+WITH CustomerSales AS (
+    SELECT
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2023 AND d.d_month_seq IN (1, 2, 3) -- Sales for the first quarter of 2023
+    GROUP BY
+        c.c_customer_id
+), SalesByIncome AS (
+    SELECT
+        hd.hd_income_band_sk,
+        SUM(cs.total_sales) AS total_income_sales,
+        COUNT(cs.c_customer_id) AS customer_count
+    FROM
+        household_demographics hd
+    JOIN
+        CustomerSales cs ON hd.hd_demo_sk = cs.c_customer_id
+    GROUP BY
+        hd.hd_income_band_sk
+), ShippingCostDetails AS (
+    SELECT
+        SM.sm_ship_mode_id,
+        AVG(ws.ws_ext_ship_cost) AS avg_shipping_cost,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM
+        web_sales ws
+    JOIN
+        ship_mode SM ON ws.ws_ship_mode_sk = SM.sm_ship_mode_sk
+    WHERE
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY
+        SM.sm_ship_mode_id
+)
+SELECT
+    si.hd_income_band_sk,
+    si.total_income_sales,
+    si.customer_count,
+    ss.sm_ship_mode_id,
+    ss.avg_shipping_cost,
+    ss.total_sales
+FROM
+    SalesByIncome si
+JOIN
+    ShippingCostDetails ss ON si.total_income_sales > 0 -- Join on income sales
+ORDER BY
+    si.hd_income_band_sk, ss.avg_shipping_cost DESC;

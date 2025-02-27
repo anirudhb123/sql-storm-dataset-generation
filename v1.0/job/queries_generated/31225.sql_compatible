@@ -1,0 +1,66 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        CASE 
+            WHEN m.season_nr IS NOT NULL THEN 'Episode'
+            ELSE 'Movie'
+        END AS type,
+        COALESCE(ep.season_nr, 0) AS season_nr,
+        ep.episode_nr AS episode_nr
+    FROM
+        aka_title m
+    LEFT JOIN aka_title ep ON m.id = ep.episode_of_id
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        'Movie' AS type,
+        COALESCE(ep.season_nr, 0) AS season_nr,
+        ep.episode_nr AS episode_nr
+    FROM
+        movie_hierarchy mh
+    JOIN aka_title m ON mh.movie_id = m.episode_of_id
+    LEFT JOIN aka_title ep ON m.id = ep.episode_of_id
+),
+cast_info_summary AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors
+    FROM
+        cast_info c
+    JOIN aka_name a ON c.person_id = a.person_id
+    GROUP BY c.movie_id
+),
+keyword_usage AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT
+    m.title,
+    m.type,
+    m.season_nr,
+    m.episode_nr,
+    COALESCE(cast.total_cast, 0) AS total_cast,
+    COALESCE(cast.actors, 'No actors listed') AS actors,
+    COALESCE(keyword.keywords, 'No keywords') AS keywords
+FROM
+    movie_hierarchy m
+LEFT JOIN cast_info_summary cast ON m.movie_id = cast.movie_id
+LEFT JOIN keyword_usage keyword ON m.movie_id = keyword.movie_id
+WHERE
+    m.type = 'Movie'
+    AND m.production_year >= 2000
+    AND (m.title LIKE '%adventure%' OR m.title LIKE '%comedy%')
+ORDER BY
+    m.production_year DESC,
+    total_cast DESC;

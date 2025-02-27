@@ -1,0 +1,66 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(c.id) AS cast_count,
+        STRING_AGG(DISTINCT p.name, ', ') AS cast_names
+    FROM 
+        aka_title m
+    JOIN 
+        cast_info c ON m.id = c.movie_id
+    JOIN 
+        aka_name p ON c.person_id = p.person_id
+    WHERE 
+        m.production_year >= 2000
+        AND m.kind_id = (
+            SELECT id FROM kind_type WHERE kind = 'movie'
+        )
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+
+info_summary AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT it.info, '; ') AS info_types
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+),
+
+keyword_summary AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    rm.cast_names,
+    is.info_types,
+    ks.keywords
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    info_summary is ON rm.movie_id = is.movie_id
+LEFT JOIN 
+    keyword_summary ks ON rm.movie_id = ks.movie_id
+ORDER BY 
+    rm.production_year DESC, 
+    rm.cast_count DESC
+LIMIT 50;
+
+This SQL query benchmarks string processing across multiple tables in the Join Order Benchmark schema. It retrieves detailed information about movies, such as the movie ID, title, production year, number of cast members, names of cast members, associated information types, and keywords linked to the movie. The query incorporates Common Table Expressions (CTEs) to organize and summarize data efficiently.

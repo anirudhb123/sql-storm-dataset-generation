@@ -1,0 +1,39 @@
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o.o_orderstatus = 'F'
+    UNION ALL
+    SELECT oh.o_orderkey, oh.o_orderdate, oh.o_totalprice, c.c_name, oh.order_rank
+    FROM orders_history oh
+    JOIN customer c ON oh.o_custkey = c.c_custkey
+    WHERE oh.o_orderstatus = 'F'
+      AND oh.o_orderdate > (SELECT MAX(o_orderdate) FROM orders o WHERE o.o_custkey = c.c_custkey)
+),
+part_supplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY ps.ps_partkey
+),
+top_parts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, COALESCE(ps.total_supply_cost, 0) AS total_supply_cost
+    FROM part p
+    LEFT JOIN part_supplier ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size > 10 AND p.p_retailprice < (SELECT AVG(p1.p_retailprice) FROM part p1)
+)
+SELECT t1.p_partkey, t1.p_name, t1.total_supply_cost, t2.o_orderkey, t2.o_orderdate, 
+       NTILE(5) OVER (ORDER BY t1.total_supply_cost DESC) AS cost_rank,
+       CASE 
+           WHEN t1.total_supply_cost IS NULL THEN 'Not Available'
+           ELSE 'Available'
+       END AS availability
+FROM top_parts t1
+LEFT JOIN orders o ON o.o_orderkey IN (
+    SELECT l.l_orderkey
+    FROM lineitem l
+    WHERE l.l_partkey = t1.p_partkey AND l.l_quantity > 100
+)
+LEFT JOIN order_hierarchy t2 ON t2.o_orderkey = o.o_orderkey
+WHERE t1.total_supply_cost > 1000 OR (t1.total_supply_cost IS NULL AND t1.p_name LIKE '%Generic%')
+ORDER BY t1.total_supply_cost DESC, t1.p_name;

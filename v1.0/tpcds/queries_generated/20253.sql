@@ -1,0 +1,42 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_sold_date_sk DESC, ws_net_profit DESC) AS rn,
+        SUM(ws_ext_sales_price) OVER (PARTITION BY ws.web_site_sk) AS total_sales,
+        COUNT(ws_order_number) OVER (PARTITION BY ws.web_site_sk) AS order_count
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year IS NOT NULL
+    AND c.c_current_hdemo_sk IS NOT DISTINCT FROM (
+        SELECT MIN(cd_demo_sk)
+        FROM customer_demographics
+        WHERE cd_marital_status = 'M'
+        AND cd_gender = 'F'
+    )
+),
+BestSales AS (
+    SELECT
+        rs.web_site_sk,
+        rs.ws_order_number,
+        rs.total_sales,
+        rs.order_count
+    FROM RankedSales rs
+    WHERE rs.rn = 1
+)
+SELECT
+    ws.web_site_id,
+    COALESCE(bs.total_sales, 0) AS total_sales,
+    COALESCE(bs.order_count, 0) AS order_count,
+    CASE 
+        WHEN bs.total_sales > 100000 THEN 'High Performer'
+        WHEN bs.total_sales BETWEEN 50000 AND 100000 THEN 'Mid Performer'
+        ELSE 'Low Performer'
+    END AS performance_category
+FROM web_site ws
+LEFT JOIN BestSales bs ON ws.web_site_sk = bs.web_site_sk
+WHERE (ws.web_open_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2020))
+OR (bs.total_sales IS NOT NULL AND bs.order_count > (SELECT COALESCE(AVG(cs_quantity), 0) FROM catalog_sales cs))
+ORDER BY total_sales DESC, ws.web_site_id
+LIMIT 10;

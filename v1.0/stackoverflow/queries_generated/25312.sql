@@ -1,0 +1,61 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.ViewCount DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Focusing on Questions only
+        AND p.CreationDate > NOW() - INTERVAL '1 year' -- From the last year
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerDisplayName,
+        rp.CreationDate
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 5 -- Limit to Top 5 Posts per User
+),
+PopularTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(t.Id) AS TagUsage
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.CreationDate > NOW() - INTERVAL '1 year'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        TagUsage DESC
+    LIMIT 10
+)
+
+SELECT 
+    tp.Title AS "Top Post Title",
+    tp.ViewCount AS "View Count",
+    tp.Score AS "Post Score",
+    tp.OwnerDisplayName AS "Author",
+    TO_CHAR(tp.CreationDate, 'YYYY-MM-DD HH24:MI:SS') AS "Creation Date",
+    pt.TagName AS "Popular Tag",
+    pt.TagUsage AS "Usage Count"
+FROM 
+    TopPosts tp
+CROSS JOIN 
+    PopularTags pt
+ORDER BY 
+    tp.Score DESC, pt.TagUsage DESC;

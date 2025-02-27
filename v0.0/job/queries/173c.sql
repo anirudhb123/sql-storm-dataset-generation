@@ -1,0 +1,4 @@
+SELECT min(a1.name) AS writer_pseudo_name, min(t.title) AS movie_title
+FROM aka_name AS a1, cast_info AS ci, company_name AS cn, movie_companies AS mc, name AS n1, role_type AS rt, title AS t
+WHERE a1.person_id = n1.id AND n1.id = ci.person_id AND ci.movie_id = t.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.role_id = rt.id AND a1.person_id = ci.person_id AND ci.movie_id = mc.movie_id
+AND t.title < 'Chiisana keikaku' AND cn.md5sum IN ('3a24451959fa2201f85cdc03ebddf2c3', '3d43b94646df7d35696e8f5a037e5411', '6acd94bb0af2c1101fd68b9959d2cd5f', '8a8144f7ed254718b8e892ed7d1e438d', 'bc1aeb3e8db05d61e73929bdf1eb2930', 'bda6b7d5d80b89258b2e54a7de88449e', 'c7fd99bd996b8cd2fb59f7c2f6b76ce8', 'e2ea0d04a3b6199d8f3c6f98f8ed1468', 'f5dcf94a515c615f0595dbb8cd1a8ece');

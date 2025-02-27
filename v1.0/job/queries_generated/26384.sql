@@ -1,0 +1,53 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        rank() OVER (PARTITION BY t.production_year ORDER BY LENGTH(t.title) DESC) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopTitles AS (
+    SELECT 
+        movie_title,
+        production_year
+    FROM 
+        RankedTitles
+    WHERE 
+        title_rank <= 5
+),
+TopActors AS (
+    SELECT 
+        a.name AS actor_name,
+        COUNT(ci.movie_id) AS total_movies
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        TopTitles tt ON ci.movie_id = tt.movie_id
+    GROUP BY 
+        a.name
+    ORDER BY 
+        total_movies DESC
+    LIMIT 10
+)
+SELECT 
+    tt.movie_title,
+    tt.production_year,
+    ta.actor_name,
+    ta.total_movies
+FROM 
+    TopTitles tt
+JOIN 
+    cast_info ci ON tt.movie_id = ci.movie_id
+JOIN 
+    aka_name an ON ci.person_id = an.person_id
+JOIN 
+    TopActors ta ON an.name = ta.actor_name
+ORDER BY 
+    tt.production_year DESC, 
+    total_movies DESC;
+
+This elaborate SQL query benchmarks string processing by first identifying the top 5 longest movie titles per production year. It ranks those titles, then finds the top 10 actors who appeared in the most movies from that selection. Finally, it retrieves the movie titles alongside their production years and the corresponding actors' names and the count of movies they appeared in, ordered by production year and the number of movies in descending order.

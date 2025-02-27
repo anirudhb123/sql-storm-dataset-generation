@@ -1,0 +1,37 @@
+
+WITH RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_type, 
+           SUM(ps.ps_availqty) AS total_available, 
+           SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_brand, p.p_type
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, 
+           COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+)
+
+SELECT r.r_name, ts.s_suppkey, p.p_brand, SUM(c.total_spent) AS total_revenue,
+       COUNT(DISTINCT c.c_custkey) AS unique_customers,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       p.total_available, p.total_cost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN TopSuppliers ts ON n.n_nationkey = ts.s_nationkey
+JOIN RankedParts p ON p.p_brand = ts.s_suppkey
+JOIN CustomerOrders c ON n.n_nationkey = c.c_nationkey
+JOIN orders o ON c.c_custkey = o.o_custkey
+WHERE ts.rn <= 3
+GROUP BY r.r_name, ts.s_suppkey, p.p_brand, p.total_available, p.total_cost
+HAVING SUM(c.total_spent) > 100000
+ORDER BY total_revenue DESC;

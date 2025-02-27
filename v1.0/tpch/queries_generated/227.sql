@@ -1,0 +1,73 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_customerkey,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as order_rank
+    FROM 
+        orders o
+), 
+SupplierStats AS (
+    SELECT 
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS total_parts_supplied,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_name
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal > 2000 -- Filtering customers with account balance > 2000
+    GROUP BY 
+        c.c_name
+), 
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '2023-01-01' AND l.l_shipdate < '2024-01-01'
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+)
+
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT cs.c_name) AS total_customers,
+    SUM(cs.total_spent) AS total_revenue,
+    SUM(ss.total_supply_cost) AS total_supplier_costs,
+    AVG(fo.total_value) AS avg_order_value
+FROM 
+    nation n
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    CustomerOrders cs ON n.n_nationkey = cs.c_nationkey
+LEFT JOIN 
+    SupplierStats ss ON ss.total_parts_supplied > 5
+INNER JOIN 
+    FilteredLineItems fo ON fo.l_orderkey IN (SELECT o.o_orderkey FROM RankedOrders WHERE o.o_orderdate >= '2023-01-01')
+WHERE 
+    r.r_name LIKE '%America%'
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT cs.c_name) > 10
+ORDER BY 
+    total_revenue DESC

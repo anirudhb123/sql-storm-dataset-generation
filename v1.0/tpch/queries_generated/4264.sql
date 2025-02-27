@@ -1,0 +1,42 @@
+WITH OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_suppkey) AS supplier_count,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+TopOrders AS (
+    SELECT 
+        od.o_orderkey,
+        od.o_orderdate,
+        od.total_revenue,
+        od.supplier_count
+    FROM OrderDetails od
+    WHERE od.revenue_rank <= 5
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(s.s_acctbal) AS average_account_balance
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    TO_CHAR(TO_DATE(od.o_orderdate, 'YYYY-MM-DD'), 'Month YYYY') AS order_month,
+    tos.total_revenue,
+    tos.supplier_count,
+    ss.s_name AS supplier_name,
+    ss.total_available_quantity,
+    ss.average_account_balance
+FROM TopOrders tos
+LEFT JOIN SupplierSummary ss ON tos.supplier_count = ss.total_available_quantity
+ORDER BY order_month, tos.total_revenue DESC
+FETCH FIRST 10 ROWS ONLY;

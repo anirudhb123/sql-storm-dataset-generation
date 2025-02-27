@@ -1,0 +1,53 @@
+WITH RankedUsers AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.CreationDate DESC) AS UserRank
+    FROM Users U 
+    WHERE U.Reputation > 1000
+), 
+PostVoteCounts AS (
+    SELECT 
+        P.Id AS PostId, 
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS UpVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS DownVotesCount,
+        COUNT(CASE WHEN V.VoteTypeId IN (6, 10, 11) THEN 1 END) AS CloseVotesCount
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= NOW() - INTERVAL '30 days'
+    GROUP BY P.Id
+),
+RecentPostHistory AS (
+    SELECT 
+        H.PostId,
+        H.UserId,
+        H.CreationDate,
+        H.PostHistoryTypeId,
+        ROW_NUMBER() OVER (PARTITION BY H.PostId ORDER BY H.CreationDate DESC) AS PH_RowNum
+    FROM PostHistory H
+    WHERE H.CreationDate >= NOW() - INTERVAL '60 days'
+)
+SELECT 
+    U.DisplayName AS UserName,
+    U.Reputation,
+    PH.postHistoryTypeId,
+    P.Title,
+    V.UpVotesCount,
+    V.DownVotesCount,
+    COALESCE(T.TagName, 'No Tags') AS TagName,
+    COUNT(CASE WHEN PH.PH_RowNum = 1 AND PH.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+    MAX(PH.CreationDate) FILTER (WHERE PH.UserId IS NOT NULL) AS LastHistoryActionDate
+FROM RankedUsers U
+JOIN Posts P ON P.OwnerUserId = U.Id
+LEFT JOIN PostVoteCounts V ON P.Id = V.PostId
+LEFT JOIN PostLinks PL ON PL.PostId = P.Id
+LEFT JOIN Tags T ON PL.RelatedPostId = T.Id
+LEFT JOIN RecentPostHistory PH ON PH.PostId = P.Id
+WHERE PH.postHistoryTypeId IN (10, 11, 12) 
+GROUP BY U.DisplayName, U.Reputation, PH.PostHistoryTypeId, P.Title, T.TagName
+HAVING AVG(U.Reputation) > 1500 
+ORDER BY U.Reputation DESC, V.UpVotesCount DESC
+LIMIT 20;
+
+This query performs a detailed examination of recent user activity, including their posts and associated votes while providing a comprehensive average reputation filtering. It uses several SQL constructs such as CTEs, conditional aggregation, correlated subqueries, and advanced filtering and ordering logic to present an innovative way to analyze post and user dynamics within the specified schema.

@@ -1,0 +1,86 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        ss.total_cost 
+    FROM 
+        supplier s
+    JOIN 
+        SupplierStats ss ON s.s_suppkey = ss.s_suppkey
+    WHERE 
+        ss.total_cost > (
+            SELECT 
+                AVG(total_cost) 
+            FROM 
+                SupplierStats
+        )
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_order_value,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RankedCustomers AS (
+    SELECT 
+        co.c_custkey, 
+        co.c_name, 
+        co.total_order_value,
+        co.order_count,
+        RANK() OVER (ORDER BY co.total_order_value DESC) AS order_rank
+    FROM 
+        CustomerOrders co 
+    WHERE 
+        co.total_order_value IS NOT NULL
+)
+SELECT 
+    tc.s_suppkey,
+    tc.s_name,
+    c.c_custkey,
+    c.c_name,
+    c.total_order_value,
+    c.order_count,
+    CASE 
+        WHEN c.order_count > 5 THEN 'High Activity'
+        WHEN c.order_count BETWEEN 1 AND 5 THEN 'Moderate Activity'
+        ELSE 'No Activity' 
+    END AS customer_activity,
+    COUNT(DISTINCT l.l_orderkey) AS total_lineitems
+FROM 
+    TopSuppliers tc
+LEFT JOIN 
+    lineitem l ON tc.s_suppkey = l.l_suppkey
+JOIN 
+    RankedCustomers c ON l.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+GROUP BY 
+    tc.s_suppkey, 
+    tc.s_name, 
+    c.c_custkey, 
+    c.c_name, 
+    c.total_order_value, 
+    c.order_count
+HAVING 
+    COUNT(DISTINCT l.l_orderkey) > 0
+ORDER BY 
+    tc.total_cost DESC, 
+    c.total_order_value DESC;

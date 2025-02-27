@@ -1,0 +1,87 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        S.s_suppkey,
+        S.s_name,
+        S.s_nationkey,
+        PS.ps_partkey,
+        PS.ps_supplycost,
+        PS.ps_availqty
+    FROM 
+        supplier S
+    JOIN 
+        partsupp PS ON S.s_suppkey = PS.ps_suppkey
+    WHERE 
+        PS.ps_availqty > 0
+
+    UNION ALL
+
+    SELECT 
+        S.s_suppkey,
+        S.s_name,
+        S.s_nationkey,
+        PS.ps_partkey,
+        PS.ps_supplycost,
+        PS.ps_availqty
+    FROM 
+        SupplyChain SC
+    JOIN 
+        supplier S ON SC.s_nationkey = S.s_nationkey
+    JOIN 
+        partsupp PS ON S.s_suppkey = PS.ps_suppkey
+    WHERE 
+        PS.ps_availqty < SC.ps_availqty
+),
+
+RankedOrders AS (
+    SELECT 
+        O.o_orderkey,
+        O.o_orderstatus,
+        O.o_totalprice,
+        O.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY O.o_orderstatus ORDER BY O.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders O
+    WHERE 
+        O.o_orderdate >= DATE '2023-01-01' AND O.o_orderdate <= DATE '2023-12-31'
+),
+
+SupplierStats AS (
+    SELECT 
+        N.n_name,
+        SUM(S.s_acctbal) AS total_acctbal,
+        COUNT(DISTINCT S.s_suppkey) AS supplier_count,
+        AVG(PS.ps_supplycost) AS avg_supplycost
+    FROM 
+        nation N
+    JOIN 
+        supplier S ON N.n_nationkey = S.s_nationkey
+    LEFT JOIN 
+        partsupp PS ON S.s_suppkey = PS.ps_suppkey
+    GROUP BY 
+        N.n_name
+)
+
+SELECT 
+    SC.s_suppkey,
+    SC.s_name,
+    SC.ps_partkey,
+    SC.ps_supplycost,
+    SC.ps_availqty,
+    RO.o_orderkey,
+    RO.o_orderstatus,
+    RO.o_totalprice,
+    SS.n_name,
+    SS.total_acctbal,
+    SS.supplier_count,
+    SS.avg_supplycost
+FROM 
+    SupplyChain SC
+FULL OUTER JOIN 
+    RankedOrders RO ON SC.ps_partkey = RO.o_orderkey
+LEFT JOIN 
+    SupplierStats SS ON SC.s_nationkey = SS.n_name
+WHERE 
+    (SC.ps_availqty IS NOT NULL OR RO.o_orderstatus IS NULL)
+    AND (SC.ps_supplycost * COALESCE(RO.o_totalprice, 0) > 1000)
+ORDER BY 
+    COALESCE(SS.total_acctbal, 0) DESC, SC.ps_supplycost ASC;

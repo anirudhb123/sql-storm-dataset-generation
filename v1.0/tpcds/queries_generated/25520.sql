@@ -1,0 +1,42 @@
+
+WITH customer_data AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_id ORDER BY c.c_birth_year DESC) AS rnk
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    cd_education_status,
+    ca_city,
+    ca_state,
+    ca_country,
+    CONCAT('Customer ID: ', c_customer_id) AS customer_id_info,
+    CASE 
+        WHEN cd_gender = 'M' THEN 'Male' 
+        WHEN cd_gender = 'F' THEN 'Female' 
+        ELSE 'Other' 
+    END AS gender_description,
+    TRIM(REPLACE(REPLACE(cd_education_status, 'Graduated', 'Grad'), 'Undergraduate', 'Undergrad'), ' ', '')) AS processed_education,
+    COUNT(*) OVER() AS total_customers
+FROM 
+    customer_data 
+WHERE 
+    rnk = 1 
+    AND ca_country = 'USA'
+ORDER BY 
+    full_name ASC;

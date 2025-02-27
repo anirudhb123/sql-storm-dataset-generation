@@ -1,0 +1,45 @@
+WITH RECURSIVE RegionHierarchy AS (
+    SELECT r_regionkey, r_name, 0 AS level
+    FROM region
+    WHERE r_name = 'AFRICA'
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, level + 1
+    FROM nation n
+    JOIN RegionHierarchy rh ON n.n_regionkey = rh.r_regionkey
+),
+CustomerSpend AS (
+    SELECT c.c_custkey, SUM(o.o_totalprice) AS total_spend
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+SupplierCost AS (
+    SELECT ps.ps_suppkey, SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_suppkey
+),
+LineItemAnalysis AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey,
+           AVG(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY l.l_suppkey) AS avg_price
+    FROM lineitem l
+    WHERE l.l_shipdate <= CURRENT_DATE - INTERVAL '30 days'
+),
+NationSpend AS (
+    SELECT n.n_nationkey, SUM(c.total_spend) AS total_spend_by_nation
+    FROM nation n
+    LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+    LEFT JOIN CustomerSpend cs ON c.c_custkey = cs.c_custkey
+    GROUP BY n.n_nationkey
+)
+SELECT rh.r_name, COUNT(DISTINCT n.n_nationkey) AS nation_count, 
+       COALESCE(SUM(ns.total_spend_by_nation), 0) AS total_nation_spend,
+       AVG(sc.total_supply_cost) AS avg_supplier_cost,
+       MAX(l.avg_price) AS max_lineitem_price
+FROM RegionHierarchy rh
+LEFT JOIN nation n ON rh.r_regionkey = n.n_regionkey
+LEFT JOIN NationSpend ns ON n.n_nationkey = ns.n_nationkey
+LEFT JOIN SupplierCost sc ON n.n_nationkey = sc.ps_suppkey  -- assuming ps_suppkey relates to nation keys
+LEFT JOIN LineItemAnalysis l ON n.n_nationkey = l.l_suppkey  -- using suppkey for joining
+GROUP BY rh.r_name
+ORDER BY nation_count DESC, total_nation_spend DESC
+LIMIT 10;

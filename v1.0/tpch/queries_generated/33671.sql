@@ -1,0 +1,62 @@
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+NationStats AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        nation n
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_nationkey, n.n_name
+)
+SELECT 
+    r.r_name AS region_name,
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    AVG(co.total_spent) AS avg_customer_spending,
+    SUM(rs.total_supplycost) AS total_supplier_cost,
+    MAX(rs.rank) AS max_rank
+FROM 
+    region r
+LEFT JOIN 
+    nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = ns.n_nationkey)
+LEFT JOIN 
+    RankedSuppliers rs ON rs.s_nationkey = ns.n_nationkey
+LEFT JOIN 
+    NationStats nstat ON nstat.n_nationkey = ns.n_nationkey
+GROUP BY 
+    r.r_name, ns.n_name
+HAVING 
+    COUNT(DISTINCT c.c_custkey) > 0 AND SUM(rs.total_supplycost) IS NOT NULL
+ORDER BY 
+    region_name, nation_name;

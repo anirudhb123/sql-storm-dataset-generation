@@ -1,0 +1,57 @@
+
+WITH Regional_Summary AS (
+    SELECT n.n_name AS nation_name,
+           r.r_name AS region_name,
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+           SUM(s.s_acctbal) AS total_acctbal,
+           AVG(s.s_acctbal) AS avg_acctbal,
+           MAX(s.s_acctbal) AS max_acctbal,
+           MIN(s.s_acctbal) AS min_acctbal
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_name, r.r_name
+),
+Order_Stats AS (
+    SELECT c.c_custkey, 
+           c.c_name,
+           SUM(o.o_totalprice) AS total_spent,
+           COUNT(o.o_orderkey) AS order_count,
+           MAX(o.o_orderdate) AS last_order_date,
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS customer_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus IN ('O', 'F')
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+Lineitem_Stats AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_price,
+           COUNT(DISTINCT l.l_partkey) AS unique_parts,
+           COUNT(*) FILTER (WHERE l.l_returnflag = 'R') AS returned_items
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+)
+SELECT rs.region_name,
+       rs.nation_name,
+       rs.supplier_count,
+       rs.total_acctbal,
+       os.c_name,
+       os.total_spent,
+       os.order_count,
+       os.last_order_date,
+       ls.total_lineitem_price,
+       ls.unique_parts,
+       ls.returned_items,
+       CASE 
+           WHEN os.total_spent IS NULL THEN 'No Orders'
+           WHEN os.total_spent > 10000 THEN 'High Spending'
+           ELSE 'Low Spending'
+       END AS spending_category,
+       ROW_NUMBER() OVER (PARTITION BY rs.region_name ORDER BY rs.total_acctbal DESC) AS regional_rank
+FROM Regional_Summary rs
+LEFT JOIN Order_Stats os ON rs.nation_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = os.c_nationkey)
+LEFT JOIN Lineitem_Stats ls ON os.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_custkey = ls.l_orderkey)
+WHERE rs.supplier_count > 10
+  AND (rs.total_acctbal IS NOT NULL OR rs.supplier_count = (SELECT AVG(supplier_count) FROM Regional_Summary))
+ORDER BY rs.region_name, spending_category DESC;

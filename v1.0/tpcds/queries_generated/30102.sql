@@ -1,0 +1,57 @@
+
+WITH RECURSIVE sales_trends AS (
+    SELECT d.d_date, SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE d.d_year = 2023
+    GROUP BY d.d_date
+    UNION ALL
+    SELECT d.d_date, SUM(cs.cs_ext_sales_price) AS total_sales
+    FROM date_dim d
+    LEFT JOIN catalog_sales cs ON d.d_date_sk = cs.cs_sold_date_sk
+    WHERE d.d_year = 2023
+    GROUP BY d.d_date
+),
+customer_info AS (
+    SELECT c.c_customer_id, 
+           c.c_first_name, 
+           c.c_last_name, 
+           cd.cd_gender, 
+           cd.cd_marital_status, 
+           cd.cd_purchase_estimate,
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS rank
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+),
+top_customers AS (
+    SELECT customer_id, 
+           c_first_name, 
+           c_last_name, 
+           cd_gender,
+           cd_marital_status,
+           cd_purchase_estimate
+    FROM customer_info
+    WHERE rank <= 10
+),
+sales_metrics AS (
+    SELECT st.d_date,
+           SUM(st.total_sales) AS total_sales,
+           AVG(st.total_sales) OVER () AS avg_sales,
+           MAX(st.total_sales) OVER () AS max_sales
+    FROM sales_trends st
+    GROUP BY st.d_date
+)
+SELECT sm.d_date,
+       sm.total_sales,
+       sm.avg_sales,
+       sm.max_sales,
+       tc.c_customer_id,
+       tc.c_first_name,
+       tc.c_last_name,
+       COALESCE(tc.cd_gender, 'Unknown') AS gender,
+       COALESCE(tc.cd_marital_status, 'N/A') AS marital_status
+FROM sales_metrics sm
+LEFT JOIN top_customers tc ON sm.total_sales > (SELECT AVG(total_sales) FROM sales_metrics)
+WHERE sm.d_date BETWEEN '2023-01-01' AND '2023-12-31'
+ORDER BY sm.d_date DESC, sm.total_sales DESC;

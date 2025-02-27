@@ -1,0 +1,43 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS Rank,
+        (SELECT COUNT(*) 
+         FROM Comments c 
+         WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT STRING_AGG(t.TagName, ', ') 
+         FROM Tags t 
+         WHERE t.Id IN (SELECT unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))) ) ) AS Tags
+    FROM Posts p
+    WHERE p.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.Rank,
+    COALESCE(ur.Reputation, 0) AS OwnerReputation,
+    COALESCE(mg.Count, 0) AS BadgeCount,
+    CASE 
+        WHEN rp.CommentCount = 0 THEN 'No Comments Yet'
+        WHEN rp.CommentCount = 1 THEN '1 Comment'
+        ELSE CONCAT(rp.CommentCount, ' Comments')
+    END AS CommentStatus,
+    STRING_AGG(DISTINCT CONCAT('Tag: ', t.TagName), '; ') AS TagSummary
+FROM RankedPosts rp
+LEFT JOIN Users ur ON ur.Id = (SELECT OwnerUserId FROM Posts WHERE Id = rp.PostId)
+LEFT JOIN Badges mg ON mg.UserId = ur.Id 
+LEFT JOIN Tags t ON t.Id IN (SELECT unnest(string_to_array(substring(rp.Tags, 2, length(rp.Tags) - 2), '><'))) 
+                             AND t.Count > 10
+GROUP BY 
+    rp.PostId, rp.Title, rp.ViewCount, rp.Score, rp.Rank, ur.Reputation, mg.Count
+HAVING 
+    SUM(CASE WHEN ur.Reputation IS NOT NULL THEN 1 ELSE 0 END) > 0 
+ORDER BY 
+    rp.Rank, rp.ViewCount DESC;

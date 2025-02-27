@@ -1,0 +1,87 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        c.c_acctbal BETWEEN 0 AND 1000
+        AND c.c_mktsegment IN ('BUILDING', 'AUTOMOBILE')
+),
+SupplierAvgCost AS (
+    SELECT 
+        ps.ps_suppkey,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+    GROUP BY 
+        ps.ps_suppkey
+),
+FilteredLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        (l.l_extendedprice * (1 - l.l_discount)) AS sale_price,
+        COALESCE(NULLIF(l.l_discount, 0), 1) AS effective_discount,
+        l.l_shipdate
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N' 
+        AND l.l_shipdate > (CURRENT_DATE - INTERVAL '90 days')
+),
+FinalAggregation AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(f.l_quantity) AS total_quantity,
+        SUM(f.sale_price) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        ARRAY_AGG(DISTINCT r.r_name) AS regions_supplied
+    FROM 
+        part p
+    LEFT JOIN 
+        FilteredLineItems f ON p.p_partkey = f.l_partkey
+    LEFT JOIN 
+        orders o ON f.l_orderkey = o.o_orderkey
+    LEFT JOIN 
+        supplier s ON s.s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_partkey = p.p_partkey)
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    LEFT JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+)
+SELECT 
+    fa.p_partkey,
+    fa.p_name,
+    fa.total_quantity,
+    fa.total_sales,
+    fa.order_count,
+    CASE 
+        WHEN fa.total_sales IS NULL THEN 'No Sales'
+        WHEN fa.total_sales > 10000 THEN 'High Value'
+        ELSE 'Moderate Value'
+    END AS sales_category,
+    COALESCE(sac.avg_supply_cost, 0) AS avg_supply_cost
+FROM 
+    FinalAggregation fa
+LEFT JOIN 
+    SupplierAvgCost sac ON fa.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = sac.ps_suppkey LIMIT 1)
+WHERE 
+    fa.order_count > 0 
+ORDER BY 
+    fa.total_sales DESC, 
+    fa.p_name ASC;

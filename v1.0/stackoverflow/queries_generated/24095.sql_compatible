@@ -1,0 +1,73 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        pt.Name AS PostTypeName,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY v.CreationDate DESC) AS UserVoteRow
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, pt.Name
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.UserId,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ClosureRow
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.PostTypeName,
+    COALESCE(ps.CommentCount, 0) AS TotalComments,
+    COALESCE(ps.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(ps.DownVotes, 0) AS TotalDownVotes,
+    ub.BadgeCount AS UserBadgeCount,
+    ub.HighestBadgeClass,
+    cp.CreationDate AS ClosedDate,
+    cp.Comment AS CloseReason
+FROM 
+    PostStats ps
+LEFT JOIN 
+    UserBadges ub ON ps.UserId = ub.UserId
+LEFT JOIN 
+    ClosedPosts cp ON ps.PostId = cp.PostId AND cp.ClosureRow = 1
+WHERE 
+    ps.UserVoteRow = 1
+ORDER BY 
+    ps.Score DESC, 
+    COALESCE(cp.CreationDate, TIMESTAMP '9999-12-31') ASC;

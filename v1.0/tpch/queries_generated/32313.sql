@@ -1,0 +1,43 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+RankedProducts AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice, 
+           ROW_NUMBER() OVER(PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS rank
+    FROM part p
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY o.o_orderkey
+),
+TopOrders AS (
+    SELECT fo.*, RANK() OVER(ORDER BY fo.total_revenue DESC) as revenue_rank
+    FROM FilteredOrders fo
+)
+SELECT 
+    rh.s_name AS Supplier_Name,
+    rp.p_name AS Product_Name,
+    to.total_revenue AS Total_Revenue,
+    COUNT(DISTINCT to.o_orderkey) AS Order_Count,
+    AVG(s.hierarchy_level) AS Avg_Hierarchy_Level
+FROM SupplierHierarchy sh
+JOIN supplier s ON sh.s_suppkey = s.s_suppkey
+JOIN RankedProducts rp ON s.s_nationkey = rp.p_partkey
+JOIN TopOrders to ON s.s_suppkey = to.o_orderkey
+LEFT OUTER JOIN (SELECT DISTINCT n.n_nationkey, COUNT(DISTINCT s.s_suppkey) AS hierarchy_level
+                  FROM nation n
+                  LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+                  GROUP BY n.n_nationkey) AS s ON s.n_nationkey = sh.s_nationkey
+WHERE sh.level > 0 AND rp.rank = 1 AND to.revenue_rank <= 10
+GROUP BY rh.s_name, rp.p_name, to.total_revenue
+ORDER BY total_revenue DESC;

@@ -1,0 +1,61 @@
+WITH actor_movie_stats AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles,
+        AVG(m.production_year) AS average_production_year
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    JOIN 
+        title t ON c.movie_id = t.id
+    JOIN 
+        movie_info m ON t.id = m.movie_id AND m.info_type_id = (SELECT id FROM info_type WHERE info = 'year')
+    GROUP BY 
+        a.id, a.name
+),
+keyword_summary AS (
+    SELECT 
+        t.id AS title_id,
+        k.keyword AS keyword,
+        COUNT(mk.id) AS keyword_count
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.id, k.keyword
+),
+actor_keyword_summary AS (
+    SELECT 
+        a.actor_id,
+        STRING_AGG(DISTINCT ks.keyword, ', ') AS keywords
+    FROM 
+        actor_movie_stats a
+    JOIN 
+        cast_info c ON a.actor_id = c.person_id
+    JOIN 
+        movie_keyword mk ON c.movie_id = mk.movie_id
+    JOIN 
+        keyword ks ON mk.keyword_id = ks.id
+    GROUP BY 
+        a.actor_id
+)
+SELECT 
+    a.actor_id,
+    a.actor_name,
+    a.total_movies,
+    a.movie_titles,
+    a.average_production_year,
+    ak.keywords
+FROM 
+    actor_movie_stats a
+LEFT JOIN 
+    actor_keyword_summary ak ON a.actor_id = ak.actor_id
+ORDER BY 
+    a.total_movies DESC
+LIMIT 10;

@@ -1,0 +1,91 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.Reputation < 100 THEN 1 ELSE 0 END) AS LowReputationUsers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+QuestionDetails AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.ViewCount,
+        COALESCE(ph.ClosedDate, 'No Closure') AS ClosureStatus,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (ORDER BY p.ViewCount DESC) AS PopularityRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, ph.ClosedDate
+),
+VoteSummary AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS TotalUpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS TotalDownVotes,
+        SUM(CASE WHEN VoteTypeId = 4 THEN 1 ELSE 0 END) AS TotalOffensiveVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+FinalReport AS (
+    SELECT 
+        ua.DisplayName,
+        ua.TotalPosts,
+        ua.TotalQuestions,
+        ua.TotalAnswers,
+        CASE WHEN ua.LowReputationUsers = 0 THEN 'Reputable' ELSE 'Needs Attention' END AS ReputationStatus,
+        qd.QuestionId,
+        qd.Title,
+        qd.ViewCount,
+        qd.ClosureStatus,
+        qs.TotalUpVotes,
+        qs.TotalDownVotes,
+        qs.TotalOffensiveVotes,
+        CONCAT('Views: ', CAST(qd.ViewCount AS VARCHAR), ', Comments: ', CAST(qd.CommentCount AS VARCHAR)) AS ViewCommentSummary
+    FROM 
+        UserActivity ua
+    LEFT JOIN 
+        QuestionDetails qd ON ua.TotalQuestions > 0
+    LEFT JOIN 
+        VoteSummary qs ON qd.QuestionId = qs.PostId
+    ORDER BY 
+        ua.TotalPosts DESC, qd.PopularityRank
+)
+SELECT 
+    *,
+    CASE 
+        WHEN TotalUpVotes > TotalDownVotes 
+            THEN 'Positive' 
+        WHEN TotalDownVotes > TotalUpVotes 
+            THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS OverallVoteSentiment,
+    CASE 
+        WHEN ClosureStatus = 'No Closure' AND TotalAnswers > 0 
+            THEN 'Active Question' 
+        ELSE 'Closed or No Answers' 
+    END AS QuestionActivityStatus
+FROM 
+    FinalReport
+WHERE 
+    TotalPosts > 5
+    OR (TotalQuestions > 0 AND ClosureStatus <> 'No Closure')
+ORDER BY 
+    ReputationStatus DESC, OverallVoteSentiment ASC;

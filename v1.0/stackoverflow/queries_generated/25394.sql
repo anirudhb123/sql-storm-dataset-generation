@@ -1,0 +1,49 @@
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore,
+        AVG(COALESCE(p.Score, 0)) AS AverageScore,
+        ARRAY_AGG(DISTINCT p.OwnerDisplayName) AS OwnerNames,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Comments c ON c.PostId = p.Id
+    GROUP BY 
+        t.TagName
+),
+
+PostHistoryChanges AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11, 12) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (1, 4, 5) THEN 1 END) AS TitleEditCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 24 THEN 1 END) AS SuggestedEditCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    ts.TagName,
+    ts.PostCount,
+    ts.TotalViews,
+    ts.TotalScore,
+    ts.AverageScore,
+    ts.OwnerNames,
+    ts.CommentCount,
+    ph.CloseReopenCount,
+    ph.TitleEditCount,
+    ph.SuggestedEditCount,
+    RANK() OVER (ORDER BY ts.TotalScore DESC) AS TagRank
+FROM 
+    TagStatistics ts
+LEFT JOIN 
+    PostHistoryChanges ph ON ph.PostId IN (SELECT unnest(ARRAY(SELECT p.Id FROM Posts p WHERE p.Tags LIKE '%' || ts.TagName || '%')))
+ORDER BY 
+    ts.TotalScore DESC, ts.TagName;

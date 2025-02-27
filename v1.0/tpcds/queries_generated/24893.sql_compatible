@@ -1,0 +1,66 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_return_quantity,
+        sr_return_amt_inc_tax,
+        RANK() OVER (PARTITION BY sr_item_sk ORDER BY sr_return_amt_inc_tax DESC) AS rank_return
+    FROM 
+        store_returns
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT sr_returned_date_sk) AS total_returns,
+        SUM(COALESCE(sr_return_amt_inc_tax, 0)) AS total_return_amt
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_returns, 
+        cs.total_return_amt
+    FROM 
+        CustomerSummary cs
+    WHERE 
+        cs.total_return_amt > (
+            SELECT AVG(total_return_amt) FROM CustomerSummary
+        )
+),
+InventoryStatus AS (
+    SELECT 
+        i.i_item_sk,
+        SUM(i.inv_quantity_on_hand) AS quantity_on_hand,
+        CASE 
+            WHEN SUM(i.inv_quantity_on_hand) = 0 THEN 'Out of Stock'
+            WHEN SUM(i.inv_quantity_on_hand) < 10 THEN 'Low Stock'
+            ELSE 'In Stock'
+        END AS stock_status
+    FROM 
+        inventory i
+    GROUP BY 
+        i.i_item_sk
+)
+SELECT 
+    hvc.c_customer_sk,
+    ir.sr_item_sk,
+    ir.sr_return_quantity,
+    ir.sr_return_amt_inc_tax,
+    is.quantity_on_hand,
+    is.stock_status
+FROM 
+    RankedReturns ir
+JOIN 
+    HighValueCustomers hvc ON ir.sr_customer_sk = hvc.c_customer_sk
+JOIN 
+    InventoryStatus is ON ir.sr_item_sk = is.i_item_sk
+WHERE 
+    ir.rank_return = 1
+    AND (is.stock_status = 'In Stock' OR (is.stock_status = 'Low Stock' AND ir.sr_return_quantity > 5))
+ORDER BY 
+    hvc.total_return_amt DESC, ir.sr_return_amt_inc_tax ASC;

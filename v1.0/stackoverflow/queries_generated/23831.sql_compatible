@@ -1,0 +1,87 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+),
+FilteredBadges AS (
+    SELECT 
+        b.Id,
+        b.UserId,
+        b.Name,
+        b.Class,
+        COUNT(b.Id) OVER (PARTITION BY b.UserId) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class < 3 
+),
+UserReputation AS (
+    SELECT 
+        u.Id,
+        u.Reputation,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    u.DisplayName,
+    ur.Reputation,
+    rb.PostId,
+    rb.Title,
+    rb.CreationDate,
+    rb.Score,
+    rb.ViewCount,
+    rb.Tags,
+    rb.PostStatus,
+    fb.Name AS BadgeName,
+    fb.BadgeCount AS TotalBadges,
+    ur.UpVotes,
+    ur.DownVotes,
+    (SELECT 
+         COUNT(DISTINCT ph.Id)
+     FROM 
+         PostHistory ph
+     WHERE 
+         ph.PostId = rb.PostId AND ph.PostHistoryTypeId IN (10, 11)) AS CloseReopenCount,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS AllTags
+FROM 
+    RankedPosts rb
+JOIN 
+    Users u ON rb.OwnerUserId = u.Id
+JOIN 
+    UserReputation ur ON u.Id = ur.Id
+LEFT JOIN 
+    FilteredBadges fb ON u.Id = fb.UserId
+LEFT JOIN 
+    Tags t ON t.Id = ANY(STRING_TO_ARRAY(rb.Tags, ',')::TEXT[])  
+WHERE 
+    rb.Rank <= 5 AND 
+    (rb.ViewCount - rb.CommentCount) > 0 
+GROUP BY 
+    u.DisplayName, ur.Reputation, rb.PostId, rb.Title, rb.CreationDate, rb.Score, rb.ViewCount, rb.Tags, 
+    rb.PostStatus, fb.Name, fb.BadgeCount, ur.UpVotes, ur.DownVotes
+ORDER BY 
+    rb.Score DESC, rb.CreationDate ASC
+LIMIT 100;

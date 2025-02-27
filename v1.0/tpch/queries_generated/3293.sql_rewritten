@@ -1,0 +1,44 @@
+WITH SupplierPart AS (
+    SELECT ps.ps_partkey,
+           ps.ps_suppkey,
+           SUM(ps.ps_availqty) AS total_avail_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey, ps.ps_suppkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           s.s_acctbal,
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+),
+OrderLineStats AS (
+    SELECT l.l_orderkey,
+           COUNT(*) AS num_lines,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1997-01-01' AND l.l_shipdate < DATE '1998-01-01'
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name,
+       SUM(ol.total_revenue) AS total_revenue,
+       COUNT(DISTINCT o.o_orderkey) AS total_orders,
+       SUM(sp.total_avail_qty) AS total_avail_qty,
+       AVG(sp.avg_supply_cost) AS avg_supply_cost,
+       CASE 
+           WHEN SUM(ol.total_revenue) IS NULL THEN 'No Revenue'
+           ELSE 'Revenue Exists'
+       END AS revenue_status
+FROM nation n
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN OrderLineStats ol ON o.o_orderkey = ol.l_orderkey
+LEFT JOIN SupplierPart sp ON sp.ps_partkey IN (
+    SELECT p.p_partkey
+    FROM part p
+    WHERE LENGTH(p.p_name) > 10 AND p.p_retailprice > 50
+) AND sp.ps_suppkey IN (SELECT ts.s_suppkey FROM TopSuppliers ts WHERE ts.rn <= 5)
+WHERE o.o_orderstatus = 'O'
+GROUP BY n.n_name
+ORDER BY total_revenue DESC NULLS LAST;

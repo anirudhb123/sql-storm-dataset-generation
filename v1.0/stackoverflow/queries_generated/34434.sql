@@ -1,0 +1,70 @@
+WITH RecursivePostHistory AS (
+    SELECT p.Id AS PostId,
+           ph.CreationDate,
+           ph.PostHistoryTypeId,
+           ph.UserId,
+           ph.Comment,
+           ph.Text,
+           ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS rn
+    FROM Posts p
+    JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE ph.CreationDate >= '2022-01-01'
+),
+UserScore AS (
+    SELECT u.Id AS UserId,
+           u.DisplayName,
+           SUM(v.BountyAmount) AS TotalBounties,
+           COUNT(v.Id) AS VoteCount,
+           AVG(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS AvgUpvotes,
+           AVG(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS AvgDownvotes,
+           COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PopularTags AS (
+    SELECT t.TagName,
+           t.Count,
+           RANK() OVER (ORDER BY t.Count DESC) AS TagRank
+    FROM Tags t
+    WHERE t.IsModeratorOnly = 0
+),
+PostEngagement AS (
+    SELECT p.Id AS PostId,
+           COUNT(c.Id) AS CommentCount,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount,
+           MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate ELSE NULL END) AS CloseDate
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    GROUP BY p.Id
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    pe.CommentCount,
+    pe.UpvoteCount,
+    pe.DownvoteCount,
+    pe.CloseDate,
+    ps.UserId,
+    u.DisplayName AS OwnerDisplayName,
+    ps.TotalBounties,
+    ps.VoteCount AS TotalVotes,
+    pt.TagName,
+    pt.TagRank
+FROM Posts p
+LEFT JOIN PostEngagement pe ON p.Id = pe.PostId
+LEFT JOIN UserScore ps ON p.OwnerUserId = ps.UserId
+LEFT JOIN PopularTags pt ON pt.TagName = ANY(STRING_TO_ARRAY(p.Tags, ','))
+WHERE pe.CommentCount > 5
+  AND ps.TotalBounties IS NOT NULL
+  AND ps.AvgUpvotes > 1
+ORDER BY pe.CommentCount DESC, ps.TotalBounties DESC
+LIMIT 50;
+
+This SQL query utilizes multiple advanced constructs, including recursive common table expressions (CTEs), window functions, multiple joins, and complicated predicates to retrieve insights about posts, users, and tags while also performing aggregations over that information.

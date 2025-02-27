@@ -1,0 +1,72 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+
+PostStatistics AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS Questions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS Answers,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+
+UserPostStats AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        ur.BadgeCount,
+        ps.PostCount,
+        ps.Questions,
+        ps.Answers,
+        ps.TotalScore,
+        ROW_NUMBER() OVER (ORDER BY ur.Reputation DESC) AS ReputationRank
+    FROM 
+        UserReputation ur
+    LEFT JOIN 
+        PostStatistics ps ON ur.UserId = ps.OwnerUserId
+)
+
+SELECT 
+    ups.*,
+    COALESCE(p.AcceptedAnswer, 0) AS AcceptedAnswers,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    UserPostStats ups
+LEFT JOIN 
+    (SELECT 
+        p.OwnerUserId,
+        COUNT(DISTINCT p.AcceptedAnswerId) AS AcceptedAnswer
+     FROM 
+        Posts p
+     WHERE 
+        p.AcceptedAnswerId IS NOT NULL
+     GROUP BY 
+        p.OwnerUserId) p ON ups.UserId = p.OwnerUserId
+LEFT JOIN 
+    Posts post ON post.OwnerUserId = ups.UserId
+LEFT JOIN 
+    LATERAL (SELECT 
+        DISTINCT unnest(string_to_array(substring(post.Tags, 2, length(post.Tags)-2), '>')) AS TagName) AS t ON TRUE 
+GROUP BY 
+    ups.UserId 
+ORDER BY 
+    ups.Reputation DESC, ups.UserId;

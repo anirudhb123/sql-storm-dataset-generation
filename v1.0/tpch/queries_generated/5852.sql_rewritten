@@ -1,0 +1,31 @@
+WITH NationSuppliers AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(s.s_suppkey) AS supplier_count, SUM(s.s_acctbal) AS total_balance
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+PartLineItems AS (
+    SELECT p.p_partkey, p.p_name, SUM(l.l_quantity) AS total_quantity, SUM(l.l_extendedprice) AS total_price
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+HighValueOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_value
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 10000
+)
+SELECT 
+    ns.n_name AS nation,
+    COUNT(DISTINCT o.o_orderkey) AS high_value_order_count,
+    AVG(ns.total_balance) AS avg_supplier_balance,
+    SUM(pl.total_quantity) AS total_part_quantity,
+    SUM(pl.total_price) AS total_part_value
+FROM NationSuppliers ns
+JOIN HighValueOrders o ON ns.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = o.o_custkey)
+JOIN PartLineItems pl ON pl.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = ns.n_nationkey))
+GROUP BY ns.n_name
+ORDER BY total_part_value DESC;

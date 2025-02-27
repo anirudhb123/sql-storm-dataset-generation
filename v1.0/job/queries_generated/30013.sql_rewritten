@@ -1,0 +1,83 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = 1  
+
+    UNION ALL
+
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        movie_link ml ON ml.movie_id = mh.movie_id
+    INNER JOIN 
+        aka_title linked ON ml.linked_movie_id = linked.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = linked.id
+)
+
+SELECT 
+    m.id AS movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(cast_stats.avg_cast_size, 0) AS avg_cast_size,
+    COALESCE(kws.keyword_count, 0) AS keyword_count,
+    ct.kind AS company_type,
+    STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+    COUNT(DISTINCT ci.person_id) AS distinct_cast_count,
+    SUM(CASE 
+        WHEN ci.note IS NOT NULL THEN 1 
+        ELSE 0 
+    END) AS cast_notes_count
+FROM 
+    aka_title m
+LEFT JOIN 
+    (SELECT 
+         movie_id, 
+         AVG(cast_size) AS avg_cast_size
+     FROM 
+         (SELECT 
+              movie_id, 
+              COUNT(person_id) AS cast_size
+          FROM 
+              cast_info 
+          GROUP BY 
+              movie_id) AS cast_summary
+     GROUP BY 
+         movie_id) AS cast_stats ON cast_stats.movie_id = m.id
+LEFT JOIN 
+    (SELECT 
+         mk.movie_id, 
+         COUNT(DISTINCT mk.keyword_id) AS keyword_count
+     FROM 
+         movie_keyword mk 
+     GROUP BY 
+         mk.movie_id) AS kws ON kws.movie_id = m.id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = m.id
+LEFT JOIN 
+    company_name cn ON cn.id = mc.company_id
+LEFT JOIN 
+    company_type ct ON ct.id = mc.company_type_id
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = m.id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = m.id
+WHERE 
+    m.production_year >= 2000 
+    AND (m.title LIKE '%Avengers%' OR m.title LIKE '%Spider-Man%')
+GROUP BY 
+    m.id, m.title, m.production_year, cast_stats.avg_cast_size, kws.keyword_count, ct.kind
+ORDER BY 
+    m.production_year DESC, avg_cast_size DESC
+LIMIT 100;

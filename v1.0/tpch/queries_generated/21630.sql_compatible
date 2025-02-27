@@ -1,0 +1,51 @@
+
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+), PartStatistics AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_availqty) AS total_avail_qty, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+), CustomerInfo AS (
+    SELECT c.c_custkey, 
+           c.c_name, 
+           c.c_acctbal, 
+           CASE 
+               WHEN c.c_acctbal IS NULL THEN 'Unknown'
+               WHEN c.c_acctbal < 1000 THEN 'Low'
+               ELSE 'High' 
+           END AS acctbal_category
+    FROM customer c
+), RecentOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, COUNT(l.l_orderkey) AS order_count
+    FROM orders o
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATEADD(year, -1, CAST('1998-10-01' AS DATE))
+    GROUP BY o.o_orderkey, o.o_custkey
+)
+SELECT 
+    p.p_name, 
+    r.r_name, 
+    COUNT(DISTINCT so.s_suppkey) AS supplier_count,
+    SUM(COALESCE(ps.total_avail_qty, 0)) AS total_available_quantity,
+    AVG(COALESCE(ps.avg_supply_cost, 0)) AS avg_supply_price,
+    SUM(CASE WHEN ci.acctbal_category = 'High' THEN ci.c_acctbal ELSE 0 END) AS high_balance_sum,
+    STRING_AGG(COALESCE(ci.c_name, 'No Customer')) AS customer_names
+FROM part p
+JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN SupplierDetails so ON ps.ps_suppkey = so.s_suppkey AND so.rank = 1
+JOIN nation n ON so.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN RecentOrders o ON o.o_custkey IN (SELECT c.c_custkey 
+                                             FROM customer c 
+                                             WHERE c.c_nationkey = n.n_nationkey)
+LEFT JOIN CustomerInfo ci ON o.o_custkey = ci.c_custkey
+WHERE p.p_size >= 10 
+  AND p.p_retailprice < (SELECT AVG(p2.p_retailprice) * 1.1 FROM part p2 WHERE p2.p_size IS NOT NULL)
+GROUP BY p.p_name, r.r_name
+HAVING COUNT(DISTINCT so.s_suppkey) > 5
+ORDER BY total_available_quantity DESC, p.p_name;

@@ -1,0 +1,54 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+)
+SELECT
+    a.name AS actor_name,
+    COUNT(DISTINCT co.movie_id) AS movies_count,
+    AVG(COALESCE(mh.level, 0)) AS average_link_depth,
+    STRING_AGG(DISTINCT t.title, ', ') AS titles,
+    SUM(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Budget') THEN mi.info::numeric ELSE 0 END) AS total_budget
+FROM
+    cast_info ci
+JOIN
+    aka_name a ON ci.person_id = a.person_id
+JOIN
+    aka_title t ON ci.movie_id = t.movie_id
+LEFT JOIN
+    movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN
+    movie_hierarchy mh ON t.id = mh.movie_id
+LEFT JOIN
+    (SELECT DISTINCT movie_id FROM movie_keyword WHERE keyword_id IN (SELECT id FROM keyword WHERE phonetic_code IS NOT NULL)) co ON t.id = co.movie_id
+WHERE
+    a.name IS NOT NULL
+    AND a.name NOT LIKE '%unknown%'
+    AND t.production_year >= 2000
+GROUP BY
+    a.name
+ORDER BY
+    movies_count DESC
+LIMIT 10;

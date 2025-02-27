@@ -1,0 +1,31 @@
+SELECT 
+    a.name AS aka_name,
+    t.title AS movie_title,
+    c.nr_order AS cast_order,
+    cc.kind AS comp_cast_type,
+    co.name AS company_name,
+    mn.info AS movie_info,
+    mk.keyword AS movie_keyword
+FROM 
+    aka_name a
+JOIN 
+    cast_info c ON a.person_id = c.person_id
+JOIN 
+    title t ON c.movie_id = t.id
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    movie_companies mc ON t.id = mc.movie_id
+JOIN 
+    company_name co ON mc.company_id = co.id
+JOIN 
+    movie_info mn ON t.id = mn.movie_id
+LEFT JOIN 
+    movie_keyword mk ON t.id = mk.movie_id
+WHERE 
+    a.name IS NOT NULL 
+    AND t.production_year >= 2000 
+    AND mk.keyword IS NOT NULL
+ORDER BY 
+    t.production_year DESC, 
+    c.nr_order ASC;

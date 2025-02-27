@@ -1,0 +1,52 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_profit) AS avg_net_profit
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+), HighValueCustomers AS (
+    SELECT 
+        c.customer_id,
+        cs.total_sales,
+        cs.order_count,
+        cs.avg_net_profit
+    FROM 
+        CustomerSales cs
+    JOIN 
+        customer c ON cs.c_customer_id = c.c_customer_id
+    WHERE 
+        cs.total_sales > (
+            SELECT AVG(total_sales) FROM CustomerSales
+        )
+), CustomerDemographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT h.hd_demo_sk) AS demo_count
+    FROM 
+        highvaluecustomers hvc
+    JOIN 
+        customer_demographics cd ON hvc.customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    gender,
+    marital_status,
+    demo_count,
+    RANK() OVER (ORDER BY demo_count DESC) AS rank
+FROM 
+    CustomerDemographics
+WHERE 
+    demo_count > 5
+ORDER BY 
+    rank;

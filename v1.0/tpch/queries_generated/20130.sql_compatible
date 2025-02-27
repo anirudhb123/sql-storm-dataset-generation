@@ -1,0 +1,57 @@
+
+WITH RECURSIVE ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1994-01-01' AND o.o_orderdate < DATE '1995-01-01'
+),
+part_supplier_counts AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+customer_region AS (
+    SELECT 
+        c.c_custkey,
+        r.r_name AS region_name,
+        SUM(c.c_acctbal) AS total_acctbal
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY c.c_custkey, r.r_name
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(psc.num_suppliers, 0) AS total_suppliers,
+    cr.region_name,
+    cr.total_acctbal,
+    CASE 
+        WHEN cr.total_acctbal IS NULL THEN 'No Account Balance'
+        WHEN cr.total_acctbal > 10000 THEN 'High Value'
+        ELSE 'Standard Value'
+    END AS customer_value_category,
+    (SELECT 
+        MAX(o.o_totalprice) 
+     FROM ranked_orders ro 
+     WHERE ro.o_orderkey IN (SELECT l.l_orderkey FROM lineitem l WHERE l.l_partkey = p.p_partkey)
+    ) AS max_order_price
+FROM part p
+LEFT JOIN part_supplier_counts psc ON p.p_partkey = psc.ps_partkey
+FULL OUTER JOIN customer_region cr ON cr.c_custkey = (
+    SELECT 
+        o.o_custkey 
+    FROM ranked_orders ro 
+    JOIN orders o ON ro.o_orderkey = o.o_orderkey 
+    WHERE ro.order_rank = 1 
+    LIMIT 1
+)
+WHERE p.p_size > 10 AND p.p_container = 'Box'
+GROUP BY p.p_partkey, p.p_name, p.p_brand, psc.num_suppliers, cr.region_name, cr.total_acctbal
+ORDER BY p.p_partkey, p.p_name;

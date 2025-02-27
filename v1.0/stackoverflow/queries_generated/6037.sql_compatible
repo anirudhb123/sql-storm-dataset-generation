@@ -1,0 +1,38 @@
+
+WITH ActiveUsers AS (
+    SELECT Id, DisplayName, Reputation
+    FROM Users
+    WHERE LastAccessDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+),
+RecentPosts AS (
+    SELECT Posts.Id AS PostId, Posts.Title, Posts.CreationDate, Posts.OwnerUserId, Posts.PostTypeId, COUNT(Comments.Id) AS CommentCount
+    FROM Posts
+    LEFT JOIN Comments ON Posts.Id = Comments.PostId
+    WHERE Posts.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+    GROUP BY Posts.Id, Posts.Title, Posts.CreationDate, Posts.OwnerUserId, Posts.PostTypeId
+),
+TopTags AS (
+    SELECT Tags.TagName, COUNT(Posts.Id) AS PostCount
+    FROM Tags
+    JOIN Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, ','))
+    GROUP BY Tags.TagName
+    ORDER BY PostCount DESC
+    LIMIT 5
+),
+PostDetails AS (
+    SELECT RANK() OVER (PARTITION BY r.PostId ORDER BY p.Score DESC) AS PostRank, 
+           p.Title, 
+           p.CreationDate, 
+           u.DisplayName AS OwnerDisplayName, 
+           u.Reputation AS OwnerReputation, 
+           t.TagName, 
+           r.CommentCount
+    FROM RecentPosts p
+    JOIN ActiveUsers u ON p.OwnerUserId = u.Id
+    JOIN TopTags t ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN Comments r ON p.PostId = r.PostId
+)
+SELECT pd.PostRank, pd.Title, pd.CreationDate, pd.OwnerDisplayName, pd.OwnerReputation, pd.TagName, pd.CommentCount
+FROM PostDetails pd
+WHERE pd.PostRank = 1
+ORDER BY pd.CreationDate DESC;

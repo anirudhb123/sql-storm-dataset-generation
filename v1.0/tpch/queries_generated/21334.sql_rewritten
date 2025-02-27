@@ -1,0 +1,104 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        RANK() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank_by_price
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 10 AND 20
+), 
+SupplierSales AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        s.s_suppkey
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS customer_spending
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate > cast('1998-10-01' as date) - INTERVAL '1 year'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+NullHandling AS (
+    SELECT 
+        r.r_name,
+        COUNT(n.n_nationkey) AS nation_count,
+        COALESCE(SUM(s.s_acctbal), 0) AS total_account_balance
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_name
+)
+
+SELECT 
+    rp.p_partkey,
+    rp.p_name,
+    rp.p_retailprice,
+    s.total_sales,
+    hc.customer_spending,
+    nh.nation_count,
+    nh.total_account_balance
+FROM 
+    RankedParts rp
+JOIN 
+    SupplierSales s ON s.total_sales > 5000
+LEFT JOIN 
+    HighValueCustomers hc ON hc.customer_spending IS NOT NULL
+JOIN 
+    NullHandling nh ON nh.nation_count > 0
+WHERE 
+    rp.rank_by_price <= 5
+    AND (rp.p_retailprice IS NOT NULL OR s.total_sales IS NOT NULL)
+ORDER BY 
+    rp.p_partkey, s.total_sales DESC
+LIMIT 100 OFFSET 10
+
+UNION ALL
+
+SELECT 
+    NULL AS p_partkey, 
+    'No Part' AS p_name, 
+    SUM(s.total_sales) AS sales_summary,
+    NULL AS customer_spending,
+    NULL AS nation_count,
+    COUNT(hc.c_custkey) AS high_value_customers
+FROM 
+    SupplierSales s
+FULL OUTER JOIN 
+    HighValueCustomers hc ON s.total_sales IS NULL
+WHERE 
+    s.total_sales IS NULL OR hc.customer_spending >= 5000
+GROUP BY 
+    s.total_sales
+HAVING 
+    COUNT(s.s_suppkey) > 0
+ORDER BY 
+    sales_summary DESC;

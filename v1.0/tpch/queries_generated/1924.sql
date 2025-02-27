@@ -1,0 +1,57 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY ps_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT l.l_partkey) AS total_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+),
+SupplierPerformance AS (
+    SELECT 
+        r.r_name AS region_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        ps.ps_supplycost > 0
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    R.region_name,
+    COALESCE(S.total_cost, 0) AS total_cost,
+    COALESCE(O.total_sales, 0) AS total_sales,
+    (SELECT AVG(total_sales) FROM OrderDetails) AS avg_sales_per_order
+FROM 
+    SupplierPerformance S
+FULL OUTER JOIN OrderDetails O ON S.region_name = (SELECT r.r_name FROM region r JOIN nation n ON r.r_regionkey = n.n_regionkey JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey IN (SELECT s_suppkey FROM RankedSuppliers WHERE rn = 1))
+RIGHT JOIN (SELECT DISTINCT r_name FROM region) R ON S.region_name = R.region_name
+WHERE 
+    (S.total_cost IS NOT NULL OR O.total_sales IS NOT NULL)
+ORDER BY 
+    R.region_name;

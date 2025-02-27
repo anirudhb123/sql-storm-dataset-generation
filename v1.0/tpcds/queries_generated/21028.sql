@@ -1,0 +1,75 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_email_address,
+        COALESCE(SUM(ss.ss_net_paid_inc_tax), 0) AS total_store_sales,
+        COALESCE(SUM(ws.ws_net_paid_inc_tax), 0) AS total_web_sales,
+        DENSE_RANK() OVER (PARTITION BY c.c_gender ORDER BY COALESCE(SUM(ss.ss_net_paid_inc_tax), 0) DESC) AS sales_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_email_address, c.c_gender
+), 
+HighValueCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_email_address,
+        cs.total_store_sales + cs.total_web_sales AS grand_total_sales
+    FROM 
+        CustomerSales cs
+    INNER JOIN 
+        customer c ON cs.c_customer_sk = c.c_customer_sk
+    WHERE 
+        (cs.total_store_sales + cs.total_web_sales) > (SELECT AVG(total_sales) FROM (
+            SELECT 
+                SUM(ss.ss_net_paid_inc_tax) AS total_sales
+            FROM 
+                store_sales ss
+            GROUP BY 
+                ss.ss_customer_sk
+        ) AS avg_sales)
+)
+
+SELECT 
+    c.c_customer_id,
+    c.c_first_name,
+    c.c_last_name,
+    CASE 
+        WHEN hc.grand_total_sales IS NOT NULL THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_type,
+    hc.grand_total_sales,
+    CASE 
+        WHEN hc.grand_total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Present'
+    END AS sales_status
+FROM 
+    customer c
+LEFT JOIN 
+    HighValueCustomers hc ON c.c_customer_sk = hc.c_customer_sk
+WHERE 
+    c.c_birth_day IS NOT NULL AND 
+    c.c_birth_month IS NOT NULL AND 
+    (c.c_birth_year IS NULL OR c.c_birth_year < 1980)
+ORDER BY 
+    customer_type, grand_total_sales DESC
+FETCH FIRST 10 ROWS ONLY;
+
+SELECT 
+    'Total Customers' AS metric, 
+    COUNT(DISTINCT c.c_customer_sk) AS count
+FROM 
+    customer c
+
+UNION ALL 
+
+SELECT 
+    'High Value Customers', 
+    COUNT(DISTINCT hc.c_customer_sk)
+FROM 
+    HighValueCustomers hc;

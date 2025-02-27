@@ -1,0 +1,59 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ws_ext_discount_amt,
+        RANK() OVER (PARTITION BY ws_order_number ORDER BY ws_quantity DESC) AS rank_order
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+Customer_Address AS (
+    SELECT
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, COALESCE(ca_suite_number, '')) AS full_address,
+        ca_city,
+        ca_state
+    FROM 
+        customer_address
+),
+Sales_Analysis AS (
+    SELECT 
+        ca.full_address,
+        ca.ca_city,
+        ca.ca_state,
+        SUM(s.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT s.ws_order_number) AS total_orders
+    FROM 
+        Sales_CTE s
+    JOIN 
+        customer c ON s.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        Customer_Address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY 
+        ca.full_address, ca.ca_city, ca.ca_state
+)
+SELECT 
+    sa.full_address,
+    sa.ca_city,
+    sa.ca_state,
+    sa.total_sales,
+    sa.total_orders,
+    CASE 
+        WHEN total_sales > 10000 THEN 'High Value'
+        WHEN total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    Sales_Analysis sa
+WHERE 
+    sa.total_orders > 5
+ORDER BY 
+    sa.total_sales DESC
+LIMIT 100;

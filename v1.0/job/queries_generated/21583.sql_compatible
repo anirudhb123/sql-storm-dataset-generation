@@ -1,0 +1,55 @@
+
+WITH 
+  RankedMovies AS (
+    SELECT 
+      t.title,
+      t.production_year,
+      ROW_NUMBER() OVER(PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank,
+      COUNT(*) OVER(PARTITION BY t.production_year) AS year_count
+    FROM aka_title t
+  ),
+  
+  ActorStats AS (
+    SELECT 
+      a.person_id,
+      a.name,
+      COUNT(DISTINCT c.movie_id) AS movie_count,
+      AVG(t.production_year) AS avg_prod_year,
+      MAX(t.production_year) AS last_active_year
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN aka_title t ON c.movie_id = t.id
+    GROUP BY a.person_id, a.name
+    HAVING COUNT(DISTINCT c.movie_id) > 5
+  ),
+  
+  CompanyCounts AS (
+    SELECT 
+      mc.company_id,
+      COUNT(m.movie_id) AS movie_count,
+      STRING_AGG(DISTINCT m.title, ', ') AS movies
+    FROM movie_companies mc
+    JOIN aka_title m ON mc.movie_id = m.id
+    WHERE mc.note IS NOT NULL
+    GROUP BY mc.company_id
+  )
+
+SELECT 
+  a.name AS actor_name,
+  COUNT(DISTINCT c.movie_id) AS number_of_co_stars,
+  STRING_AGG(DISTINCT co.name, ', ') AS co_stars,
+  COALESCE(cc.movie_count, 0) AS movies_produced,
+  STRING_AGG(DISTINCT cc.movies, '; ') AS produced_movies,
+  MAX(r.year_rank) AS top_year_rank
+FROM ActorStats a
+LEFT JOIN cast_info c ON a.person_id = c.person_id
+LEFT JOIN aka_name co ON co.person_id = c.person_id AND co.name <> a.name
+LEFT JOIN (SELECT company_id, COUNT(DISTINCT movie_id) AS movie_count FROM movie_companies GROUP BY company_id) mc ON mc.company_id = c.role_id
+LEFT JOIN CompanyCounts cc ON cc.company_id = c.role_id
+JOIN RankedMovies r ON r.title = c.movie_id
+WHERE 
+  c.nr_order IS NOT NULL
+  AND (c.note IS NULL OR c.note NOT LIKE '%extras%')
+GROUP BY a.name, cc.movie_count, a.avg_prod_year
+HAVING MAX(a.avg_prod_year) > 2000
+ORDER BY number_of_co_stars DESC, actor_name;

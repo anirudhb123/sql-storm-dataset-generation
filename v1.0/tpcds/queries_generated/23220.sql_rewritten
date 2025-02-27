@@ -1,0 +1,54 @@
+WITH RankedSales AS (
+    SELECT 
+        sm.sm_ship_mode_id,
+        ws.ws_sold_date_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        DENSE_RANK() OVER (PARTITION BY sm.sm_ship_mode_id ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (
+            SELECT d_date_sk 
+            FROM date_dim 
+            WHERE d_year = 2001 AND d_month_seq = 6
+        )
+    GROUP BY 
+        sm.sm_ship_mode_id, ws.ws_sold_date_sk
+),
+TopSales AS (
+    SELECT 
+        r.sm_ship_mode_id,
+        r.total_quantity,
+        r.total_sales,
+        r.sales_rank,
+        ROW_NUMBER() OVER (PARTITION BY r.sm_ship_mode_id ORDER BY r.total_sales DESC) AS row_num
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank <= 5
+)
+SELECT 
+    t.sm_ship_mode_id,
+    COALESCE(Total_Sales, 0) AS Adjusted_Total_Sales,
+    CASE 
+        WHEN t.total_sales IS NULL THEN 'No Sales'
+        ELSE 'Sales Recorded'
+    END AS Sales_Status,
+    STRING_AGG(t.sm_ship_mode_id, ', ') WITHIN GROUP (ORDER BY t.total_sales DESC) AS Combined_Ships
+FROM 
+    TopSales t
+LEFT JOIN 
+    warehouse w ON t.sm_ship_mode_id = w.w_warehouse_id
+WHERE 
+    t.row_num < 4 OR (t.row_num IS NULL AND EXISTS (
+        SELECT 1 
+        FROM store s 
+        WHERE s.s_store_sk IS NOT NULL
+    ))
+GROUP BY 
+    t.sm_ship_mode_id, t.total_sales
+ORDER BY 
+    Adjusted_Total_Sales DESC;

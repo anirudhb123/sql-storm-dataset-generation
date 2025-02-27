@@ -1,0 +1,83 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        P.CreationDate,
+        0 AS Level,
+        CAST(P.Title AS VARCHAR(300)) AS Path
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1  -- Starting with questions
+    UNION ALL
+    SELECT 
+        P2.Id,
+        P2.Title,
+        P2.OwnerUserId,
+        P2.CreationDate,
+        Level + 1,
+        CAST(RPH.Path + ' > ' + P2.Title AS VARCHAR(300))
+    FROM 
+        Posts P2
+    INNER JOIN 
+        RecursivePostHierarchy RPH ON P2.ParentId = RPH.PostId
+    WHERE 
+        P2.PostTypeId = 2  -- Answer posts
+),
+UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.Views,
+        ROW_NUMBER() OVER (PARTITION BY U.Reputation ORDER BY U.Views DESC) AS Rank
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation > 1000
+),
+PostStatistics AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        COUNT(C.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount,
+        SI.Title AS AcceptedAnswerTitle
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Posts SI ON P.AcceptedAnswerId = SI.Id
+    WHERE 
+        P.PostTypeId = 1  -- Only questions
+    GROUP BY 
+        P.Id, P.Title, SI.Title
+)
+SELECT 
+    PS.Title AS QuestionTitle,
+    PS.CommentCount,
+    PS.UpVoteCount,
+    PS.DownVoteCount,
+    CASE 
+        WHEN PS.UpVoteCount > PS.DownVoteCount THEN 'Positive'
+        WHEN PS.UpVoteCount = PS.DownVoteCount THEN 'Neutral'
+        ELSE 'Negative'
+    END AS Sentiment,
+    RPH.Path AS AnswerHierarchy,
+    UR.DisplayName AS ActiveUser,
+    UR.Reputation AS UserReputation
+FROM 
+    PostStatistics PS
+LEFT JOIN 
+    RecursivePostHierarchy RPH ON RPH.PostId = PS.Id
+INNER JOIN 
+    UserReputation UR ON PS.UpVoteCount > 5  -- Only include active users
+WHERE 
+    RPH.Level = 0  -- Only top-level questions
+ORDER BY 
+    PS.UpVoteCount DESC, PS.CommentCount DESC;

@@ -1,0 +1,55 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_id, 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL THEN ' Suite ' || ca_suite_number ELSE '' END) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip,
+        ca_country
+    FROM customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_id,
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_credit_rating
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+DateSales AS (
+    SELECT 
+        d.d_date,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM web_sales ws
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY d.d_date
+),
+RankedSales AS (
+    SELECT 
+        d_date,
+        total_sales,
+        total_orders,
+        RANK() OVER (ORDER BY total_sales DESC, total_orders DESC) AS sales_rank
+    FROM DateSales
+)
+SELECT 
+    c.full_name,
+    c.c_customer_id,
+    a.full_address,
+    a.ca_city,
+    a.ca_state,
+    d.d_date,
+    r.total_sales,
+    r.total_orders,
+    r.sales_rank
+FROM CustomerInfo c
+JOIN AddressInfo a ON c.c_customer_id = a.ca_address_id
+JOIN RankedSales r ON r.d_date = (SELECT MAX(d.d_date) FROM DateSales d)
+WHERE r.sales_rank <= 10
+ORDER BY r.total_sales DESC;

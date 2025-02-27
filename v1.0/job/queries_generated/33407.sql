@@ -1,0 +1,52 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level,
+        m.id AS root_movie_id
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mh.level + 1,
+        mh.root_movie_id
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    h.title AS root_movie_title,
+    h.production_year AS root_movie_year,
+    COUNT(DISTINCT h2.movie_id) AS linked_movies_count,
+    ARRAY_AGG(DISTINCT h2.title) AS linked_movie_titles,
+    COALESCE(SUM(CASE WHEN h2.production_year < 2010 THEN 1 END), 0) AS pre_2010_count,
+    STRING_AGG(DISTINCT c.name, ', ') AS cast_members,
+    MAX(CASE WHEN ci.kind_id IS NOT NULL THEN ci.kind_id ELSE 'UNKNOWN' END) AS role_types
+FROM 
+    movie_hierarchy h
+LEFT JOIN 
+    movie_link ml ON h.movie_id = ml.movie_id
+LEFT JOIN 
+    aka_title h2 ON ml.linked_movie_id = h2.id
+LEFT JOIN 
+    cast_info ci ON h.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name c ON ci.person_id = c.person_id
+WHERE 
+    h.level < 3
+GROUP BY 
+    h.root_movie_id, h.root_movie_title, h.root_movie_year
+ORDER BY 
+    h.root_movie_year DESC, linked_movies_count DESC
+LIMIT 10;

@@ -1,0 +1,75 @@
+WITH RecursivePostHierarchy AS (
+    SELECT Id AS PostId, ParentId, Title, OwnerUserId, CreationDate, 1 as Level
+    FROM Posts
+    WHERE ParentId IS NULL
+    UNION ALL
+    SELECT p.Id, p.ParentId, p.Title, p.OwnerUserId, p.CreationDate, Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+PostVoteSummary AS (
+    SELECT PostId,
+           COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+           COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+           COUNT(CASE WHEN VoteTypeId = 6 THEN 1 END) AS CloseVotes,
+           COUNT(CASE WHEN VoteTypeId = 7 THEN 1 END) AS ReopenVotes
+    FROM Votes
+    GROUP BY PostId
+),
+UserBadgeSummary AS (
+    SELECT UserId,
+           COUNT(CASE WHEN Class = 1 THEN 1 END) AS GoldBadges,
+           COUNT(CASE WHEN Class = 2 THEN 1 END) AS SilverBadges,
+           COUNT(CASE WHEN Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges
+    GROUP BY UserId
+), 
+TopUsers AS (
+    SELECT u.DisplayName,
+           u.Reputation,
+           u.Location,
+           ABS(COALESCE(u.Views, 0) - COALESCE(v.UpVotes, 0)) AS EngagementScore
+    FROM Users u
+    LEFT JOIN PostVoteSummary v ON u.Id = v.UserId
+    WHERE u.Reputation > 1000
+),
+FilteredPosts AS (
+    SELECT p.Id, 
+           p.Title, 
+           p.CreationDate,
+           p.Score,
+           p.Body,
+           COALESCE(ps.UpVotes, 0) AS UpVotes,
+           COALESCE(ps.DownVotes, 0) AS DownVotes,
+           COALESCE(ps.CloseVotes, 0) AS CloseVotes,
+           COALESCE(ps.ReopenVotes, 0) AS ReopenVotes,
+           COALESCE(b.GoldBadges, 0) AS GoldBadges,
+           COALESCE(b.SilverBadges, 0) AS SilverBadges,
+           COALESCE(b.BronzeBadges, 0) AS BronzeBadges,
+           rh.Level AS PostLevel
+    FROM Posts p
+    LEFT JOIN PostVoteSummary ps ON p.Id = ps.PostId
+    LEFT JOIN UserBadgeSummary b ON p.OwnerUserId = b.UserId
+    LEFT JOIN RecursivePostHierarchy rh ON p.Id = rh.PostId
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 year' 
+      AND (ps.UpVotes - ps.DownVotes) > 10
+)
+SELECT f.Title, 
+       f.CreationDate, 
+       f.Score, 
+       f.UpVotes, 
+       f.DownVotes, 
+       f.CloseVotes, 
+       f.ReopenVotes, 
+       f.GoldBadges, 
+       f.SilverBadges, 
+       f.BronzeBadges, 
+       u.DisplayName AS Owner, 
+       u.Location,
+       f.PostLevel
+FROM FilteredPosts f
+JOIN Users u ON f.OwnerUserId = u.Id
+ORDER BY f.CreationDate DESC, f.Score DESC
+LIMIT 100;
+
+This query incorporates multiple SQL constructs, such as recursive CTEs to navigate post hierarchies, a summary of votes for posts, user badge aggregation, filtering based on post activity, and ordering results with metrics that signify engagement.

@@ -1,0 +1,60 @@
+
+WITH RECURSIVE Sales AS (
+    SELECT 
+        ws_order_number,
+        ws_item_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_ext_sales_price,
+        ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_order_number ORDER BY ws_item_sk) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2451913 AND 2451916
+),
+AddressCounts AS (
+    SELECT 
+        c.c_first_name,
+        c.c_last_name,
+        ca.ca_city,
+        COUNT(DISTINCT c.c_current_addr_sk) AS unique_address_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1975 AND 1985
+    GROUP BY 
+        c.c_first_name, c.c_last_name, ca.ca_city
+),
+SalesData AS (
+    SELECT 
+        s.ws_order_number,
+        SUM(s.ws_quantity) AS total_quantity,
+        SUM(s.ws_ext_sales_price) AS total_sales,
+        SUM(s.ws_net_paid) AS total_net_paid
+    FROM 
+        Sales s
+    GROUP BY 
+        s.ws_order_number
+)
+SELECT 
+    ac.c_first_name,
+    ac.c_last_name,
+    ac.ca_city,
+    COALESCE(sd.total_quantity, 0) AS total_quantity,
+    COALESCE(sd.total_sales, 0.00) AS total_sales,
+    COALESCE(sd.total_net_paid, 0.00) AS total_net_paid,
+    CASE 
+        WHEN sd.total_sales > 1000 THEN 'High Value Customer'
+        ELSE 'Regular Customer'
+    END AS customer_category
+FROM 
+    AddressCounts ac
+LEFT JOIN 
+    SalesData sd ON ac.c_first_name = sd.ws_order_number
+WHERE 
+    ac.unique_address_count > 1
+ORDER BY 
+    ac.ca_city, ac.c_last_name;

@@ -1,0 +1,45 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        SUBSTRING_INDEX(c.c_email_address, '@', 1) AS email_prefix
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+AggregateData AS (
+    SELECT 
+        ci.ca_city,
+        ci.ca_state,
+        COUNT(*) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        STRING_AGG(DISTINCT ci.full_name, '; ') AS customer_names,
+        STRING_AGG(DISTINCT CONCAT_WS(' ', ci.email_prefix, ci.cd_gender, ci.cd_marital_status), '; ') AS email_info
+    FROM 
+        CustomerInfo ci
+    JOIN 
+        customer_demographics cd ON ci.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        ci.ca_city, ci.ca_state
+)
+SELECT 
+    CONCAT(ca_city, ', ', ca_state) AS location,
+    customer_count,
+    avg_purchase_estimate,
+    customer_names,
+    email_info
+FROM 
+    AggregateData
+ORDER BY 
+    customer_count DESC
+LIMIT 10;

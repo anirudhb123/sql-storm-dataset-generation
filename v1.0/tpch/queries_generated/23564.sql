@@ -1,0 +1,82 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_totalprice DESC) AS total_rank
+    FROM 
+        orders o
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+    HAVING 
+        SUM(ps.ps_availqty) > 1000 AND COUNT(DISTINCT ps.ps_partkey) > 10
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL AND c.c_acctbal > (SELECT AVG(c2.c_acctbal) FROM customer c2)
+    GROUP BY 
+        c.c_custkey
+),
+ProductCounts AS (
+    SELECT 
+        l.l_partkey,
+        COUNT(l.l_orderkey) AS order_frequency
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_partkey
+    HAVING 
+        COUNT(DISTINCT l.l_orderkey) > 5
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    p.p_retailprice,
+    COALESCE(cs.order_count, 0) AS customer_orders_count,
+    COALESCE(cs.total_spent, 0) AS customer_total_spent,
+    COALESCE(pc.order_frequency, 0) AS product_order_frequency,
+    r.r_name AS supplier_region,
+    CASE 
+        WHEN s.s_nationkey IS NOT NULL THEN s.s_name 
+        ELSE 'Unknown Supplier' 
+    END AS effective_supplier_name
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedOrders ro ON l.l_orderkey = ro.o_orderkey
+LEFT JOIN 
+    CustomerOrderSummary cs ON ro.o_custkey = cs.c_custkey
+LEFT JOIN 
+    FilteredSuppliers s ON l.l_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    ProductCounts pc ON p.p_partkey = pc.l_partkey
+WHERE 
+    p.p_size > 10 AND p.p_retailprice BETWEEN 50 AND 500
+ORDER BY 
+    customer_total_spent DESC, product_order_frequency DESC
+LIMIT 50 OFFSET 10;

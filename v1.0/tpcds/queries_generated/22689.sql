@@ -1,0 +1,56 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        ws_item_sk,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_ext_sales_price DESC) AS Rank
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (
+        SELECT d_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023 AND d_month_seq BETWEEN 1 AND 6
+    )
+), SalesSummary AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(CASE 
+            WHEN rs.Rank <= 5 THEN rs.ws_ext_sales_price 
+            ELSE 0 
+        END) AS Top5Sales,
+        COUNT(DISTINCT rs.ws_item_sk) AS DistinctItems
+    FROM customer c
+    LEFT JOIN RankedSales rs ON c.c_customer_sk = rs.ws_bill_customer_sk
+    GROUP BY c.c_customer_sk
+), CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        IFNULL(hd.hd_buy_potential, 'Unknown') AS BuyPotential,
+        COUNT(DISTINCT c.c_customer_sk) AS CustomerCount
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, hd.hd_income_band_sk
+)
+SELECT 
+    cd.cd_demo_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    SUM(ss.Top5Sales) AS TotalTop5Sales,
+    COUNT(DISTINCT ss.c_customer_sk) AS CustomerWithTopSales
+FROM CustomerDemographics cd
+LEFT JOIN SalesSummary ss ON cd.cd_demo_sk IN (
+    SELECT DISTINCT c.c_current_cdemo_sk 
+    FROM customer c
+)
+LEFT JOIN income_band ib ON cd.cd_income_band_sk = ib.ib_income_band_sk
+WHERE cd.cd_marital_status IS NOT NULL 
+AND (cd.cd_gender = 'M' OR cd.cd_gender IS NULL)
+GROUP BY cd.cd_demo_sk, cd.cd_gender, cd.cd_marital_status, ib.ib_lower_bound, ib.ib_upper_bound
+HAVING SUM(ss.Top5Sales) IS NOT NULL
+ORDER BY TotalTop5Sales DESC, cd.cd_marital_status, cd.cd_gender;

@@ -1,0 +1,75 @@
+
+WITH sales_summary AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales,
+        AVG(ws_net_profit) AS average_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_item_sk
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT c.c_first_name) AS distinct_first_names,
+        COUNT(DISTINCT c.c_last_name) AS distinct_last_names,
+        MAX(cd_purchase_estimate) AS max_purchase_estimate
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'M' AND cd.cd_marital_status = 'S'
+    GROUP BY 
+        c.c_customer_sk
+),
+item_prices AS (
+    SELECT 
+        i.i_item_sk,
+        MAX(i.i_current_price) AS max_price,
+        MIN(i.i_current_price) AS min_price
+    FROM 
+        item i
+    GROUP BY 
+        i.i_item_sk
+),
+returns AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(sr_returned_date_sk) AS total_returns,
+        SUM(sr_return_amt_inc_tax) AS total_return_amount
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_item_sk
+)
+SELECT 
+    s.item_id,
+    ss.total_quantity,
+    ss.total_sales,
+    ss.average_profit,
+    cs.distinct_first_names,
+    cs.distinct_last_names,
+    cs.max_purchase_estimate,
+    ip.max_price,
+    ip.min_price,
+    COALESCE(r.total_returns, 0) AS total_returns,
+    COALESCE(r.total_return_amount, 0) AS total_return_amount
+FROM 
+    (SELECT DISTINCT i_item_sk AS item_id FROM item) s
+LEFT JOIN 
+    sales_summary ss ON s.item_id = ss.ws_item_sk
+LEFT JOIN 
+    customer_stats cs ON cs.c_customer_sk IN (SELECT DISTINCT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = s.item_id)
+LEFT JOIN 
+    item_prices ip ON s.item_id = ip.i_item_sk
+LEFT JOIN 
+    returns r ON s.item_id = r.sr_item_sk
+WHERE 
+    ss.total_quantity > 0 OR r.total_returns IS NOT NULL
+ORDER BY 
+    ss.total_sales DESC, ss.average_profit ASC;

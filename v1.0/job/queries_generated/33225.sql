@@ -1,0 +1,52 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level,
+        CAST(m.title AS VARCHAR(255)) AS full_title
+    FROM title m
+    WHERE m.kind_id = 1  -- Assuming '1' is the identifier for movies
+
+    UNION ALL
+
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        CAST(mh.full_title || ' > ' || m.title AS VARCHAR(255)) AS full_title
+    FROM title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    a.id AS actor_id,
+    ak.name AS actor_name,
+    t.title AS movie_title,
+    th.production_year,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    AVG(COALESCE(mi.info_type_id, 0)) AS avg_info_type_id,
+    STRING_AGG(DISTINCT c.kind, ', ') AS company_kinds,
+    SUM(CASE WHEN c.kind = 'Distributor' THEN 1 ELSE 0 END) AS distributor_count
+FROM cast_info ci
+JOIN aka_name ak ON ci.person_id = ak.person_id
+JOIN title t ON ci.movie_id = t.id
+LEFT JOIN movie_keyword mk ON t.id = mk.movie_id
+LEFT JOIN keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN movie_companies mc ON t.id = mc.movie_id
+LEFT JOIN company_name c ON mc.company_id = c.id
+LEFT JOIN movie_info mi ON t.id = mi.movie_id
+LEFT JOIN MovieHierarchy mh ON mh.movie_id = t.id
+WHERE 
+    t.production_year >= 2000
+    AND ak.name IS NOT NULL
+GROUP BY 
+    a.id, ak.name, t.title, th.production_year
+HAVING 
+    COUNT(DISTINCT kw.keyword) > 2
+ORDER BY 
+    th.production_year DESC, keyword_count DESC
+LIMIT 50;
+

@@ -1,0 +1,77 @@
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+LineItemProjections AS (
+    SELECT 
+        l.l_orderkey,
+        COUNT(l.l_linenumber) AS line_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        SUM(l.l_tax) AS total_tax
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.c_name,
+    co.o_orderkey,
+    co.o_orderdate,
+    ls.line_count,
+    ls.total_revenue,
+    ls.total_tax,
+    COALESCE(ss.total_available, 0) AS total_available,
+    ss.avg_supply_cost,
+    CASE 
+        WHEN co.o_orderdate >= DATEADD(MONTH, -3, CURRENT_DATE) THEN 'Recent Order'
+        ELSE 'Old Order'
+    END AS order_recency,
+    CASE 
+        WHEN c.c_acctbal IS NULL THEN 'No Balance' 
+        ELSE 'Has Balance' 
+    END AS balance_status
+FROM 
+    CustomerOrders co
+JOIN 
+    TopCustomers c ON co.c_custkey = c.c_custkey
+LEFT JOIN 
+    LineItemProjections ls ON co.o_orderkey = ls.l_orderkey
+LEFT JOIN 
+    SupplierStats ss ON ss.ps_partkey = (SELECT ps_partkey FROM partsupp WHERE ps_suppkey IN (SELECT s_suppkey FROM supplier WHERE s_nationkey = c.c_nationkey) LIMIT 1)
+ORDER BY 
+    total_revenue DESC, c.c_name
+FETCH FIRST 100 ROWS ONLY;

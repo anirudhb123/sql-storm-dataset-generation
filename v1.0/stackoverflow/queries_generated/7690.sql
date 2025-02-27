@@ -1,0 +1,56 @@
+WITH UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName
+),
+TopVotedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName
+    FROM Posts P
+    JOIN Users U ON P.OwnerUserId = U.Id
+    WHERE P.PostTypeId IN (1, 2) -- Questions or Answers
+    ORDER BY P.Score DESC
+    LIMIT 10
+),
+PostComments AS (
+    SELECT 
+        C.PostId,
+        COUNT(C.Id) AS CommentCount
+    FROM Comments C
+    GROUP BY C.PostId
+),
+PostWithComments AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        COALESCE(C.CommentCount, 0) AS CommentCount
+    FROM Posts P
+    LEFT JOIN PostComments C ON P.Id = C.PostId
+    WHERE P.PostTypeId = 1 -- Questions only
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.BadgeCount,
+    U.GoldBadges,
+    U.SilverBadges,
+    U.BronzeBadges,
+    P.Title AS TopPostTitle,
+    P.Score,
+    P.ViewCount,
+    P.CommentCount
+FROM UserBadges U
+JOIN TopVotedPosts T ON T.OwnerDisplayName = U.DisplayName
+JOIN PostWithComments P ON P.PostId = T.PostId
+ORDER BY U.BadgeCount DESC, T.Score DESC;

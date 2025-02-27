@@ -1,0 +1,74 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS SupplierRank
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+TotalOrders AS (
+    SELECT 
+        o.o_custkey,
+        COUNT(o.o_orderkey) AS OrderCount,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        o.o_custkey
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(CASE 
+            WHEN ps.ps_availqty IS NULL THEN 0 
+            ELSE ps.ps_availqty 
+        END) AS TotalAvailable
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderLineItem AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        l.l_discount,
+        l.l_tax
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_returnflag = 'N' 
+        AND l.l_shipdate >= cast('1998-10-01' as date) - INTERVAL '30 DAY'
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_mfgr,
+    p.p_retailprice,
+    COALESCE(sa.TotalAvailable, 0) AS AvailableQuantity,
+    COALESCE(SUM(ol.ExtendedPrice * (1 - ol.Discount) + ol.Tax), 0) AS Revenue,
+    RANK() OVER (PARTITION BY n.n_nationkey ORDER BY COALESCE(SUM(ol.ExtendedPrice * (1 - ol.Discount) + ol.Tax), 0) DESC) AS RevenueRank
+FROM 
+    part p
+LEFT JOIN 
+    SupplierAvailability sa ON p.p_partkey = sa.ps_partkey
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    TotalOrders to ON l.l_orderkey = to.o_custkey
+LEFT JOIN 
+    nation n ON n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = l.l_suppkey)
+LEFT JOIN 
+    OrderLineItem ol ON ol.l_orderkey = l.l_orderkey
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_mfgr, p.p_retailprice, n.n_nationkey, sa.TotalAvailable
+HAVING 
+    COALESCE(SUM(ol.ExtendedPrice * (1 - ol.Discount) + ol.Tax), 0) > 5000
+ORDER BY 
+    RevenueRank, AvailableQuantity DESC, p.p_name;

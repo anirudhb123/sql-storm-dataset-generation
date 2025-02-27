@@ -1,0 +1,46 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositiveScorePosts,
+        AVG(p.ViewCount) AS AverageViewCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TagPostStats AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(DISTINCT p.OwnerUserId) AS UniqueUsers,
+        AVG(p.ViewCount) AS AverageViewCount
+    FROM 
+        Tags t
+    LEFT JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+)
+SELECT 
+    u.DisplayName AS UserDisplayName,
+    u.TotalPosts,
+    u.TotalQuestions,
+    u.TotalAnswers,
+    u.PositiveScorePosts,
+    u.AverageViewCount,
+    t.TagName,
+    t.TotalPosts AS TagTotalPosts,
+    t.UniqueUsers AS TagUniqueUsers,
+    t.AverageViewCount AS TagAverageViewCount
+FROM 
+    UserPostStats u
+FULL OUTER JOIN 
+    TagPostStats t ON u.Id = t.TagName 
+ORDER BY 
+    u.TotalPosts DESC, t.TotalPosts DESC;

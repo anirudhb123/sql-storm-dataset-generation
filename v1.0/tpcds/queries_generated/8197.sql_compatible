@@ -1,0 +1,49 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_paid) AS average_order_value,
+        EXTRACT(YEAR FROM d.d_date) AS sales_year,
+        d.d_month AS sales_month
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' AND 
+        d.d_year = 2023
+    GROUP BY 
+        ws.web_site_id, sales_year, sales_month
+),
+SalesRanking AS (
+    SELECT 
+        web_site_id,
+        sales_year,
+        sales_month,
+        total_net_profit,
+        total_orders,
+        average_order_value,
+        RANK() OVER (PARTITION BY sales_year, sales_month ORDER BY total_net_profit DESC) AS profit_rank
+    FROM 
+        SalesData
+)
+SELECT 
+    s.web_site_id,
+    s.sales_year,
+    s.sales_month,
+    s.total_net_profit,
+    s.total_orders,
+    s.average_order_value,
+    s.profit_rank
+FROM 
+    SalesRanking s
+WHERE 
+    s.profit_rank <= 10
+ORDER BY 
+    s.sales_year, s.sales_month, s.profit_rank;

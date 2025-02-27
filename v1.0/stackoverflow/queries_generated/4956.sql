@@ -1,0 +1,69 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        MAX(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS IsUpvoted,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerRecentPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+)
+SELECT 
+    ra.Title,
+    ra.CreationDate,
+    ra.Score,
+    ra.ViewCount,
+    ra.IsUpvoted,
+    ra.CommentCount,
+    ua.DisplayName AS OwnerDisplayName,
+    ua.Reputation AS OwnerReputation,
+    ua.TotalPosts,
+    ua.TotalViews,
+    ua.AcceptedAnswers,
+    COALESCE(t.TagName, 'Uncategorized') AS TagName
+FROM 
+    RankedPosts ra
+LEFT JOIN 
+    Users u ON ra.Id = u.Id
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+LEFT JOIN 
+    (SELECT 
+         DISTINCT Tags.TagName, p.Id 
+     FROM 
+         Posts p 
+     JOIN 
+         UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '> <'))::text[]) AS tag ON tag = Tags.TagName
+     JOIN 
+         Tags ON Tags.TagName = tag) t ON ra.Id = t.Id
+WHERE 
+    (ra.OwnerRecentPostRank <= 3 OR ra.IsUpvoted = 1)
+ORDER BY 
+    ra.CreationDate DESC, ra.Score DESC
+LIMIT 100;

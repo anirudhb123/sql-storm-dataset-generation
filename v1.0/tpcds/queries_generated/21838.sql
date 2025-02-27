@@ -1,0 +1,55 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        COALESCE(NULLIF(i.i_brand, ''), 'Unknown') AS cleaned_brand,
+        0 AS level
+    FROM item i
+    WHERE i.i_rec_start_date <= CURRENT_DATE AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CURRENT_DATE)
+    
+    UNION ALL
+    
+    SELECT
+        ih.i_item_sk,
+        ih.i_item_id,
+        ih.i_item_desc,
+        ih.i_current_price * 0.9 AS i_current_price,
+        COALESCE(NULLIF(ih.i_brand, ''), 'Unknown') AS cleaned_brand,
+        ih.level + 1
+    FROM item_hierarchy ih
+    JOIN item i ON ih.i_item_sk = i.i_item_sk
+    WHERE ih.level < 2
+)
+
+SELECT 
+    c.c_customer_id,
+    COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+    SUM(ws.ws_ext_sales_price) AS total_revenue,
+    AVG(ws.ws_net_profit) AS avg_net_profit,
+    DENSE_RANK() OVER (PARTITION BY c.c_birth_year ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS rank_per_birth_year,
+    (SELECT COUNT(*)
+     FROM web_sales ws2
+     WHERE ws2.ws_bill_customer_sk = c.c_customer_sk AND ws2.ws_sold_date_sk = ws.ws_sold_date_sk) AS order_count_same_date,
+    (SELECT MAX(ws_ext_sales_price)
+     FROM web_sales 
+     WHERE ws_bill_customer_sk = c.c_customer_sk AND ws_sold_date_sk = ws.ws_sold_date_sk) AS max_sales_price_on_date,
+     MAX(CASE WHEN ws.ws_ext_sales_price < 0 THEN 'Negative Sale' ELSE 'Sale' END) AS transaction_type
+FROM customer c
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+WHERE c.c_current_cdemo_sk IS NOT NULL
+  AND (c.c_birth_year BETWEEN 1970 AND 1990 OR c.c_birth_month = 5)
+GROUP BY c.c_customer_id, c.c_birth_year
+HAVING SUM(ws.ws_ext_sales_price) > (
+    SELECT AVG(ws_ext_sales_price) * 1.5
+    FROM web_sales ws3
+    WHERE ws3.ws_sold_date_sk IN (
+        SELECT ws_sold_date_sk 
+        FROM date_dim 
+        WHERE d_year = 2023 AND d_month_seq <= 6
+    )
+)
+ORDER BY total_revenue DESC
+LIMIT 10 OFFSET 5;

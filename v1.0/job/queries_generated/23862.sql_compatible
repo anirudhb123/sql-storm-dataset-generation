@@ -1,0 +1,93 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        ml.linked_movie_id,
+        1 AS level
+    FROM 
+        title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year > 2000
+
+    UNION ALL
+
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        m.level + 1
+    FROM 
+        title mt
+    JOIN 
+        movie_link ml ON mt.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy m ON m.movie_id = ml.movie_id
+    WHERE 
+        m.level < 3
+)
+
+SELECT 
+    ak.name AS actor_name,
+    m.movie_title,
+    m.production_year,
+    COUNT(DISTINCT kc.keyword) AS keyword_count,
+    STRING_AGG(DISTINCT kc.keyword, ', ') AS keywords,
+    AVG(INFO.info_length) AS avg_info_length,
+    P.info AS person_info,
+    R.role AS person_role,
+    COALESCE(CNT.active_count, 0) AS active_movie_count,
+    CASE 
+        WHEN p.gender IS NULL THEN 'Not Specified'
+        ELSE p.gender
+    END AS gender
+FROM 
+    aka_name ak
+JOIN 
+    cast_info c ON ak.person_id = c.person_id
+JOIN 
+    movie_hierarchy m ON c.movie_id = m.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = m.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    person_info P ON ak.person_id = P.person_id
+LEFT JOIN (
+    SELECT 
+        c.person_id, 
+        COUNT(DISTINCT m.id) AS active_count 
+    FROM 
+        cast_info c 
+    JOIN 
+        movie_companies mc ON c.movie_id = mc.movie_id 
+    JOIN 
+        title m ON mc.movie_id = m.id 
+    WHERE 
+        mc.company_type_id IS NOT NULL
+    GROUP BY 
+        c.person_id
+) CNT ON ak.person_id = CNT.person_id
+LEFT JOIN 
+    role_type R ON c.role_id = R.id
+LEFT JOIN (
+    SELECT DISTINCT 
+        movie_id, 
+        LENGTH(info) AS info_length 
+    FROM 
+        movie_info 
+    WHERE 
+        info IS NOT NULL
+) INFO ON m.movie_id = INFO.movie_id
+WHERE 
+    m.level = 2
+GROUP BY 
+    ak.name, m.movie_title, m.production_year, P.info, R.role, CNT.active_count, p.gender
+HAVING 
+    COUNT(DISTINCT kc.keyword) > 2 
+ORDER BY 
+    m.production_year DESC, keyword_count DESC;

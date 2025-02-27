@@ -1,0 +1,88 @@
+WITH RegionStats AS (
+    SELECT 
+        r.r_regionkey, 
+        r.r_name,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        AVG(s.s_acctbal) AS avg_acctbal,
+        SUM(CASE WHEN s.s_acctbal IS NULL THEN 1 ELSE 0 END) AS null_acctbal_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        r.r_regionkey, 
+        r.r_name
+),
+PartStats AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rank_by_price
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_type
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, 
+        c.c_name
+)
+SELECT 
+    r.r_name, 
+    p.p_name, 
+    cs.c_name, 
+    cs.total_orders,
+    cs.total_spent,
+    rs.supplier_count,
+    ps.total_available,
+    ps.avg_supply_cost,
+    ps.rank_by_price
+FROM 
+    RegionStats rs
+JOIN 
+    PartStats ps ON ps.total_available > 500
+JOIN 
+    CustomerOrders cs ON cs.total_spent > (
+        SELECT 
+            AVG(total_spent) 
+        FROM 
+            CustomerOrders
+    )
+LEFT JOIN 
+    lineitem l ON l.l_orderkey IN (
+        SELECT o.o_orderkey 
+        FROM orders o 
+        WHERE o.o_orderstatus = 'F'
+    )
+WHERE 
+    rs.null_acctbal_count = 0 
+    AND EXISTS (
+        SELECT 1 
+        FROM supplier s 
+        WHERE s.s_nationkey = (
+            SELECT n.n_nationkey 
+            FROM nation n 
+            WHERE n.n_name = 'USA'
+        )
+        AND s.s_acctbal > 1000
+    )
+ORDER BY 
+    r.r_name, ps.total_available DESC;

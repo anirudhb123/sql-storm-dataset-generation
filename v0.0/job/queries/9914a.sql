@@ -1,0 +1,4 @@
+SELECT min(mi_idx.info) AS rating, min(t.title) AS northern_dark_movie
+FROM info_type AS it1, info_type AS it2, keyword AS k, kind_type AS kt, movie_info AS mi, movie_info_idx AS mi_idx, movie_keyword AS mk, title AS t
+WHERE kt.id = t.kind_id AND t.id = mi.movie_id AND t.id = mk.movie_id AND t.id = mi_idx.movie_id AND mk.movie_id = mi.movie_id AND mk.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND k.id = mk.keyword_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND t.phonetic_code < 'R5145' AND mi.info_type_id IN (12, 18, 93) AND mi.note IN ('(Goodbye Winter - Cinema Heralds of a Major Change)', '(as Eastern Service Studios, Inc.)', '(color processing by) (as TVC Laboratories)', '(exteriors of The Colpepper Institute)', '(final outdoor scene)', 'Blum, Mike (I)', 'Dave Andrae', 'Galen Summer', 'Janet Edwards <jigger@rocketmail.com>', 'Oivind Naess');

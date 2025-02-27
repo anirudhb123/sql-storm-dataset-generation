@@ -1,0 +1,68 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn,
+        COALESCE(p.Score, 0) AS AdjustedScore,
+        COALESCE(STRING_AGG(DISTINCT t.TagName, ', ' ORDER BY t.TagName), 'No Tags') AS TagsList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        LATERAL (
+            SELECT 
+                unnest(string_to_array(p.Tags, '>')) AS TagName
+        ) t ON TRUE
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.Score
+), 
+PostVoteDetails AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes, 
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        SUM(CASE 
+            WHEN v.CreationDate > p.CreationDate 
+            THEN 1 
+            ELSE 0 
+        END) AS RecentVotes
+    FROM 
+        Votes v
+    JOIN 
+        Posts p ON v.PostId = p.Id
+    GROUP BY 
+        v.PostId
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS ClosureCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.TagsList,
+    COALESCE(v.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(v.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(h.ClosureCount, 0) AS TotalClosures,
+    CASE 
+        WHEN rp.rn = 1 THEN 'Latest Post' 
+        ELSE 'Earlier Post' 
+    END AS PostSequence,
+    (rp.AdjustedScore - COALESCE(v.DownVotes, 0) + COALESCE(v.UpVotes, 0)) AS ScoreAdjustment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostVoteDetails v ON rp.PostId = v.PostId
+LEFT JOIN 
+    PostHistoryStats h ON rp.PostId = h.PostId
+WHERE 
+    rp.ViewCount > 100  
+ORDER BY 
+    ScoreAdjustment DESC NULLS LAST;

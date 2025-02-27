@@ -1,0 +1,64 @@
+
+WITH RECURSIVE part_supplier_summary AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_suppkey, 
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rn,
+        SUM(ps.ps_availqty) OVER (PARTITION BY p.p_partkey) AS total_availqty
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+),
+customer_region AS (
+    SELECT 
+        c.c_custkey,
+        r.r_name AS region_name,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c 
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey 
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, r.r_name
+)
+SELECT 
+    ps.p_partkey,
+    ps.p_name,
+    COALESCE(s.s_name, 'No Supplier') AS supplier_name,
+    ps.total_availqty,
+    CASE 
+        WHEN ps.rn = 1 THEN 'Primary Supplier'
+        ELSE 'Secondary Supplier'
+    END AS supplier_type,
+    cr.region_name,
+    cr.total_orders,
+    AVG(CASE WHEN l.l_discount > 0.1 THEN l.l_extendedprice END) OVER (PARTITION BY ps.p_partkey) AS avg_discounted_price,
+    COUNT(DISTINCT l.l_orderkey) AS unique_order_count,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN 1 ELSE 0 END) AS total_returns
+FROM 
+    part_supplier_summary ps
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    lineitem l ON ps.p_partkey = l.l_partkey 
+JOIN 
+    customer_region cr ON cr.c_custkey = ps.ps_suppkey
+WHERE 
+    ps.total_availqty IS NOT NULL
+    AND (l.l_shipdate >= '1997-01-01' OR l.l_shipdate IS NULL)
+    AND s.s_acctbal IS NOT NULL
+GROUP BY 
+    ps.p_partkey, ps.p_name, ps.total_availqty, supplier_name, ps.rn, cr.region_name, cr.total_orders
+HAVING 
+    unique_order_count > 5 
+    OR (AVG(l.l_discount) IS NULL AND total_returns = 0)
+ORDER BY 
+    ps.p_partkey DESC, cr.total_orders ASC;

@@ -1,0 +1,53 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS total_posts
+    FROM Posts p
+    WHERE p.CreationDate > NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+PopularTags AS (
+    SELECT 
+        UNNEST(STRING_TO_ARRAY(Trim(b.Tags), '><')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM Posts b
+    WHERE b.PostTypeId = 1
+    GROUP BY TagName
+    ORDER BY TagCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    up.BadgeCount,
+    up.GoldBadges,
+    up.SilverBadges,
+    up.BronzeBadges,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    pt.TagName
+FROM Users u
+LEFT JOIN UserBadges up ON u.Id = up.UserId
+JOIN RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+LEFT JOIN PopularTags pt ON pt.TagName = ANY(STRING_TO_ARRAY(rp.Tags, '><'))
+WHERE u.Reputation > 5000
+ORDER BY rp.Score DESC, up.BadgeCount DESC
+LIMIT 50;

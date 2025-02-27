@@ -1,0 +1,64 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVoteCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVoteCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.PostTypeId = 1 
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.OwnerUserId
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM Badges b
+    GROUP BY b.UserId
+),
+UserRank AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName,
+        u.Reputation,
+        ub.BadgeCount,
+        ub.HighestBadgeClass,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+    LEFT JOIN UserBadges ub ON u.Id = ub.UserId
+)
+SELECT 
+    ur.UserId, 
+    ur.DisplayName, 
+    ur.Reputation,
+    ur.BadgeCount,
+    ur.HighestBadgeClass,
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    CASE 
+        WHEN rp.Rank = 1 THEN 'Top Post'
+        ELSE 'Regular Post'
+    END AS PostRank
+FROM UserRank ur
+JOIN RankedPosts rp ON ur.UserId = rp.OwnerUserId
+WHERE ur.BadgeCount > 0 
+AND ur.Reputation > (
+    SELECT AVG(Reputation) 
+    FROM Users 
+    WHERE Reputation IS NOT NULL
+)
+ORDER BY ur.Reputation DESC, rp.Score DESC
+LIMIT 100;

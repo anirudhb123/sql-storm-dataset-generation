@@ -1,0 +1,57 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        COUNT(*) AS total_addresses,
+        STRING_AGG(CONCAT_WS(' ', ca_street_number, ca_street_name, ca_street_type, ca_suite_number), ', ') AS all_streets
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_city, ca_state
+),
+DemographicStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS total_customers,
+        AVG(cd_dep_count) AS avg_dependents,
+        STRING_AGG(CONCAT(cd_marital_status, ': ', cd_education_status), '; ') AS education_status_summary
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+SalesAggregates AS (
+    SELECT 
+        d.d_year,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        STRING_AGG(DISTINCT i.i_item_desc, '; ') AS sold_items
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        d.d_year
+)
+SELECT 
+    AS.ca_city AS address_city,
+    AS.ca_state AS address_state,
+    AS.total_addresses,
+    AS.all_streets,
+    DS.cd_gender AS demographic_gender,
+    DS.total_customers,
+    DS.avg_dependents,
+    DS.education_status_summary,
+    SA.d_year AS sales_year,
+    SA.total_net_profit,
+    SA.sold_items
+FROM 
+    AddressStats AS AS
+JOIN 
+    DemographicStats DS ON TRUE
+JOIN 
+    SalesAggregates SA ON TRUE
+ORDER BY 
+    AS.ca_city, DS.cd_gender, SA.d_year;

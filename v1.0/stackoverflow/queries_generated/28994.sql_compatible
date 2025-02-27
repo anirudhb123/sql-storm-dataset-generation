@@ -1,0 +1,48 @@
+
+WITH TagStatistics AS (
+    SELECT
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(VotesCount.UpVoteCount) AS AverageUpVotes,
+        AVG(VotesCount.DownVoteCount) AS AverageDownVotes
+    FROM
+        Tags
+    LEFT JOIN
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::text[])
+    LEFT JOIN (
+        SELECT
+            PostId,
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+        FROM
+            Votes
+        GROUP BY
+            PostId
+    ) AS VotesCount ON Posts.Id = VotesCount.PostId
+    GROUP BY
+        Tags.TagName
+),
+TopTags AS (
+    SELECT
+        TagName,
+        PostCount,
+        TotalViews,
+        AverageUpVotes,
+        AverageDownVotes,
+        DENSE_RANK() OVER (ORDER BY TotalViews DESC) AS TagRank
+    FROM
+        TagStatistics
+)
+SELECT
+    TagName,
+    PostCount,
+    TotalViews,
+    AverageUpVotes,
+    AverageDownVotes
+FROM
+    TopTags
+WHERE
+    TagRank <= 10
+ORDER BY
+    TotalViews DESC;

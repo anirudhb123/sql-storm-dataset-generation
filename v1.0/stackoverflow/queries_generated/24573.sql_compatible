@@ -1,0 +1,83 @@
+
+WITH UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+QuestionStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(*) AS QuestionCount,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswerCount,
+        AVG(p.Score) AS AvgScore
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+          AND p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' 
+    GROUP BY 
+        p.OwnerUserId
+),
+PostActivity AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS ActivityOrder
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 24 
+),
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(pa.UserId, -1) AS LastActivityUser, 
+        MAX(pa.CreationDate) AS LastActivityDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostActivity pa ON p.Id = pa.PostId
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges,
+    qs.QuestionCount,
+    qs.AcceptedAnswerCount,
+    qs.AvgScore,
+    ra.PostId,
+    ra.LastActivityUser,
+    ra.LastActivityDate
+FROM 
+    Users u
+LEFT JOIN 
+    UserBadgeCounts ub ON u.Id = ub.UserId
+LEFT JOIN 
+    QuestionStats qs ON u.Id = qs.OwnerUserId
+LEFT JOIN 
+    RecentActivity ra ON u.Id = ra.LastActivityUser
+WHERE 
+    (ub.BadgeCount IS NULL OR ub.BadgeCount > 0) 
+    AND (qs.QuestionCount IS NULL OR qs.QuestionCount > 5) 
+    AND (ra.LastActivityDate IS NOT NULL OR ra.LastActivityUser = -1) 
+ORDER BY 
+    ub.BadgeCount DESC, 
+    qs.QuestionCount DESC, 
+    qs.AvgScore DESC
+FETCH FIRST 100 ROWS ONLY;

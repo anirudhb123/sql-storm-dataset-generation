@@ -1,0 +1,79 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rank_profit,
+        SUM(ws.ws_quantity) OVER (PARTITION BY ws.ws_bill_customer_sk) AS total_quantity_billed,
+        COUNT(DISTINCT ws.ws_bill_customer_sk) OVER () AS total_customers
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+        AND ws.ws_order_number IN (
+            SELECT 
+                cr_order_number 
+            FROM 
+                catalog_returns 
+            WHERE 
+                cr_return_quantity > 0
+        )
+), HighProfitItems AS (
+    SELECT 
+        item.i_item_id,
+        item.i_item_desc,
+        rs.rank_profit,
+        rs.total_quantity_billed,
+        rs.total_customers
+    FROM 
+        RankedSales rs
+    JOIN 
+        item ON item.i_item_sk = rs.ws_item_sk
+    WHERE 
+        rs.rank_profit = 1
+), CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(SUM(ws.ws_net_profit), 0) AS total_net_profit,
+        COUNT(*) AS purchase_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_id, c.c_first_name, c.c_last_name
+    HAVING 
+        COUNT(*) > 5
+)
+SELECT 
+    ci.i_item_id,
+    ci.i_item_desc,
+    cs.c_customer_id,
+    cs.total_net_profit,
+    cs.purchase_count
+FROM 
+    HighProfitItems ci
+JOIN 
+    CustomerStats cs ON cs.total_quantity_billed > (
+        SELECT 
+            COALESCE(MAX(total_quantity_billed), 0) 
+        FROM 
+            HighProfitItems 
+        WHERE 
+            total_quantity_billed IS NOT NULL
+    )
+UNION ALL
+SELECT 
+    NULL AS i_item_id, 
+    NULL AS i_item_desc,
+    cs.c_customer_id, 
+    cs.total_net_profit, 
+    cs.purchase_count
+FROM 
+    CustomerStats cs
+WHERE 
+    cs.total_net_profit = 0
+ORDER BY 
+    cs.total_net_profit DESC NULLS LAST;

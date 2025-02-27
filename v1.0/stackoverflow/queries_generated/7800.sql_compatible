@@ -1,0 +1,84 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS RN
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate > DATEADD(day, -30, '2024-10-01')
+        AND p.PostTypeId = 1 
+), PopularTags AS (
+    SELECT 
+        unnest(string_to_array(Tags, '>')) AS TagName,
+        COUNT(*) AS TagCount
+    FROM 
+        Posts 
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC 
+    LIMIT 10
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+), AggregatedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.Score,
+        rp.AnswerCount,
+        rp.OwnerDisplayName,
+        pt.Name AS PostType,
+        COALESCE(tr.TagCount, 0) AS PopularTagCount,
+        ur.Reputation,
+        ur.BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostTypes pt ON rp.AnswerCount > 0
+    LEFT JOIN 
+        PopularTags tr ON rp.Tags LIKE '%' || tr.TagName || '%'
+    LEFT JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+)
+SELECT 
+    PostId,
+    Title,
+    ViewCount,
+    CASE 
+        WHEN Score > 10 THEN 'Highly Rated' 
+        WHEN Score BETWEEN 1 AND 10 THEN 'Moderately Rated' 
+        ELSE 'Low Rated' 
+    END AS RatingCategory,
+    OwnerDisplayName,
+    PopularTagCount,
+    Reputation,
+    BadgeCount,
+    CreationDate
+FROM 
+    AggregatedData
+WHERE 
+    RN = 1
+ORDER BY 
+    ViewCount DESC, Score DESC;

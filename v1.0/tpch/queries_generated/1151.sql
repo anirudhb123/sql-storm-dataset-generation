@@ -1,0 +1,70 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01'
+),
+SupplierCost AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+LineItemsByOrder AS (
+    SELECT
+        li.l_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_line_value
+    FROM 
+        lineitem li
+    WHERE 
+        li.l_shipdate >= DATE '2023-01-01'
+    GROUP BY 
+        li.l_orderkey
+),
+CustomerDetails AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (ORDER BY c.c_acctbal DESC) AS cust_rank
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal > 5000
+)
+SELECT
+    DISTINCT 
+    cd.c_name,
+    cd.nation,
+    o.o_orderkey,
+    o.o_orderdate,
+    COALESCE(l.total_line_value, 0) AS total_line_value,
+    COALESCE(sc.total_supply_cost, 0) AS total_supply_cost,
+    CASE 
+        WHEN cd.cust_rank <= 10 THEN 'Top Customer'
+        ELSE 'Regular Customer'
+    END AS customer_status
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    LineItemsByOrder l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN 
+    SupplierCost sc ON l.total_line_value > sc.total_supply_cost
+JOIN 
+    CustomerDetails cd ON o.o_custkey = cd.c_custkey
+WHERE 
+    o.order_rank <= 5
+ORDER BY 
+    o.o_orderdate DESC, 
+    cd.c_name ASC;

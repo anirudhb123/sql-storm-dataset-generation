@@ -1,0 +1,56 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_totalprice, o_orderdate, 1 AS order_level
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT oh.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate, oh.order_level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_orderkey = oh.o_orderkey
+    WHERE o.o_orderstatus = 'O' AND oh.order_level < 5
+),
+
+TotalSales AS (
+    SELECT c.c_name, SUM(o.o_totalprice) AS total_sales
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_name
+),
+
+SupplierStats AS (
+    SELECT s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_name
+),
+
+DailyShipping AS (
+    SELECT l_shipdate, SUM(l_extendedprice * (1 - l_discount)) AS total_revenue
+    FROM lineitem
+    GROUP BY l_shipdate
+    HAVING l_shipdate >= DATE '1997-01-01' AND l_shipdate < DATE '1997-10-01'
+),
+
+PopularParts AS (
+    SELECT p.p_name, COUNT(l.l_partkey) AS order_count
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY p.p_name
+    ORDER BY order_count DESC
+    LIMIT 10
+)
+
+SELECT 
+    r.r_name,
+    ph.order_level,
+    COALESCE(t.total_sales, 0) AS customer_total_sales,
+    COALESCE(s.total_supply_cost, 0) AS supplier_total_cost,
+    d.total_revenue
+FROM region r
+LEFT JOIN OrderHierarchy ph ON ph.o_orderkey IS NOT NULL
+LEFT JOIN TotalSales t ON t.total_sales > 1000
+LEFT JOIN SupplierStats s ON s.s_name IS NOT NULL
+LEFT JOIN DailyShipping d ON d.l_shipdate = cast('1998-10-01' as date)
+WHERE r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_name = 'GERMANY')
+ORDER BY r.r_name, ph.order_level DESC;

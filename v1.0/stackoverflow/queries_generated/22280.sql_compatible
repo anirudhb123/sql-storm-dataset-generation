@@ -1,0 +1,71 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.ViewCount DESC) AS Rank,
+        COALESCE(UPPER(p.Body), 'No Content') AS BodyPreview,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS Upvotes, 
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS Downvotes
+    FROM Posts p
+    JOIN PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE p.CreationDate >= DATE '2024-10-01' - INTERVAL '365 days'
+    AND (p.Score IS NULL OR p.Score > 0)
+),
+PostTagStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(DISTINCT t.Id) AS TagCount,
+        STRING_AGG(t.TagName, ', ' ORDER BY t.TagName) AS TagsList
+    FROM Posts p
+    LEFT JOIN LATERAL (
+        SELECT UNNEST(string_to_array(p.Tags, '><')) AS TagName
+    ) AS t ON TRUE
+    GROUP BY p.Id
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        STRING_AGG(b.Name, ', ' ORDER BY b.Name) AS BadgeNames,
+        COUNT(b.Id) AS BadgeCount,
+        MAX(b.Date) AS LastBadgeDate
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+DailyActiveUsers AS (
+    SELECT 
+        CAST(LastAccessDate AS DATE) AS ActiveDate,
+        COUNT(DISTINCT Id) AS UserCount
+    FROM Users
+    WHERE LastAccessDate >= DATE '2024-10-01' - INTERVAL '30 days'
+    GROUP BY ActiveDate
+)
+SELECT 
+    rp.PostId, 
+    rp.Title,
+    rp.BodyPreview,
+    pts.TagCount,
+    pts.TagsList,
+    rp.ViewCount,
+    rp.Score,
+    rp.Upvotes,
+    rp.Downvotes,
+    ub.UserId AS BadgeOwnerId,
+    ub.BadgeNames,
+    ub.BadgeCount,
+    ub.LastBadgeDate,
+    dau.ActiveDate,
+    dau.UserCount
+FROM RankedPosts rp
+LEFT JOIN PostTagStats pts ON rp.PostId = pts.PostId
+LEFT JOIN UserBadges ub ON rp.OwnerUserId = ub.UserId
+LEFT JOIN DailyActiveUsers dau ON dau.ActiveDate = DATE '2024-10-01'
+WHERE rp.Rank <= 5
+AND (ub.BadgeCount IS NULL OR ub.BadgeCount >= 2)
+ORDER BY rp.ViewCount DESC, rp.CreationDate DESC
+FETCH FIRST 50 ROWS ONLY;

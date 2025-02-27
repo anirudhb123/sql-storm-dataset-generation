@@ -1,0 +1,67 @@
+
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        1 AS level
+    FROM 
+        partsupp ps
+    WHERE 
+        ps.ps_availqty > 0
+    UNION ALL
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty - SC.ps_supplycost AS ps_availqty,
+        ps.ps_supplycost,
+        SC.level + 1
+    FROM 
+        partsupp ps
+    INNER JOIN SupplyChain SC ON ps.ps_partkey = SC.ps_partkey
+    WHERE 
+        ps.ps_availqty > SC.ps_supplycost
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_spent,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS recent_order
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(COALESCE(SC.ps_availqty, 0)) AS total_availqty,
+    AVG(co.total_spent) AS avg_spent,
+    (SELECT COUNT(*) FROM customer WHERE c_acctbal > 50000) AS high_value_customers
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    SupplyChain SC ON s.s_suppkey = SC.ps_suppkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = s.s_suppkey
+GROUP BY 
+    r.r_name, n.n_name
+HAVING 
+    COUNT(DISTINCT co.c_custkey) > 10
+ORDER BY 
+    total_availqty DESC, avg_spent DESC;

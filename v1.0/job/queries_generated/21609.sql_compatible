@@ -1,0 +1,105 @@
+
+WITH RECURSIVE MovieChains AS (
+    SELECT 
+        mc.movie_id,
+        mc.company_id,
+        cn.name AS company_name,
+        COALESCE(ki.kind, 'Unknown') AS company_type,
+        1 AS depth
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ki ON mc.company_type_id = ki.id
+
+    UNION ALL
+
+    SELECT 
+        mc2.movie_id,
+        mc2.company_id,
+        cn.name,
+        COALESCE(ki.kind, 'Unknown'),
+        mc.depth + 1
+    FROM 
+        MovieChains mc
+    JOIN 
+        movie_companies mc2 ON mc.movie_id = mc2.movie_id
+    LEFT JOIN 
+        company_name cn ON mc2.company_id = cn.id
+    LEFT JOIN 
+        company_type ki ON mc2.company_type_id = ki.id
+    WHERE 
+        mc.depth < 5
+),
+
+AggregatedTitles AS (
+    SELECT 
+        at.title,
+        COUNT(ci.person_id) AS cast_count,
+        SUM(CASE WHEN ki.kind = 'Production' THEN 1 ELSE 0 END) AS production_count
+    FROM 
+        aka_title at
+    INNER JOIN 
+        complete_cast cc ON at.id = cc.movie_id
+    INNER JOIN 
+        cast_info ci ON cc.movie_id = ci.movie_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = at.id
+    LEFT JOIN 
+        company_type ki ON mc.company_type_id = ki.id
+    GROUP BY 
+        at.title
+),
+
+RankedMovies AS (
+    SELECT 
+        title,
+        cast_count,
+        production_count,
+        RANK() OVER (ORDER BY production_count DESC, cast_count ASC) AS rank
+    FROM 
+        AggregatedTitles
+    WHERE 
+        cast_count > 2
+),
+
+FinalOutput AS (
+    SELECT 
+        mt.title,
+        mt.cast_count,
+        mt.production_count,
+        (SELECT COUNT(*)
+         FROM MovieChains
+         WHERE movie_id = mt.id) AS associated_companies,
+        CASE 
+            WHEN mt.production_count > 5 THEN 'High Production'
+            WHEN mt.production_count BETWEEN 3 AND 5 THEN 'Medium Production'
+            ELSE 'Low Production'
+        END AS production_level
+    FROM 
+        RankedMovies mt
+    WHERE 
+        mt.rank <= 10
+)
+
+SELECT 
+    fo.title,
+    fo.cast_count,
+    fo.production_count,
+    fo.associated_companies,
+    fo.production_level,
+    COALESCE(GROUP_CONCAT(K.keyword ORDER BY K.keyword SEPARATOR ', '), 'No Keywords') AS keywords,
+    COUNT(DISTINCT ci.person_id) FILTER (WHERE ci.note IS NOT NULL) AS non_null_cast_members
+FROM 
+    FinalOutput fo
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = fo.id
+LEFT JOIN 
+    keyword K ON K.id = mk.keyword_id
+LEFT JOIN 
+    cast_info ci ON fo.id = ci.movie_id
+GROUP BY 
+    fo.title, fo.cast_count, fo.production_count, fo.associated_companies, fo.production_level
+ORDER BY 
+    fo.production_count DESC, fo.cast_count ASC;

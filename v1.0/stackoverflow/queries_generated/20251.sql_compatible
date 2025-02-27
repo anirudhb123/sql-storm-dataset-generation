@@ -1,0 +1,96 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        ARRAY_AGG(t.TagName) AS TagsArray
+    FROM 
+        Posts AS p
+    JOIN 
+        Tags AS t ON p.Tags LIKE CONCAT('%<', t.TagName, '> %')
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.PostTypeId
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserID,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty
+    FROM 
+        Users AS u
+    LEFT JOIN 
+        Badges AS b ON u.Id = b.UserId
+    LEFT JOIN 
+        Votes AS v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    HAVING 
+        COUNT(b.Id) > 0
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(DISTINCT ph.UserId) AS CloseVoteCount,
+        MAX(ph.CreationDate) AS LastClosedDate
+    FROM 
+        PostHistory AS ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  
+    GROUP BY 
+        ph.PostId
+),
+PostEngagement AS (
+    SELECT 
+        r.PostID,
+        r.Title,
+        r.ViewCount,
+        COALESCE(cp.CloseVoteCount, 0) AS CloseVotes,
+        COALESCE(up.UpVotes, 0) AS UpVotesCount,
+        r.TagsArray
+    FROM 
+        RecentPosts AS r
+    LEFT JOIN 
+        ClosedPosts AS cp ON r.PostID = cp.PostId
+    LEFT JOIN 
+        Users AS u ON r.PostID = u.Id
+    LEFT JOIN 
+        (SELECT 
+             p.OwnerUserId, 
+             COUNT(*) AS UpVotes 
+         FROM 
+             Votes AS v
+         JOIN 
+             Posts AS p ON v.PostId = p.Id
+         WHERE 
+             v.VoteTypeId = 2  
+         GROUP BY 
+             p.OwnerUserId
+        ) AS up ON u.Id = up.OwnerUserId
+)
+SELECT 
+    pe.*,
+    tu.DisplayName AS TopUser,
+    tu.Reputation,
+    tu.BadgeCount,
+    tu.TotalBounty,
+    STRING_AGG(DISTINCT tag, ', ') AS Tags
+FROM 
+    PostEngagement AS pe
+JOIN 
+    TopUsers AS tu ON tu.Reputation > 1000  
+LEFT JOIN 
+    UNNEST(pe.TagsArray) AS tag ON true
+WHERE 
+    pe.CloseVotes > 0
+GROUP BY 
+    pe.PostID, pe.Title, pe.ViewCount, pe.CloseVotes, pe.UpVotesCount, tu.DisplayName, tu.Reputation, tu.BadgeCount, tu.TotalBounty
+ORDER BY 
+    pe.ViewCount DESC, pe.CloseVotes DESC;

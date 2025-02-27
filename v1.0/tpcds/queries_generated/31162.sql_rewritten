@@ -1,0 +1,47 @@
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS Total_Sales,
+        COUNT(DISTINCT ws_order_number) AS Total_Orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS Sales_Rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2459654 AND 2459659  
+    GROUP BY 
+        ws_bill_customer_sk
+),
+Customer_Info AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        total.Total_Sales,
+        total.Total_Orders,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY total.Total_Sales DESC) AS Gender_Rank
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        Sales_CTE total ON c.c_customer_sk = total.ws_bill_customer_sk
+    WHERE 
+        cd.cd_marital_status = 'M' OR cd.cd_marital_status IS NULL
+)
+SELECT 
+    ci.c_customer_id,
+    ci.cd_gender,
+    ci.Total_Sales,
+    ci.Total_Orders,
+    CASE 
+        WHEN ci.Total_Sales IS NULL THEN 'No Sales'
+        WHEN ci.Total_Sales > 1000 THEN 'High Value'
+        ELSE 'Low Value'
+    END AS Value_Category
+FROM 
+    Customer_Info ci
+WHERE 
+    ci.Sales_Rank <= 10
+ORDER BY 
+    ci.Total_Sales DESC
+LIMIT 5;

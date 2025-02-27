@@ -1,0 +1,56 @@
+WITH RECURSIVE movie_tree AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        1 AS depth
+    FROM 
+        title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year >= 2000 
+        
+    UNION ALL
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ml.linked_movie_id,
+        mt.depth + 1
+    FROM 
+        movie_tree mt
+    JOIN 
+        movie_link ml ON mt.linked_movie_id = ml.movie_id
+    JOIN 
+        title t ON ml.linked_movie_id = t.id
+)
+SELECT 
+    ak.name AS actor_name,
+    mov.title AS movie_title,
+    mov.production_year,
+    COUNT(DISTINCT cc.person_id) OVER (PARTITION BY mov.id) AS total_actors,
+    STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+    COALESCE(ci.note, 'No note') AS cast_note,
+    ROW_NUMBER() OVER (PARTITION BY mov.id ORDER BY ak.name) AS actor_order
+FROM 
+    movie_tree mov
+JOIN 
+    complete_cast cc ON mov.movie_id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_keyword mk ON mov.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+WHERE 
+    mov.depth < 3 -- Limit to direct and one-level linked films
+    AND (mov.production_year IS NOT NULL AND mov.production_year > 2000)
+GROUP BY 
+    ak.name, mov.title, mov.production_year, ci.note
+ORDER BY 
+    mov.production_year DESC, total_actors DESC, ak.name;

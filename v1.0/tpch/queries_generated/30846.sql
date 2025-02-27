@@ -1,0 +1,40 @@
+WITH RECURSIVE region_suppliers AS (
+    SELECT r.r_regionkey, r.r_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM region r
+    JOIN nation n ON r.r_regionkey = n.n_regionkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_nationkey = n.n_nationkey)
+    
+    UNION ALL
+    
+    SELECT r.r_regionkey, r.r_name, s.s_suppkey, s.s_name, s.s_acctbal
+    FROM region_suppliers rs
+    JOIN supplier s ON rs.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = s.s_nationkey)
+    WHERE s.s_acctbal > 5000 AND rs.s_suppkey <> s.s_suppkey
+),
+summary AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * l.l_quantity) AS total_supplycost
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_partkey
+),
+ranked_summary AS (
+    SELECT ss.ps_partkey, ss.total_supplycost,
+           RANK() OVER (ORDER BY ss.total_supplycost DESC) AS rank
+    FROM summary ss
+),
+filter_summary AS (
+    SELECT r.r_name, rs.s_name, r_sup.ps_partkey, rs.total_supplycost
+    FROM region_suppliers rs
+    LEFT JOIN ranked_summary r_sup ON rs.s_suppkey = r_sup.ps_partkey
+    WHERE r_sup.rank <= 10 OR r_sup.total_supplycost IS NOT NULL
+),
+final_result AS (
+    SELECT DISTINCT r.r_name, f.s_name, f.total_supplycost
+    FROM filter_summary f
+    LEFT JOIN region r ON f.r_name = r.r_name
+    WHERE f.total_supplycost IS NOT NULL AND f.s_name IS NOT NULL
+)
+SELECT r_name, s_name, total_supplycost
+FROM final_result
+ORDER BY r_name, total_supplycost DESC;

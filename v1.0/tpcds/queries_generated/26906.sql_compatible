@@ -1,0 +1,51 @@
+
+WITH AddressStats AS (
+    SELECT 
+        ca_state,
+        COUNT(*) AS address_count,
+        AVG(LENGTH(ca_street_name)) AS avg_street_name_length,
+        MAX(LENGTH(ca_street_name)) AS max_street_name_length
+    FROM customer_address
+    GROUP BY ca_state
+), 
+CustomerStats AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS customer_count,
+        SUM(cd_dep_count) AS total_dependents,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM customer_demographics
+    GROUP BY cd_gender
+),
+SalesSummary AS (
+    SELECT 
+        CASE 
+            WHEN ws_web_page_sk IS NOT NULL THEN 'Web Sales'
+            WHEN cs_catalog_page_sk IS NOT NULL THEN 'Catalog Sales'
+            ELSE 'Store Sales'
+        END AS sale_type,
+        COUNT(*) AS total_sales,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM (
+        SELECT ws_web_page_sk, NULL AS cs_catalog_page_sk, NULL AS sr_return_quantity, ws_net_profit FROM web_sales
+        UNION ALL
+        SELECT NULL, cs_catalog_page_sk, NULL, cs_net_profit FROM catalog_sales
+        UNION ALL
+        SELECT NULL, NULL, ss_quantity, ss_net_profit FROM store_sales
+    ) AS unified_sales
+    GROUP BY sale_type
+)
+SELECT 
+    AS.address_count,
+    AS.avg_street_name_length,
+    AS.max_street_name_length,
+    CS.customer_count,
+    CS.total_dependents,
+    CS.avg_purchase_estimate,
+    SS.sale_type,
+    SS.total_sales,
+    SS.total_net_profit
+FROM AddressStats AS AS
+JOIN CustomerStats CS ON TRUE
+JOIN SalesSummary SS ON TRUE
+ORDER BY AS.address_count DESC, CS.customer_count DESC, SS.total_sales DESC;

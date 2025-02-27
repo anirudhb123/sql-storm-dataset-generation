@@ -1,0 +1,20 @@
+SELECT 
+    U.Id AS UserId,
+    U.DisplayName,
+    COUNT(DISTINCT P.Id) AS PostCount,
+    COUNT(DISTINCT V.Id) AS VoteCount,
+    COUNT(DISTINCT B.Id) AS BadgeCount,
+    SUM(CASE WHEN P.ViewCount IS NOT NULL THEN P.ViewCount ELSE 0 END) AS TotalViews,
+    SUM(CASE WHEN P.Score IS NOT NULL THEN P.Score ELSE 0 END) AS TotalScore
+FROM 
+    Users U
+LEFT JOIN 
+    Posts P ON U.Id = P.OwnerUserId
+LEFT JOIN 
+    Votes V ON U.Id = V.UserId AND V.PostId IS NOT NULL
+LEFT JOIN 
+    Badges B ON U.Id = B.UserId
+GROUP BY 
+    U.Id, U.DisplayName
+ORDER BY 
+    PostCount DESC;

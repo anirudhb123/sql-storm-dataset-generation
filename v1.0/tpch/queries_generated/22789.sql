@@ -1,0 +1,70 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+CriticalParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name, 
+        p.p_retailprice,
+        SUM(COALESCE(ps.ps_availqty, 0) * ps.ps_supplycost) AS total_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+    HAVING COUNT(DISTINCT ps.ps_suppkey) > 1
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus = 'F' AND o.o_totalprice > 10000
+),
+CustomerSegmentCount AS (
+    SELECT 
+        c.c_mktsegment, 
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM customer c
+    WHERE c.c_acctbal IS NOT NULL
+    GROUP BY c.c_mktsegment
+),
+FinalSelection AS (
+    SELECT 
+        ps.ps_partkey, 
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        MAX(s.s_name) AS best_supplier,
+        SUM(CASE WHEN l.l_discount > 0.1 THEN l.l_extendedprice * (1 - l.l_discount) ELSE l.l_extendedprice END) AS discounted_revenue,
+        CASE WHEN COUNT(DISTINCT o.o_orderkey) > 5 THEN 'High Volume' ELSE 'Low Volume' END AS order_level
+    FROM lineitem l
+    JOIN partsupp ps ON l.l_partkey = ps.ps_partkey
+    LEFT JOIN RankedSuppliers rs ON ps.ps_suppkey = rs.s_suppkey
+    LEFT JOIN HighValueOrders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY ps.ps_partkey
+)
+SELECT 
+    cp.p_partkey,
+    cp.p_name,
+    cp.p_retailprice,
+    fs.order_count,
+    fs.best_supplier,
+    fs.discounted_revenue,
+    cs.customer_count,
+    COALESCE(rn.rnk, 0) AS supplier_rank
+FROM CriticalParts cp
+JOIN FinalSelection fs ON cp.p_partkey = fs.ps_partkey
+JOIN CustomerSegmentCount cs ON cs.c_mktsegment = SUBSTRING(cp.p_comment FROM 1 FOR 10) 
+LEFT JOIN RankedSuppliers rn ON fs.best_supplier = rn.s_name
+WHERE cp.total_supply_cost > (
+    SELECT AVG(s.total_supply_cost) 
+    FROM CriticalParts s
+    WHERE s.p_retailprice < cp.p_retailprice
+) OR fs.discounted_revenue IS NULL
+ORDER BY cp.p_partkey, fs.order_count DESC
+FETCH FIRST 100 ROWS ONLY;

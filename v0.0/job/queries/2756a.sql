@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND mc.note IN ('(1991) (Croatia) (TV)', '(1998-????) (Turkey) (TV)', '(2001) (worldwide) (all media) (Palm OS & Windows Mobile versions)', '(2004) (Finland) (DVD) (rental)', '(2005) (worldwide) (theatrical) (sales)', '(2011) (worldwide) (all media)', '(2012) (UK) (VHS)', '(as Limelight) (in association with) (presents)', '(as London Film Productions Limited.)');

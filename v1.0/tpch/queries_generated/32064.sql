@@ -1,0 +1,53 @@
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 1000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2022-01-01' AND o.o_orderdate < '2023-01-01'
+    GROUP BY o.o_orderkey
+    HAVING SUM(l.l_extendedprice * (1 - l.l_discount)) > 500
+),
+ranked_orders AS (
+    SELECT os.o_orderkey, os.total_revenue, 
+           RANK() OVER (ORDER BY os.total_revenue DESC) AS revenue_rank
+    FROM order_summary os
+),
+customer_summary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+final_result AS (
+    SELECT ps.ps_partkey, 
+           p.p_name,
+           SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS returned_qty,
+           AVG(ps.ps_supplycost) AS avg_supply_cost,
+           COUNT(DISTINCT co.c_custkey) AS distinct_customers
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN lineitem l ON l.l_partkey = p.p_partkey 
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN customer co ON o.o_custkey = co.c_custkey
+    WHERE ps.ps_availqty > 0 AND p.p_retailprice < 100.00
+    GROUP BY ps.ps_partkey, p.p_name
+)
+SELECT fh.*, cs.order_count, cs.total_spent, 
+       STRING_AGG(DISTINCT s.s_name) AS supplier_names,
+       COUNT(DISTINCT ro.o_orderkey) AS order_count_ranked
+FROM final_result fh
+JOIN customer_summary cs ON cs.total_spent > fh.avg_supply_cost
+JOIN supplier_hierarchy s ON cs.order_count > 2
+LEFT JOIN ranked_orders ro ON ro.total_revenue > fh.avg_supply_cost
+GROUP BY fh.ps_partkey, fh.p_name, cs.order_count, cs.total_spent
+ORDER BY fh.returned_qty DESC, cs.total_spent DESC;

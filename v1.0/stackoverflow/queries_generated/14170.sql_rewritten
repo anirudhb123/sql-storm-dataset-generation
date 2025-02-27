@@ -1,0 +1,47 @@
+WITH UserPosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostCount,
+        SUM(P.Score) AS TotalScore,
+        SUM(P.ViewCount) AS TotalViews
+    FROM
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS HistoryCount,
+        MAX(PH.CreationDate) AS LastEdited,
+        MIN(PH.CreationDate) AS FirstEdited
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostCount,
+    U.TotalScore,
+    U.TotalViews,
+    PHS.HistoryCount,
+    PHS.LastEdited,
+    PHS.FirstEdited
+FROM 
+    UserPosts U
+LEFT JOIN 
+    PostHistoryStats PHS ON PHS.PostId IN (
+        SELECT Id FROM Posts WHERE OwnerUserId = U.UserId
+    )
+WHERE 
+    U.PostCount > 0
+ORDER BY 
+    U.TotalScore DESC, 
+    U.PostCount DESC;

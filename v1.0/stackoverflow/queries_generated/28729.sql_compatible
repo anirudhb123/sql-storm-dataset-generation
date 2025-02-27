@@ -1,0 +1,59 @@
+
+WITH UserTagCounts AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COUNT(DISTINCT p.Tags) AS TagCount
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000  
+    GROUP BY 
+        u.Id, u.DisplayName
+), TagDetails AS (
+    SELECT 
+        t.Id AS TagId, 
+        t.TagName, 
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::text[])
+    GROUP BY 
+        t.Id, t.TagName
+), UserBadgeCounts AS (
+    SELECT 
+        ub.UserId, 
+        COUNT(ub.Id) AS BadgeCount
+    FROM 
+        Badges ub
+    GROUP BY 
+        ub.UserId
+), PopularTags AS (
+    SELECT 
+        TagId, 
+        TagName, 
+        PostCount, 
+        RANK() OVER (ORDER BY PostCount DESC) AS Rank
+    FROM 
+        TagDetails
+)
+SELECT 
+    utc.DisplayName AS UserDisplayName, 
+    utc.TagCount, 
+    COALESCE(ubc.BadgeCount, 0) AS BadgeCount, 
+    pt.TagName,
+    pt.PostCount
+FROM 
+    UserTagCounts utc
+LEFT JOIN 
+    UserBadgeCounts ubc ON utc.UserId = ubc.UserId
+JOIN 
+    PopularTags pt ON utc.TagCount >= 5  
+WHERE 
+    pt.Rank <= 10  
+ORDER BY 
+    utc.TagCount DESC, 
+    ubc.BadgeCount DESC;

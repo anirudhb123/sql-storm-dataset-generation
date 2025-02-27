@@ -1,0 +1,68 @@
+WITH UserVoteSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8 
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastEditDate,
+        COUNT(*) FILTER (WHERE PH.PostHistoryTypeId = 10) AS CloseCount
+    FROM 
+        PostHistory PH
+    GROUP BY 
+        PH.PostId
+)
+SELECT 
+    U.DisplayName,
+    UPS.UpVotes,
+    UPS.DownVotes,
+    UPS.PostCount,
+    PA.PostId,
+    PA.Title,
+    PA.CreationDate,
+    PA.CommentCount,
+    PA.TotalBounty,
+    COALESCE(PHS.LastEditDate, 'No edits') AS LastEdit,
+    COALESCE(PHS.CloseCount, 0) AS CloseCount
+FROM 
+    UserVoteSummary UPS
+JOIN 
+    Posts P ON UPS.PostCount > 0
+JOIN 
+    PostAnalytics PA ON P.Id = PA.PostId
+LEFT JOIN 
+    PostHistorySummary PHS ON PA.PostId = PHS.PostId
+WHERE 
+    UPS.UpVotes - UPS.DownVotes > 5
+ORDER BY 
+    UPS.UpVotes DESC, PA.TotalBounty DESC;

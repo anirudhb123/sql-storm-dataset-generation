@@ -1,0 +1,53 @@
+WITH RECURSIVE UserRankings AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+), 
+PostAnalytics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COALESCE(A.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS TotalComments,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS TotalUpVotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS TotalDownVotes
+    FROM Posts P
+    LEFT JOIN Posts A ON P.Id = A.AcceptedAnswerId
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= DATEADD(YEAR, -1, GETDATE()) -- Posts created in the last year
+    GROUP BY P.Id, P.Title, P.CreationDate, P.ViewCount, P.Score, A.AcceptedAnswerId
+),
+TopPosts AS (
+    SELECT 
+        PA.PostId,
+        PA.Title,
+        PA.ViewCount,
+        PA.Score,
+        PA.TotalComments,
+        PA.TotalUpVotes,
+        PA.TotalDownVotes,
+        R.Rank
+    FROM PostAnalytics PA
+    JOIN UserRankings R ON PA.TotalUpVotes > R.Reputation / 10 -- arbitrarily related condition
+    ORDER BY PA.Score DESC, PA.ViewCount DESC
+    LIMIT 10
+)
+SELECT 
+    TP.Title,
+    TP.ViewCount,
+    TP.Score,
+    TP.TotalComments,
+    TP.TotalUpVotes,
+    TP.TotalDownVotes,
+    U.DisplayName AS TopUser
+FROM TopPosts TP
+LEFT JOIN Users U ON U.Id = (SELECT TOP 1 UserId FROM Votes WHERE PostId = TP.PostId ORDER BY CreationDate DESC) -- last voter
+WHERE TP.TotalUpVotes > TP.TotalDownVotes
+ORDER BY TP.Score DESC;

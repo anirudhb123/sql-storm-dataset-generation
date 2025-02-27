@@ -1,0 +1,73 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.LastActivityDate, p.ViewCount
+), 
+MostActiveUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostsCount,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8 
+    WHERE 
+        u.Reputation >= 1000 
+    GROUP BY 
+        u.Id, u.DisplayName
+), 
+UserComments AS (
+    SELECT 
+        c.UserDisplayName,
+        COUNT(c.Id) AS TotalComments
+    FROM 
+        Comments c
+    JOIN 
+        Posts p ON c.PostId = p.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        c.UserDisplayName
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    u.PostsCount,
+    u.TotalViews,
+    u.TotalBounties,
+    COALESCE(uc.TotalComments, 0) AS TotalComments,
+    rp.Title AS RecentPostTitle,
+    rp.CreationDate AS RecentPostDate,
+    rp.ViewCount AS RecentPostViewCount,
+    rp.CommentCount AS RecentPostCommentCount,
+    rp.VoteCount AS RecentPostVoteCount
+FROM 
+    MostActiveUsers u
+LEFT JOIN 
+    UserComments uc ON u.DisplayName = uc.UserDisplayName
+LEFT JOIN 
+    RankedPosts rp ON u.UserId = rp.OwnerUserId AND rp.UserPostRank = 1
+ORDER BY 
+    u.PostsCount DESC, u.TotalViews DESC
+LIMIT 10;

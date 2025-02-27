@@ -1,0 +1,73 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COUNT(b.Id) AS BadgeCount,
+        COUNT(DISTINCT p.Id) FILTER (WHERE p.PostTypeId = 1) AS QuestionCount,
+        COUNT(DISTINCT a.Id) AS AcceptedAnswers
+    FROM Users u
+    LEFT JOIN Badges b ON b.UserId = u.Id
+    LEFT JOIN Posts p ON p.OwnerUserId = u.Id
+    LEFT JOIN Posts a ON a.AcceptedAnswerId = p.Id
+    GROUP BY u.Id
+),
+UserActivity AS (
+    SELECT 
+        UserId,
+        COUNT(CASE WHEN CreationDate > NOW() - INTERVAL '1 month' THEN 1 END) AS RecentPostCount,
+        SUM(COALESCE(ViewCount, 0)) AS TotalViews
+    FROM Posts
+    GROUP BY UserId
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Id END) AS CloseCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p
+    LEFT JOIN Votes v ON v.PostId = p.Id AND v.VoteTypeId IN (8, 9) -- BountyStart and BountyClose
+    LEFT JOIN Comments c ON c.PostId = p.Id
+    LEFT JOIN PostHistory ph ON ph.PostId = p.Id
+    GROUP BY p.Id
+),
+FinalStats AS (
+    SELECT 
+        ur.UserId,
+        ur.DisplayName,
+        ur.Reputation,
+        ua.RecentPostCount,
+        ua.TotalViews,
+        ps.PostId,
+        ps.Title,
+        ps.Score,
+        ps.CommentCount,
+        ps.TotalBounty,
+        ps.CloseCount,
+        ps.PostRank
+    FROM UserReputation ur
+    JOIN UserActivity ua ON ur.UserId = ua.UserId
+    JOIN PostStats ps ON ur.UserId = ps.OwnerUserId
+    WHERE ur.Reputation > 1000
+)
+SELECT 
+    fs.UserId,
+    fs.DisplayName,
+    fs.Reputation,
+    fs.RecentPostCount,
+    fs.TotalViews,
+    fs.Title,
+    fs.Score,
+    fs.CommentCount,
+    fs.TotalBounty,
+    fs.CloseCount,
+    COALESCE(CASE WHEN fs.PostRank = 1 THEN 'Top Post' ELSE 'Regular Post' END, 'Unknown') AS PostCategory
+FROM FinalStats fs
+WHERE fs.TotalBounty > 0 OR fs.CloseCount > 0
+ORDER BY fs.Reputation DESC, fs.Score DESC;

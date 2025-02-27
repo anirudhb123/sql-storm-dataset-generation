@@ -1,0 +1,41 @@
+
+WITH StringBenchmark AS (
+    SELECT 
+        p.p_name,
+        CONCAT(SUBSTRING(p.p_comment, 1, 10), '...', LEFT(p.p_comment, 5)) AS truncated_comment,
+        REPLACE(UPPER(p.p_container), ' ', '-') AS formatted_container,
+        LENGTH(REPLACE(p.p_name, ' ', '')) AS name_length_no_spaces,
+        LENGTH(p.p_name) AS name_length_with_spaces,
+        CHAR_LENGTH(p.p_name) AS name_char_length,
+        LENGTH(UPPER(p.p_name)) AS name_upper_length,
+        COUNT(DISTINCT s.s_suppkey) OVER (PARTITION BY p.p_partkey) AS supplier_count,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY p.p_retailprice DESC) AS rank_by_price
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    sb.truncated_comment,
+    sb.formatted_container,
+    sb.name_length_no_spaces,
+    sb.supplier_count,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS total_returned_quantity,
+    MAX(sb.rank_by_price) AS max_rank_price
+FROM 
+    part p
+JOIN 
+    StringBenchmark sb ON p.p_name = sb.p_name
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+GROUP BY 
+    p.p_partkey, p.p_name, sb.truncated_comment, sb.formatted_container, sb.name_length_no_spaces, sb.supplier_count
+HAVING 
+    SUM(COALESCE(l.l_quantity, 0)) > 100
+ORDER BY 
+    p.p_retailprice DESC
+LIMIT 10;

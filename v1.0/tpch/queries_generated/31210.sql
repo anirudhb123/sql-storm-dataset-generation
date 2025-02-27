@@ -1,0 +1,71 @@
+WITH RECURSIVE SuppPartCosts AS (
+    SELECT 
+        ps.ps_partkey, 
+        ps.ps_suppkey, 
+        ps.ps_availqty, 
+        ps.ps_supplycost,
+        (ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY (ps.ps_supplycost * ps.ps_availqty) DESC) AS rn
+    FROM 
+        partsupp ps
+),TopSuppliers AS (
+    SELECT
+        sp.ps_partkey,
+        sp.ps_suppkey,
+        sp.total_cost
+    FROM 
+        SuppPartCosts sp
+    WHERE 
+        sp.rn = 1
+),CustomerCount AS (
+    SELECT 
+        c.c_nationkey, 
+        COUNT(DISTINCT c.c_custkey) AS total_customers
+    FROM 
+        customer c
+    GROUP BY 
+        c.c_nationkey
+),OrderSummaries AS (
+    SELECT 
+        o.o_custkey, 
+        SUM(o.o_totalprice) AS total_orders
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2023-01-01' 
+        AND o.o_orderdate < DATE '2024-01-01' 
+    GROUP BY 
+        o.o_custkey
+),NationClaims AS (
+    SELECT 
+        n.n_nationkey,
+        SUM(os.total_orders) AS total_claims
+    FROM 
+        nation n
+    LEFT JOIN 
+        OrderSummaries os ON n.n_nationkey = os.o_custkey
+    GROUP BY 
+        n.n_nationkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(SUM(tc.total_claims), 0) AS total_claims,
+    SUM(lp.l_extendedprice) AS total_expenditure,
+    AVG(lp.l_extendedprice) OVER (PARTITION BY r.r_name) AS avg_expenditure_per_nation,
+    COUNT(DISTINCT tc.total_customers) AS unique_customers
+FROM 
+    region r
+LEFT JOIN 
+    CustomerCount tc ON r.r_regionkey = tc.c_nationkey
+LEFT JOIN 
+    TopSuppliers ts ON ts.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_size > 20)
+LEFT JOIN 
+    lineitem lp ON lp.l_partkey = ts.ps_partkey
+WHERE 
+    r.r_regionkey IS NOT NULL
+GROUP BY 
+    r.r_name
+ORDER BY 
+    total_claims DESC, 
+    avg_expenditure_per_nation ASC
+LIMIT 10;

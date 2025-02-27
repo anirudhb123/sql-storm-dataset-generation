@@ -1,0 +1,34 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS year_rank
+    FROM aka_title t
+    LEFT JOIN cast_info c ON t.id = c.movie_id
+    WHERE t.production_year IS NOT NULL
+    GROUP BY t.id, t.title, t.production_year
+), 
+TopMovies AS (
+    SELECT title, production_year
+    FROM RankedMovies
+    WHERE year_rank <= 5
+), 
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        STRING_AGG(DISTINCT a.name, ', ') AS all_aka_names,
+        AVG(CASE WHEN mi.info_type_id = 1 THEN LENGTH(mi.info) ELSE NULL END) AS avg_info_length
+    FROM TopMovies tm
+    LEFT JOIN aka_name a ON a.id IN (SELECT ca.person_id FROM cast_info ca WHERE ca.movie_id IN (SELECT m.id FROM aka_title m WHERE m.title = tm.title))
+    LEFT JOIN movie_info mi ON mi.movie_id IN (SELECT m.id FROM aka_title m WHERE m.title = tm.title)
+    GROUP BY tm.title, tm.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.all_aka_names, 'No Aliases') AS aliases,
+    COALESCE(md.avg_info_length, 0) AS average_info_length
+FROM MovieDetails md
+ORDER BY md.production_year DESC, md.title;

@@ -1,0 +1,55 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_ext_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_ext_sales_price DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sales_price IS NOT NULL
+),
+total_sales AS (
+    SELECT 
+        web_site_sk,
+        SUM(ws_ext_sales_price) AS total_sales_amount
+    FROM 
+        web_sales
+    WHERE 
+        ws_ship_date_sk IS NOT NULL
+    GROUP BY 
+        web_site_sk
+),
+top_sales AS (
+    SELECT 
+        ts.web_site_sk,
+        ts.total_sales_amount,
+        CASE 
+            WHEN ts.total_sales_amount IS NULL THEN 'No Sales'
+            WHEN ts.total_sales_amount < 10000 THEN 'Low Sales'
+            WHEN ts.total_sales_amount BETWEEN 10000 AND 50000 THEN 'Medium Sales'
+            ELSE 'High Sales'
+        END AS sales_category
+    FROM 
+        total_sales ts
+)
+SELECT 
+    t.web_site_id,
+    COALESCE(tr.ws_order_number, 'No Orders') AS order_number,
+    t.total_sales_amount,
+    t.sales_category,
+    COUNT(DISTINCT r.ws_order_number) AS order_count,
+    AVG(r.ws_sales_price) AS avg_sales_price,
+    COUNT(DISTINCT CASE WHEN r.sales_rank = 1 THEN r.ws_order_number END) AS top_sales_count 
+FROM 
+    web_site t
+LEFT JOIN 
+    ranked_sales r ON t.web_site_sk = r.web_site_sk
+LEFT JOIN 
+    top_sales ts ON t.web_site_sk = ts.web_site_sk
+GROUP BY 
+    t.web_site_id, t.total_sales_amount, t.sales_category, tr.ws_order_number
+ORDER BY 
+    t.total_sales_amount DESC NULLS LAST;

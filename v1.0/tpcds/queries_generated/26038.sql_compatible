@@ -1,0 +1,63 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+AddressInfo AS (
+    SELECT 
+        ca.ca_address_id,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country
+    FROM customer_address ca
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        s.s_store_name,
+        d.d_date
+    FROM web_sales ws
+    JOIN store s ON ws.ws_ship_addr_sk = s.s_store_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ai.full_address,
+    ai.ca_city,
+    ai.ca_state,
+    ai.ca_zip,
+    ai.ca_country,
+    SUM(sd.ws_sales_price * sd.ws_quantity) AS total_spent,
+    COUNT(sd.ws_order_number) AS order_count,
+    d.d_day_name
+FROM CustomerInfo ci
+JOIN AddressInfo ai ON ci.c_customer_id = ai.ca_address_id
+LEFT JOIN SalesData sd ON ci.c_customer_id = sd.ws_order_number
+JOIN date_dim d ON sd.d_date = d.d_date
+WHERE ci.cd_gender = 'F'
+AND ai.ca_state = 'CA'
+GROUP BY 
+    ci.full_name,
+    ci.cd_gender,
+    ai.full_address,
+    ai.ca_city,
+    ai.ca_state,
+    ai.ca_zip,
+    ai.ca_country,
+    d.d_day_name
+ORDER BY 
+    total_spent DESC
+FETCH FIRST 10 ROWS ONLY;

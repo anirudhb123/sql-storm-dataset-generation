@@ -1,0 +1,56 @@
+WITH AddressDetails AS (
+    SELECT 
+        ca.city AS city,
+        CONCAT(ca.street_number, ' ', ca.street_name, ' ', ca.street_type) AS full_address,
+        COUNT(*) AS address_count
+    FROM 
+        customer_address ca
+    GROUP BY 
+        ca.city, ca.street_number, ca.street_name, ca.street_type
+),
+Demographics AS (
+    SELECT 
+        cd.gender,
+        cd.marital_status,
+        COUNT(DISTINCT c.customer_id) AS customer_count,
+        AVG(cd.purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer c 
+    JOIN 
+        customer_demographics cd ON c.current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.gender, cd.marital_status
+),
+SalesSummary AS (
+    SELECT
+        d.year,
+        SUM(ws.ext_sales_price) AS total_sales,
+        SUM(ws.ext_discount_amt) AS total_discount
+    FROM 
+        web_sales ws 
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.year
+)
+SELECT 
+    ad.city,
+    ad.full_address,
+    ad.address_count,
+    de.gender,
+    de.marital_status,
+    de.customer_count,
+    de.avg_purchase_estimate,
+    ss.year,
+    ss.total_sales,
+    ss.total_discount
+FROM 
+    AddressDetails ad
+JOIN 
+    Demographics de ON ad.city = 'Los Angeles' 
+JOIN 
+    SalesSummary ss ON ss.total_sales > 10000 
+WHERE 
+    ad.address_count > 5 
+ORDER BY 
+    ss.year DESC, ad.address_count DESC;

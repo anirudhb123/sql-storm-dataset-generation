@@ -1,0 +1,88 @@
+WITH PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        P.ViewCount,
+        P.Score,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.ViewCount DESC) AS Rank
+    FROM 
+        Posts P 
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId 
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    GROUP BY 
+        P.Id, P.Title, P.PostTypeId, P.ViewCount, P.Score
+), TagStatistics AS (
+    SELECT 
+        T.Id AS TagId,
+        T.TagName,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Tags T
+    LEFT JOIN 
+        Posts P ON T.Id = ANY(string_to_array(P.Tags, ',')::int[])  
+    GROUP BY 
+        T.Id, T.TagName
+), UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(P.ViewCount) AS TotalViews,
+        AVG(U.Reputation) OVER() AS AvgReputation 
+    FROM 
+        Users U 
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName
+), CombinedStats AS (
+    SELECT 
+        PS.PostId,
+        PS.Title,
+        PS.PostTypeId,
+        PS.ViewCount,
+        PS.UpVotes,
+        PS.DownVotes,
+        PS.CommentCount,
+        TS.TagName,
+        US.UserId,
+        US.DisplayName,
+        US.PostCount AS UserPostCount,
+        US.TotalViews AS UserTotalViews,
+        US.AvgReputation
+    FROM 
+        PostStatistics PS
+    LEFT JOIN 
+        Tags TS ON PS.PostId = ANY(string_to_array((SELECT Tags FROM Posts WHERE Id = PS.PostId), ',')::int[])  
+    JOIN 
+        Users US ON PS.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = US.Id)
+)
+
+SELECT 
+    CS.PostId,
+    CS.Title,
+    CS.ViewCount,
+    CS.CommentCount,
+    CS.UserDisplayName,
+    CS.TagName,
+    CASE 
+        WHEN CS.UpVotes > CS.DownVotes THEN 'Positive' 
+        WHEN CS.UpVotes < CS.DownVotes THEN 'Negative' 
+        ELSE 'Neutral' 
+    END AS Sentiment,
+    CASE 
+        WHEN CS.UserTotalViews IS NULL THEN 'No Views' 
+        ELSE format('%s (%d)', CS.UserDisplayName, CS.UserTotalViews)
+    END AS UserViewsSummary
+FROM 
+    CombinedStats CS
+WHERE 
+    CS.Rank <= 10 OR (CS.CommentCount > 5 AND CS.ViewCount > 100)  
+ORDER BY 
+    CS.ViewCount DESC, CS.CommentCount DESC;

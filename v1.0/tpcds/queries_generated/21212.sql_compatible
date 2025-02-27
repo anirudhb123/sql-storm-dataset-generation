@@ -1,0 +1,60 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk,
+        sr_reason_sk,
+        sr_item_sk,
+        sr_return_quantity,
+        sr_return_amt,
+        sr_return_tax,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rn
+    FROM store_returns
+    WHERE sr_return_quantity > 0
+),
+TotalSales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM web_sales
+    WHERE ws_sales_price IS NOT NULL
+    GROUP BY ws_item_sk
+),
+ItemInfo AS (
+    SELECT 
+        i_item_sk,
+        i_item_desc,
+        i_current_price,
+        i_color,
+        i_size,
+        COALESCE(NULLIF(i_color, ''), 'Unknown') AS resolved_color,
+        COALESCE(NULLIF(i_size, ''), 'Not Specified') AS resolved_size
+    FROM item
+)
+SELECT 
+    ii.i_item_sk,
+    ii.i_item_desc,
+    ii.i_current_price,
+    COALESCE(tr.total_sales, 0) AS total_sales,
+    COUNT(rr.sr_item_sk) AS total_returns,
+    SUM(rr.sr_return_tax) AS total_return_tax,
+    SUM(rr.sr_return_amt) AS total_return_amt,
+    AVG(ii.i_current_price) OVER (PARTITION BY ii.i_color ORDER BY ii.i_item_sk) AS avg_price_by_color,
+    COUNT(DISTINCT rr.sr_reason_sk) AS distinct_reasons,
+    CASE 
+        WHEN COUNT(rr.sr_item_sk) > 0 THEN 'Returns Exist'
+        ELSE 'No Returns'
+    END AS return_status
+FROM ItemInfo ii
+LEFT JOIN RankedReturns rr ON ii.i_item_sk = rr.sr_item_sk
+LEFT JOIN TotalSales tr ON ii.i_item_sk = tr.ws_item_sk
+WHERE (ii.i_current_price > 10 OR EXISTS (
+    SELECT 1 
+    FROM store_sales ss 
+    WHERE ss.ss_item_sk = ii.i_item_sk 
+    AND ss.ss_ext_sales_price < 5
+))
+AND (ii.resolved_color <> 'Black' OR ii.resolved_size = 'Not Specified')
+GROUP BY ii.i_item_sk, ii.i_item_desc, ii.i_current_price, ii.i_color
+HAVING COALESCE(tr.total_sales, 0) - SUM(rr.sr_return_amt) > 0
+ORDER BY avg_price_by_color DESC, ii.i_item_desc;

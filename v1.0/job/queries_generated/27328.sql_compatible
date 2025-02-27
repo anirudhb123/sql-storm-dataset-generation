@@ -1,0 +1,67 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        ARRAY_AGG(DISTINCT cn.name) AS companies,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+        STRING_AGG(DISTINCT CONCAT_WS(' (', c.nr_order, r.role), ')', ', ') AS cast_info
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.person_id
+    LEFT JOIN 
+        role_type r ON c.role_id = r.id
+    LEFT JOIN 
+        aka_title ak ON t.id = ak.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+PersonDetails AS (
+    SELECT 
+        ak.person_id AS person_id,
+        ak.name AS aka_name,
+        STRING_AGG(DISTINCT ci.note, ', ') AS person_notes
+    FROM 
+        aka_name ak
+    LEFT JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    LEFT JOIN 
+        person_info pi ON ak.person_id = pi.person_id
+    LEFT JOIN 
+        info_type it ON pi.info_type_id = it.id
+    LEFT JOIN 
+        complete_cast cc ON ci.movie_id = cc.movie_id
+    GROUP BY 
+        ak.person_id, ak.name
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.keywords,
+    md.companies,
+    md.aka_names,
+    md.cast_info,
+    pd.aka_name,
+    pd.person_notes
+FROM 
+    MovieDetails md
+JOIN 
+    PersonDetails pd ON ARRAY_LENGTH(md.aka_names) > 0
+ORDER BY 
+    md.production_year DESC, md.title;

@@ -1,0 +1,73 @@
+
+WITH UserEngagement AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostsCreated,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionsAsked,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswersProvided,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotesReceived
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT 
+        *,
+        (UpVotesReceived - DownVotesReceived) AS NetVotes,
+        RANK() OVER (ORDER BY PostsCreated DESC) AS PostsRank,
+        RANK() OVER (ORDER BY (UpVotesReceived - DownVotesReceived) DESC) AS VotesRank
+    FROM 
+        UserEngagement
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+FinalResults AS (
+    SELECT 
+        tu.DisplayName,
+        tu.PostsCreated,
+        tu.QuestionsAsked,
+        tu.AnswersProvided,
+        tu.UpVotesReceived,
+        tu.DownVotesReceived,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        tu.UpVotesReceived - tu.DownVotesReceived AS NetVotes
+    FROM 
+        TopUsers tu
+    LEFT JOIN 
+        UserBadges ub ON tu.UserId = ub.UserId
+)
+SELECT 
+    DisplayName,
+    PostsCreated,
+    QuestionsAsked,
+    AnswersProvided,
+    UpVotesReceived,
+    DownVotesReceived,
+    GoldBadges,
+    SilverBadges,
+    BronzeBadges,
+    NetVotes
+FROM 
+    FinalResults
+WHERE 
+    PostsRank <= 10 OR VotesRank <= 10
+ORDER BY 
+    PostsRank, VotesRank;

@@ -1,0 +1,39 @@
+
+WITH RECURSIVE cust_orders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus <> 'F'
+      AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus <> 'F')
+), supplier_info AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           COALESCE(SUM(ps.ps_supplycost), 0) AS total_supplycost
+    FROM supplier s
+    LEFT JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal
+), part_summary AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           COALESCE((SELECT SUM(l.l_discount) FROM lineitem l 
+                     WHERE l.l_partkey = p.p_partkey AND l.l_returnflag = 'R'), 0) AS total_discounts,
+           COUNT(DISTINCT ps.ps_suppkey) AS total_suppliers
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_retailprice
+) 
+SELECT co.c_custkey, co.c_name, co.o_orderkey, co.o_orderdate, co.o_totalprice, 
+       ps.p_partkey, ps.p_name, ps.p_retailprice, ps.total_discounts,
+       CASE WHEN si.s_acctbal IS NULL THEN 'No Supplier' 
+            ELSE CONCAT('Supplier: ', si.s_name, ' (Bal: ', si.s_acctbal, ')') END AS supplier_info,
+       RANK() OVER (PARTITION BY co.c_custkey ORDER BY co.o_totalprice DESC, ps.total_suppliers ASC) AS price_rank
+FROM cust_orders co
+LEFT JOIN part_summary ps ON co.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_linenumber = 1)
+LEFT JOIN supplier_info si ON si.total_supplycost = (
+    SELECT MAX(sii.total_supplycost) FROM supplier_info sii 
+    WHERE sii.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = ps.p_partkey)
+    GROUP BY sii.s_suppkey
+    HAVING COUNT(sii.s_suppkey) > 1
+)
+WHERE ps.total_suppliers > 5 
+  AND (co.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31' OR co.o_totalprice IS NULL)
+ORDER BY co.o_orderdate DESC, co.c_custkey, ps.total_discounts DESC;

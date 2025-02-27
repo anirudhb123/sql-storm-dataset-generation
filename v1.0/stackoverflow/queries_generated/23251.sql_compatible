@@ -1,0 +1,93 @@
+
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(V.BountyAmount) AS TotalBounties
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE U.Reputation IS NOT NULL
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+HighReputationUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName,
+        Reputation,
+        PostCount,
+        TotalBounties,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS Rank
+    FROM UserReputation
+    WHERE Reputation > 1000
+),
+MostActivePosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        COUNT(C.Id) AS CommentCount,
+        SUM(P.Score) AS TotalScore,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY COUNT(C.Id) DESC) AS PostRank
+    FROM Posts P
+    LEFT JOIN Comments C ON P.Id = C.PostId
+    WHERE P.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'
+    GROUP BY P.Id, P.Title
+),
+UserWithActivePosts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        MAX(P.HistoryDate) AS LastPostActivity
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    U.PostCount,
+    U.TotalBounties,
+    AP.Title AS MostActivePostTitle,
+    AP.CommentCount,
+    AP.TotalScore,
+    COALESCE(NULLIF(PA.UserId, -1), 'N/A') AS AssociatedActiveUser,
+    CASE 
+        WHEN U.Reputation > 5000 THEN 'Elite'
+        WHEN U.Reputation > 1000 THEN 'Experienced'
+        ELSE 'Novice'
+    END AS ReputationLevel,
+    COALESCE(T.ArrayCount, 0) AS TagsUsed,
+    CASE 
+        WHEN LastActivity.LastPostActivity IS NOT NULL THEN 'Active'
+        ELSE 'Inactive'
+    END AS ActivityStatus,
+    STRING_AGG(DISTINCT CONCAT('Badge: ', B.Name), ', ') AS BadgeList
+FROM HighReputationUsers U
+LEFT JOIN MostActivePosts AP ON U.UserId = AP.OwnerUserId AND AP.PostRank = 1
+LEFT JOIN PostLinks PL ON PL.PostId = AP.Id
+LEFT JOIN (
+    SELECT 
+        Tags.TagName, 
+        COUNT(Tags.TagName) AS ArrayCount
+    FROM Tags
+    WHERE Tags.Count > 0
+    GROUP BY Tags.TagName
+) T ON T.TagName = ANY(string_to_array(AP.Tags, ','))
+LEFT JOIN Badges B ON B.UserId = U.UserId
+LEFT JOIN UserWithActivePosts LastActivity ON U.UserId = LastActivity.UserId
+GROUP BY 
+    U.UserId, 
+    U.DisplayName, 
+    U.Reputation, 
+    U.PostCount, 
+    U.TotalBounties, 
+    AP.Title, 
+    AP.CommentCount, 
+    AP.TotalScore, 
+    PA.UserId, 
+    LastActivity.LastPostActivity
+HAVING 
+    COUNT(DISTINCT B.Id) > 0
+ORDER BY U.Reputation DESC, U.PostCount DESC;

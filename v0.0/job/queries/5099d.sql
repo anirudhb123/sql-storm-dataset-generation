@@ -1,0 +1,4 @@
+SELECT min(n.name) AS member_in_charnamed_movie
+FROM cast_info AS ci, company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, name AS n, title AS t
+WHERE n.id = ci.person_id AND ci.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND t.id = mc.movie_id AND mc.company_id = cn.id AND ci.movie_id = mc.movie_id AND ci.movie_id = mk.movie_id AND mc.movie_id = mk.movie_id
+AND mc.note IN ('(1934) (Belgium) (theatrical)', '(1962) (Finland) (TV) (Suomen Televisio)', '(1969-2007) (UK) (TV)', '(1992) (UK) (theatrical)', '(2000) (USA) (DVD) (alternate version)', '(2013) (worldwide) (TV) (web)') AND n.name_pcode_nf = 'S6251' AND n.gender IS NOT NULL;

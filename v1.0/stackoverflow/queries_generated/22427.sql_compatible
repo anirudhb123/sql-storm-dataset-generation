@@ -1,0 +1,97 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RN,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate > (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year')
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.CreationDate, p.ViewCount
+),
+
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.ViewCount,
+        rp.UpVotes - rp.DownVotes AS NetVotes,
+        u.Reputation AS UserReputation,
+        CASE 
+            WHEN u.Reputation IS NULL THEN 'No Reputation' 
+            WHEN u.Reputation < 100 THEN 'Novice'
+            ELSE 'Experienced'
+        END AS UserExperience,
+        pht.Name AS PostHistoryType,
+        ARRAY_AGG(pht.Name) AS HistoryTypes
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Users u ON rp.OwnerUserId = u.Id
+    LEFT JOIN 
+        PostHistory ph ON rp.PostId = ph.PostId
+    LEFT JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.UpVotes, rp.DownVotes, u.Reputation
+)
+
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.NetVotes,
+    pd.UserReputation,
+    pd.UserExperience,
+    COALESCE(pd.PostHistoryType, 'No History') AS LastPostHistoryType,
+    CASE 
+        WHEN pd.ViewCount = 0 THEN 'Unseen'
+        WHEN pd.ViewCount IS NULL THEN 'N/A'
+        ELSE 
+            CASE 
+                WHEN pd.ViewCount < 100 THEN 'Low Traction'
+                WHEN pd.ViewCount BETWEEN 100 AND 1000 THEN 'Moderate Engagement'
+                ELSE 'High Visibility'
+            END
+    END AS VisibilityStatus,
+    pd.HistoryTypes
+FROM 
+    PostDetails pd
+WHERE 
+    pd.NetVotes > 0
+    OR (pd.UserReputation IS NULL AND pd.ViewCount > 10)
+
+UNION ALL
+
+SELECT
+    p.Id AS PostId,
+    p.Title,
+    p.CreationDate,
+    p.ViewCount,
+    COALESCE((SELECT SUM(v.BountyAmount) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 9), 0) AS NetVotes,
+    u.Reputation AS UserReputation,
+    'Bounty Post' AS UserExperience,
+    'Bounty' AS LastPostHistoryType,
+    'High Visibility' AS VisibilityStatus,
+    NULL AS HistoryTypes
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    EXISTS (SELECT 1 FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 9)
+    AND p.ViewCount IS NOT NULL
+ORDER BY 
+    NetVotes DESC
+LIMIT 100;

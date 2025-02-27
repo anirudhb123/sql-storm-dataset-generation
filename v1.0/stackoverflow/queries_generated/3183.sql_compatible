@@ -1,0 +1,63 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes, 
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ActivePosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+),
+PostEngagement AS (
+    SELECT 
+        ap.PostId, 
+        COUNT(c.Id) AS CommentCount, 
+        COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostCount
+    FROM 
+        ActivePosts ap
+    LEFT JOIN 
+        Comments c ON ap.PostId = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON ap.PostId = pl.PostId
+    GROUP BY 
+        ap.PostId
+)
+SELECT 
+    ua.UserId, 
+    ua.DisplayName, 
+    COALESCE(ap.Title, 'No Posts') AS Title, 
+    COALESCE(pe.CommentCount, 0) AS CommentCount, 
+    COALESCE(pe.RelatedPostCount, 0) AS RelatedPosts,
+    ua.TotalBounty, 
+    ua.TotalUpVotes, 
+    ua.TotalDownVotes
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    ActivePosts ap ON ua.UserId = ap.OwnerUserId AND ap.Rank = 1
+LEFT JOIN 
+    PostEngagement pe ON ap.PostId = pe.PostId
+WHERE 
+    ua.TotalUpVotes > ua.TotalDownVotes 
+    OR ua.TotalBounty > 0
+ORDER BY 
+    ua.TotalBounty DESC, 
+    ua.TotalUpVotes DESC,
+    ua.DisplayName;

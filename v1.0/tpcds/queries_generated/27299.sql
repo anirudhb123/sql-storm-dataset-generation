@@ -1,0 +1,62 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        ca.ca_zip
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_ship_date_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    GROUP BY 
+        ws.ws_ship_date_sk
+),
+FinalBenchmark AS (
+    SELECT 
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ci.ca_city,
+        ci.ca_state,
+        sd.total_sales,
+        sd.total_orders
+    FROM 
+        CustomerInfo ci
+    LEFT JOIN 
+        SalesData sd ON ci.c_customer_sk = sd.ws_bill_customer_sk
+)
+SELECT 
+    full_name,
+    cd_gender,
+    cd_marital_status,
+    ca_city,
+    ca_state,
+    COALESCE(total_sales, 0) AS total_sales,
+    COALESCE(total_orders, 0) AS total_orders,
+    CASE 
+        WHEN total_sales > 1000 THEN 'High Value'
+        WHEN total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value
+FROM 
+    FinalBenchmark
+ORDER BY 
+    customer_value DESC, total_sales DESC;

@@ -1,0 +1,47 @@
+WITH RECURSIVE CTE_Orders AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS depth
+    FROM orders
+    WHERE o_orderstatus = 'O'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, c.depth + 1
+    FROM orders o
+    JOIN CTE_Orders c ON o.o_custkey = c.o_custkey AND c.depth < 10
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+RankedPart AS (
+    SELECT ps.ps_partkey, 
+           SUM(ps.ps_availqty * ps.ps_supplycost) AS total_available_cost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY SUM(ps.ps_availqty * ps.ps_supplycost) DESC) AS rn
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY ps.ps_partkey
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) AS return_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT n.n_name AS nation_name, 
+       COUNT(DISTINCT c.c_custkey) AS customer_count,
+       SUM(o.o_totalprice) AS total_order_value,
+       MAX(rp.total_available_cost) AS max_available_cost,
+       CASE 
+           WHEN SUM(f.total_revenue) IS NULL THEN 'No Revenue'
+           ELSE ROUND(SUM(f.total_revenue), 2)
+       END AS total_revenue,
+       COALESCE(MAX(f.return_count), 0) AS max_returns,
+       'Total Orders: ' || COUNT(DISTINCT o.o_orderkey) || ', Max Cost: ' || COALESCE(MAX(rp.total_available_cost), 'No Max Cost') AS report
+FROM nation n
+JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN RankedPart rp ON rp.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey)
+LEFT JOIN FilteredLineItems f ON f.l_orderkey = o.o_orderkey
+WHERE o.o_orderdate >= (cast('1998-10-01' as date) - INTERVAL '1 year')
+GROUP BY n.n_name
+HAVING COUNT(DISTINCT c.c_custkey) > 10 OR MAX(rp.total_available_cost) IS NOT NULL
+ORDER BY total_order_value DESC, customer_count DESC
+LIMIT 10;

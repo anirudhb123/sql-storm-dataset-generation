@@ -1,0 +1,44 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, 
+           o.o_orderdate, 
+           c.c_name AS customer_name, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_orderkey) AS order_rank
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1995-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate, c.c_name
+),
+SupplierRegion AS (
+    SELECT s.s_suppkey, 
+           s.s_name, 
+           n.n_nationkey, 
+           r.r_regionkey, 
+           AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name, n.n_nationkey, r.r_regionkey
+),
+TopRegions AS (
+    SELECT r.r_regionkey, 
+           RANK() OVER (ORDER BY SUM(s.avg_supply_cost) DESC) AS region_rank
+    FROM SupplierRegion s
+    JOIN nation n ON s.n_nationkey = n.n_nationkey
+    JOIN region r ON s.r_regionkey = r.r_regionkey
+    GROUP BY r.r_regionkey
+)
+SELECT oh.o_orderkey, 
+       oh.order_rank, 
+       oh.total_sales, 
+       CASE WHEN tr.region_rank <= 5 THEN 'Top 5 Region' ELSE 'Other Regions' END AS region_category
+FROM OrderHierarchy oh
+LEFT JOIN TopRegions tr ON oh.o_orderdate IN 
+    (SELECT o.o_orderdate 
+     FROM orders o 
+     WHERE o.o_orderkey = oh.o_orderkey)
+WHERE oh.total_sales > 1000.00
+ORDER BY oh.total_sales DESC, oh.o_orderdate DESC;
+

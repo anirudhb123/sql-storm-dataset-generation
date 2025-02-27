@@ -1,0 +1,63 @@
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        NULL AS ParentPostId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.OwnerUserId IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        pl.RelatedPostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.Score,
+        rp.OwnerUserId,
+        rp.PostTypeId,
+        rp.CreationDate,
+        pl.PostId AS ParentPostId,
+        ROW_NUMBER() OVER (PARTITION BY rp.OwnerUserId ORDER BY rp.CreationDate DESC) AS UserPostRank
+    FROM 
+        PostLinks pl
+    JOIN 
+        Posts rp ON pl.RelatedPostId = rp.Id
+    WHERE 
+        pl.LinkTypeId = 3  -- Duplicate links
+)
+
+SELECT 
+    u.DisplayName AS Author,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(p.ViewCount) AS TotalViews,
+    AVG(p.Score) AS AverageScore,
+    COUNT(DISTINCT b.Id) AS TotalBadges,
+    MAX(COALESCE(p.ClosedDate, p.CreationDate)) AS LastActivity,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS TagsUsed
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Tags t ON t.ExcerptPostId = p.Id
+LEFT JOIN 
+    RecursivePostCTE rpc ON rpc.OwnerUserId = u.Id
+WHERE 
+    u.Reputation > 1000
+    AND p.CreationDate < NOW() - INTERVAL '1 year'
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 10
+ORDER BY 
+    TotalPosts DESC, TotalViews DESC;

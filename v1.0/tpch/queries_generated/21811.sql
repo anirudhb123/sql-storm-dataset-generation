@@ -1,0 +1,55 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.n_nationkey,
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT sh.s_suppkey, sh.s_name, sh.s_acctbal, sh.n_nationkey,
+           ROW_NUMBER() OVER (PARTITION BY sh.n_nationkey ORDER BY sh.s_acctbal DESC)
+    FROM SupplierHierarchy sh
+    JOIN supplier s ON sh.n_nationkey = s.n_nationkey AND sh.s_suppkey <> s.s_suppkey
+    WHERE sh.rank <= 10
+),
+AggregateData AS (
+    SELECT p.p_partkey, 
+           SUM(COALESCE(l.l_extendedprice * (1 - l.l_discount), 0)) AS total_revenue,
+           COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY p.p_partkey
+),
+FilteredSuppliers AS (
+    SELECT s.s_suppkey, s.s_name
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal) 
+        FROM supplier 
+        WHERE s_nationkey IN (SELECT n.n_nationkey
+                              FROM nation n 
+                              WHERE n.n_name LIKE '%land')
+    )
+)
+SELECT DISTINCT 
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    p.p_name AS part_name,
+    a.total_revenue,
+    a.total_orders,
+    COUNT(DISTINCT CASE 
+                       WHEN l.l_shipdate > '2023-01-01' THEN l.l_orderkey 
+                   END) AS after_2023_orders,
+    SUM(CASE 
+            WHEN l.l_discount = 0 THEN l.l_extendedprice 
+            ELSE 0 
+        END) AS total_revenue_without_discount
+FROM AggregateData a
+FULL OUTER JOIN FilteredSuppliers s ON a.p_partkey = s.s_suppkey
+LEFT JOIN lineitem l ON a.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+GROUP BY s.s_name, p.p_name, a.total_revenue, a.total_orders
+HAVING COUNT(CASE WHEN l.l_returnflag = 'R' THEN 1 END) = 0 
+   AND SUM(l.l_tax) < (SELECT SUM(ps_supplycost * ps_availqty) 
+                       FROM partsupp 
+                       WHERE ps_partkey = a.p_partkey)
+ORDER BY total_revenue DESC NULLS LAST
+LIMIT 100 OFFSET 50;

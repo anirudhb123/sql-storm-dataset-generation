@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        pt.Name AS PostType,
+        p.CreationDate,
+        p.LastActivityDate,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(a.Id) AS AnswerCount,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagList
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        PostsTags ptg ON p.Id = ptg.PostId
+    LEFT JOIN 
+        Tags t ON ptg.TagId = t.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, pt.Name, p.CreationDate, p.LastActivityDate, p.Title, p.Body
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.UpVotes - p.DownVotes) AS NetVotes,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ru.Rank,
+    ru.Title,
+    ru.TagList,
+    ru.CommentCount,
+    ru.AnswerCount,
+    tu.DisplayName AS Author,
+    tu.TotalViews,
+    tu.NetVotes
+FROM 
+    RankedPosts ru
+JOIN 
+    TopUsers tu ON ru.OwnerUserId = tu.UserId
+WHERE 
+    ru.Rank <= 5 -- Top 5 most recent posts per user
+ORDER BY 
+    tu.TotalViews DESC, ru.LastActivityDate DESC;

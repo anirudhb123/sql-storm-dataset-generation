@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.ViewCount DESC) AS RankScore,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::int[])
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount, p.PostTypeId
+),
+RecentVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    WHERE 
+        v.CreationDate >= NOW() - INTERVAL '6 months'
+    GROUP BY 
+        v.PostId
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastCloseDate,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS LastReopenDate,
+        COUNT(DISTINCT CASE WHEN ph.PostHistoryTypeId IN (12, 13) THEN ph.Id END) AS DeleteCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.AnswerCount,
+    rp.Score,
+    COALESCE(rv.UpVotes, 0) AS UpVotes,
+    COALESCE(rv.DownVotes, 0) AS DownVotes,
+    COALESCE(phs.LastCloseDate, 'Never Closed') AS LastCloseDate,
+    COALESCE(phs.LastReopenDate, 'Never Reopened') AS LastReopenDate,
+    phs.DeleteCount,
+    rp.Tags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentVotes rv ON rp.PostId = rv.PostId
+LEFT JOIN 
+    PostHistorySummary phs ON rp.PostId = phs.PostId
+WHERE 
+    rp.RankScore <= 5 -- Only top 5 posts by PostType
+ORDER BY 
+    rp.PostTypeId, rp.Score DESC, rp.CreationDate DESC;
+
+This SQL query showcases a complex construction while performing several operations including:
+
+1. **Common Table Expressions (CTEs)** to break down the problem into manageable parts.
+2. **Window Function** (`ROW_NUMBER()`) to rank posts by score and view count.
+3. **String Aggregation** to combine tags into a single string.
+4. **Aggregate Functions** to calculate counts of upvotes and downvotes.
+5. **NULL Handling** using `COALESCE` to manage potentially missing values.
+6. **Use of `LEFT JOIN`** to include information from other related tables (votes and post history).
+7. **Group By Clauses** to summarize records appropriately.
+8. **Date calculations** to filter records based on specific time constraints, such as the last year or the last six months.
+9. **Conditional Aggregation** to count specific post history actions (like closure and deletion). 
+
+The query generates a comprehensive report on top posts, alongside their voting activity and historical post management info.

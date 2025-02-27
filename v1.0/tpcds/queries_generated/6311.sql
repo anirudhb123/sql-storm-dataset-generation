@@ -1,0 +1,52 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_ship_customer_sk) AS unique_customers,
+        DATE(d.d_date) AS sale_date
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    JOIN 
+        customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        d.d_year = 2023
+        AND cd.cd_gender = 'F'
+    GROUP BY 
+        ws.web_site_id, DATE(d.d_date)
+),
+WarehouseSales AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ws_ext_sales_price) AS warehouse_total_sales
+    FROM 
+        warehouse w
+    JOIN 
+        web_sales ws ON w.w_warehouse_sk = ws.ws_warehouse_sk
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        w.w_warehouse_id
+)
+SELECT 
+    sd.web_site_id,
+    sd.total_sales,
+    sd.total_orders,
+    sd.avg_sales_price,
+    sd.unique_customers,
+    ws.warehouse_total_sales,
+    RANK() OVER (ORDER BY sd.total_sales DESC) AS sales_rank
+FROM 
+    SalesData sd
+JOIN 
+    WarehouseSales ws ON sd.sale_date = ws.warehouse_total_sales
+ORDER BY 
+    sd.total_sales DESC, sd.web_site_id;

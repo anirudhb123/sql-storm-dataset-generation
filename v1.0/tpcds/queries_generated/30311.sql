@@ -1,0 +1,50 @@
+
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT s_store_sk, s_store_name, s_manager, 1 AS level
+    FROM store
+    WHERE s_store_name LIKE 'A%'
+    UNION ALL
+    SELECT s.store_sk, s.s_store_name, s.manager, sh.level + 1
+    FROM store s
+    JOIN sales_hierarchy sh ON s.manager = sh.s_store_name
+),
+top_customers AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, SUM(ws.ws_net_paid) AS total_spent
+    FROM customer c
+    JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE ws.ws_sold_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name
+    HAVING total_spent > 1000
+),
+item_stats AS (
+    SELECT i.i_item_id, AVG(ws.ws_sales_price) AS avg_price, COUNT(ws.ws_item_sk) AS total_sales
+    FROM item i
+    JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_id
+),
+customer_income AS (
+    SELECT cd.cd_demo_sk, COUNT(cd.cd_dep_count) AS dep_count, ib.ib_upper_bound
+    FROM customer_demographics cd
+    LEFT JOIN household_demographics hd ON cd.cd_demo_sk = hd.hd_demo_sk
+    LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    GROUP BY cd.cd_demo_sk, ib.ib_upper_bound
+),
+comprehensive_report AS (
+    SELECT cu.c_first_name, cu.c_last_name, sh.s_store_name, sh.level, 
+           ci.dep_count, ci.ib_upper_bound, its.avg_price, its.total_sales
+    FROM top_customers cu 
+    JOIN sales_hierarchy sh ON cu.c_customer_sk IN (SELECT sr_customer_sk FROM store_returns WHERE sr_return_quantity > 0)
+    JOIN customer_income ci ON cu.c_customer_sk = ci.cd_demo_sk
+    JOIN item_stats its ON its.total_sales > 10
+    ORDER BY cu.total_spent DESC, sh.level
+)
+
+SELECT * 
+FROM comprehensive_report
+WHERE (ib_upper_bound IS NOT NULL OR dep_count > 0)
+UNION ALL 
+SELECT NULL, NULL, w.web_name, NULL, NULL, NULL, AVG(ws.ws_sales_price) AS avg_price, COUNT(ws.ws_item_sk) AS total_sales
+FROM web_site w 
+JOIN web_sales ws ON w.web_site_sk = ws.ws_web_site_sk
+GROUP BY w.web_name
+ORDER BY avg_price DESC;

@@ -1,0 +1,64 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        CONCAT(ca.ca_city, ', ', ca.ca_state, ' ', ca.ca_zip) AS location,
+        ca.ca_country,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        w.w_warehouse_name,
+        sm.sm_type AS shipping_mode,
+        dd.d_date AS sale_date
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+),
+AggregatedSales AS (
+    SELECT
+        ad.full_name,
+        ad.full_address,
+        ad.location,
+        ad.ca_country,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS total_sales,
+        COUNT(sd.ws_order_number) AS order_count
+    FROM 
+        AddressDetails ad
+    JOIN 
+        SalesData sd ON ad.c_customer_id = sd.ws_order_number
+    GROUP BY 
+        ad.full_name, ad.full_address, ad.location, ad.ca_country
+)
+SELECT 
+    AggregatedSales.*,
+    CASE 
+        WHEN total_sales > 1000 THEN 'High Value'
+        WHEN total_sales BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_segment
+FROM 
+    AggregatedSales
+WHERE 
+    location LIKE '%New York%'
+ORDER BY 
+    total_sales DESC
+FETCH FIRST 10 ROWS ONLY;

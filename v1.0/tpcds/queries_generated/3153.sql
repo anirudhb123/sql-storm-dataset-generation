@@ -1,0 +1,58 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    GROUP BY ws.ws_item_sk
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        d.d_year,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        COUNT(DISTINCT s.ss_ticket_number) AS total_store_sales,
+        COALESCE(SUM(s.ss_ext_sales_price), 0) AS total_store_revenue
+    FROM customer c
+    LEFT JOIN store_sales s ON c.c_customer_sk = s.ss_customer_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN date_dim d ON s.ss_sold_date_sk = d.d_date_sk
+    GROUP BY c.c_customer_sk, d.d_year, cd.cd_gender, cd.cd_marital_status, cd.cd_income_band_sk
+),
+Promotions AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_name,
+        COUNT(DISTINCT ws.ws_order_number) AS promo_order_count,
+        SUM(ws.ws_net_profit) AS promo_net_profit
+    FROM promotion p
+    JOIN web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY p.p_promo_sk, p.p_promo_name
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.d_year,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    cd.cd_income_band_sk,
+    COALESCE(sd.total_sales, 0) AS total_web_sales,
+    COALESCE(sd.total_orders, 0) AS total_web_orders,
+    COALESCE(sd.avg_net_profit, 0) AS avg_web_net_profit,
+    COALESCE(pr.promo_order_count, 0) AS total_promo_orders,
+    COALESCE(pr.promo_net_profit, 0) AS total_promo_net_profit,
+    CASE 
+        WHEN cd.total_store_sales IS NOT NULL THEN 'Has Store Sales' 
+        ELSE 'No Store Sales'
+    END AS store_sales_status
+FROM CustomerData cd
+LEFT JOIN SalesData sd ON cd.c_customer_sk = sd.ws_item_sk
+LEFT JOIN Promotions pr ON pr.promo_order_count > 0
+WHERE cd.cd_income_band_sk IS NOT NULL OR (cd.cd_gender = 'F' AND cd.cd_marital_status = 'S') 
+ORDER BY cd.d_year DESC, total_web_sales DESC
+FETCH FIRST 100 ROWS ONLY;

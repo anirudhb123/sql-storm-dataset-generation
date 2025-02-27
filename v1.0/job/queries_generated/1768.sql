@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank_by_cast_size
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title, production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        rank_by_cast_size <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title,
+        tm.production_year,
+        ARRAY_AGG(DISTINCT an.name) AS actor_names,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        cast_info ci ON tm.title = ci.title
+    LEFT JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = ci.movie_id
+    GROUP BY 
+        tm.title, tm.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    COALESCE(md.company_count, 0) AS company_count,
+    STRING_AGG(md.actor_names::text, ', ') AS actors
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    movie_info mi ON md.title = mi.info
+WHERE 
+    mi.info_type_id = (
+        SELECT id 
+        FROM info_type 
+        WHERE info = 'rating'
+    )
+GROUP BY 
+    md.title, md.production_year
+HAVING 
+    COALESCE(md.company_count, 0) > 1
+ORDER BY 
+    md.production_year DESC;

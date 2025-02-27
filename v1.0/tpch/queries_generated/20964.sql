@@ -1,0 +1,87 @@
+WITH RecursivePart AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_container,
+        p.p_mfgr,
+        ROW_NUMBER() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps.ps_partkey FROM partsupp ps WHERE ps.ps_availqty > 10)
+),
+CustomerOrderStats AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS average_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+SupplierPartData AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS unique_parts_supplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2 WHERE s2.s_comment IS NOT NULL)
+    GROUP BY 
+        s.s_suppkey
+),
+CombinedData AS (
+    SELECT 
+        co.c_custkey,
+        COALESCE(sp.unique_parts_supplied, 0) AS parts_supplied,
+        CASE 
+            WHEN co.total_orders IS NULL THEN 'No Orders'
+            WHEN co.total_spent > 1000 THEN 'High Value'
+            ELSE 'Regular'
+        END AS customer_value_segment
+    FROM 
+        CustomerOrderStats co
+    LEFT JOIN 
+        SupplierPartData sp ON sp.total_supply_cost > co.average_order_value
+),
+FinalOutput AS (
+    SELECT 
+        rp.p_partkey, 
+        rp.p_name, 
+        rp.p_mfgr, 
+        cd.customer_value_segment,
+        SUM(CASE 
+                WHEN cd.parts_supplied > 5 THEN 1 
+                ELSE 0 
+            END) AS premium_supplier_count,
+        AVG(rp.p_retailprice) OVER (PARTITION BY cd.customer_value_segment) AS avg_part_price
+    FROM 
+        RecursivePart rp
+    LEFT JOIN 
+        CombinedData cd ON rp.rn <= 3 AND EXISTS (SELECT 1 FROM customer c WHERE c.c_custkey = cd.c_custkey)
+    GROUP BY 
+        rp.p_partkey, rp.p_name, rp.p_mfgr, cd.customer_value_segment
+)
+SELECT 
+    f.p_partkey,
+    f.p_name,
+    f.p_mfgr,
+    f.customer_value_segment,
+    f.premium_supplier_count,
+    f.avg_part_price
+FROM 
+    FinalOutput f
+WHERE 
+    f.premium_supplier_count > 0 OR f.customer_value_segment = 'High Value'
+ORDER BY 
+    f.avg_part_price DESC NULLS LAST;

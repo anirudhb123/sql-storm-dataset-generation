@@ -1,0 +1,71 @@
+
+WITH RECURSIVE CompanyHierarchy AS (
+    SELECT id AS company_id, name AS company_name, country_code, 1 AS level
+    FROM company_name
+    WHERE country_code IS NOT NULL
+    UNION ALL
+    SELECT mc.company_id, c.name AS company_name, c.country_code, ch.level + 1
+    FROM movie_companies mc
+    JOIN company_name c ON mc.company_id = c.id
+    JOIN CompanyHierarchy ch ON mc.movie_id = (
+        SELECT movie_id
+        FROM movie_companies
+        WHERE company_id = ch.company_id
+        LIMIT 1
+    )
+),
+RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        RANK() OVER (PARTITION BY m.production_year ORDER BY m.id DESC) AS year_rank,
+        COALESCE(k.keyword, 'No Keywords') AS keyword_summary
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE (m.production_year IS NOT NULL AND m.production_year > 2000)
+    GROUP BY m.id, m.title, m.production_year, k.keyword
+),
+DetailedCastInfo AS (
+    SELECT 
+        ci.movie_id,
+        COALESCE(p.name, 'Unknown Actor') AS actor_name,
+        ct.kind AS role_type,
+        COUNT(ci.id) AS total_roles,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_present
+    FROM cast_info ci
+    LEFT JOIN aka_name p ON ci.person_id = p.person_id
+    LEFT JOIN comp_cast_type ct ON ci.person_role_id = ct.id
+    GROUP BY ci.movie_id, p.name, ct.kind
+),
+FinalAnalysis AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        SUM(dci.total_roles) AS total_cast_roles,
+        MAX(dci.notes_present) AS max_notes_from_cast,
+        STRING_AGG(DISTINCT ch.company_name, ', ') AS associated_companies,
+        COUNT(DISTINCT mk.keyword_id) FILTER (WHERE mk.keyword_id IS NOT NULL) AS keyword_count
+    FROM RankedMovies rm
+    LEFT JOIN DetailedCastInfo dci ON rm.movie_id = dci.movie_id
+    LEFT JOIN movie_companies mc ON rm.movie_id = mc.movie_id
+    LEFT JOIN CompanyHierarchy ch ON mc.company_id = ch.company_id
+    LEFT JOIN movie_keyword mk ON rm.movie_id = mk.movie_id
+    GROUP BY rm.title, rm.production_year
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_cast_roles > 10 THEN 'Large Cast'
+        WHEN total_cast_roles BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category,
+    CASE 
+        WHEN production_year IS NOT NULL AND MOD(production_year, 2) = 0 THEN 'Even Year'
+        ELSE 'Odd Year'
+    END AS year_type,
+    COALESCE(associated_companies, 'No Associated Companies') AS company_info
+FROM FinalAnalysis
+WHERE year_rank <= 5
+ORDER BY production_year DESC, total_cast_roles DESC;

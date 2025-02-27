@@ -1,0 +1,104 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+RankedUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS UserRank
+    FROM 
+        Users u
+),
+PostVotes AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        DENSE_RANK() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 24) 
+),
+FinalSelection AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        pu.DisplayName AS AcceptedAnswerer,
+        COALESCE(rp.Level, 0) AS PostLevel,
+        pu.Reputation AS AnswererReputation,
+        pu.UserRank AS AnswererRank,
+        pv.UpVotes,
+        pv.DownVotes,
+        r.DisplayName AS LastEditor,
+        re.CreationDate AS LastEditDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.AcceptedAnswerId = a.Id
+    LEFT JOIN 
+        Users pu ON a.OwnerUserId = pu.Id
+    LEFT JOIN 
+        RecursivePostHierarchy rp ON p.Id = rp.PostId
+    LEFT JOIN 
+        RankedUsers r ON p.LastEditorUserId = r.Id
+    LEFT JOIN 
+        PostVotes pv ON p.Id = pv.PostId
+    LEFT JOIN 
+        RecentEdits re ON p.Id = re.PostId AND re.EditRank = 1
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    fs.PostId,
+    fs.Title,
+    fs.CreationDate,
+    fs.AcceptedAnswerId,
+    fs.AcceptedAnswerer,
+    fs.PostLevel,
+    fs.AnswererReputation,
+    fs.AnswererRank,
+    fs.UpVotes,
+    fs.DownVotes,
+    fs.LastEditor,
+    fs.LastEditDate,
+    CASE 
+        WHEN fs.LastEditDate IS NULL THEN 'No edits yet'
+        ELSE CONCAT('Edited on ', to_char(fs.LastEditDate, 'YYYY-MM-DD HH24:MI:SS'))
+    END AS EditStatus
+FROM 
+    FinalSelection fs
+ORDER BY 
+    fs.UpVotes DESC, fs.CreationDate DESC
+LIMIT 100;

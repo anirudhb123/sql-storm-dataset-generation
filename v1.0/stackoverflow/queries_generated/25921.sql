@@ -1,0 +1,106 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        RANK() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS ScoreRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 -- Only consider Questions
+        AND p.Score > 0 -- Only consider Questions with positive scores
+),
+TopPosts AS (
+    SELECT 
+        PostID,
+        Title,
+        Body,
+        Tags,
+        OwnerDisplayName,
+        CreationDate,
+        Score
+    FROM 
+        RankedPosts
+    WHERE 
+        ScoreRank = 1
+),
+PostDetails AS (
+    SELECT 
+        tp.PostID,
+        tp.Title,
+        tp.Body,
+        tp.Tags,
+        tp.OwnerDisplayName,
+        tp.CreationDate,
+        tp.Score,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(a.AnswerCount, 0) AS AnswerCount,
+        COALESCE(b.BadgeCount, 0) AS BadgeCount,
+        COALESCE(pn.LinkCount, 0) AS LinkCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(Id) AS CommentCount 
+        FROM 
+            Comments 
+        GROUP BY 
+            PostId
+    ) c ON tp.PostID = c.PostId
+    LEFT JOIN (
+        SELECT 
+            ParentId AS PostId, 
+            COUNT(Id) AS AnswerCount 
+        FROM 
+            Posts 
+        WHERE 
+            PostTypeId = 2 -- Answers
+        GROUP BY 
+            ParentId
+    ) a ON tp.PostID = a.PostId
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(Id) AS BadgeCount 
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = tp.PostID)
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            COUNT(Id) AS LinkCount 
+        FROM 
+            PostLinks 
+        GROUP BY 
+            PostId
+    ) pn ON tp.PostID = pn.PostId
+)
+SELECT 
+    pd.PostID,
+    pd.Title,
+    pd.Body,
+    pd.Tags,
+    pd.OwnerDisplayName,
+    pd.CreationDate,
+    pd.Score,
+    pd.CommentCount,
+    pd.AnswerCount,
+    pd.BadgeCount,
+    pd.LinkCount,
+    CONCAT('Tags: ', STRING_AGG(DISTINCT TRIM(BOTH '<>' FROM UNNEST(string_to_array(pd.Tags, '><'))), ', ')) AS ParsedTags
+FROM 
+    PostDetails pd
+GROUP BY 
+    pd.PostID, pd.Title, pd.Body, pd.Tags, pd.OwnerDisplayName, pd.CreationDate, pd.Score, pd.CommentCount, pd.AnswerCount, pd.BadgeCount, pd.LinkCount
+ORDER BY 
+    pd.Score DESC
+LIMIT 50;

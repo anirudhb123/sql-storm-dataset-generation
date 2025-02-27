@@ -1,0 +1,63 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns
+    GROUP BY 
+        sr_returning_customer_sk
+),
+SalesWithShipping AS (
+    SELECT 
+        ws_bill_customer_sk AS customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        SUM(ws_ext_ship_cost) AS total_shipping_cost,
+        COUNT(ws_order_number) AS order_count,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+    HAVING 
+        COUNT(ws_order_number) > 1
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, -1) AS income_band,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_customer_sk = hd.hd_demo_sk
+)
+SELECT 
+    cd.c_customer_sk,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    COUNT(sr.total_returns) AS return_count,
+    SUM(sr.total_return_amt) AS total_returned_amount,
+    SUM(sws.total_sales) AS total_spent,
+    AVG(sws.total_shipping_cost) AS avg_shipping_cost,
+    SUM(CASE WHEN cus.sales_rank = 1 THEN sws.total_sales ELSE 0 END) AS highest_sales
+FROM 
+    CustomerDemographics cd
+LEFT JOIN 
+    CustomerReturns sr ON cd.c_customer_sk = sr.sr_returning_customer_sk
+LEFT JOIN 
+    SalesWithShipping sws ON cd.c_customer_sk = sws.customer_sk
+LEFT JOIN 
+    (SELECT DISTINCT customer_sk, sales_rank FROM SalesWithShipping) cus ON cus.customer_sk = cd.c_customer_sk
+GROUP BY 
+    cd.c_customer_sk, cd.cd_gender, cd.cd_marital_status
+HAVING 
+    SUM(COALESCE(sws.total_sales, 0)) > 1000 AND COUNT(sr.total_returns) > 0
+ORDER BY 
+    total_returned_amount DESC
+LIMIT 10 OFFSET 5;

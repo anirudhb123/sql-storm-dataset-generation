@@ -1,0 +1,74 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.ViewCount, 
+        p.AnswerCount, 
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY FORMAT_TIMESTAMP(p.CreationDate, 'YYYY-MM-DD') ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p 
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 YEAR'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(DISTINCT c.Id) AS CommentCount, 
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u 
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 11 THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+TopPosts AS (
+    SELECT 
+        rp.Id, 
+        rp.Title, 
+        rp.ViewCount, 
+        rp.AnswerCount, 
+        ua.UserId, 
+        ua.CommentCount,
+        ua.UpVotes,
+        ua.DownVotes,
+        pha.CloseCount,
+        pha.ReopenCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserActivity ua ON rp.Id IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = ua.UserId)
+    LEFT JOIN 
+        PostHistoryAnalysis pha ON rp.Id = pha.PostId
+    WHERE 
+        rp.ViewRank <= 5
+)
+SELECT 
+    tp.Title,
+    tp.ViewCount,
+    tp.AnswerCount,
+    COALESCE(tp.CommentCount, 0) AS CommentCount,
+    COALESCE(tp.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(tp.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(tp.CloseCount, 0) AS TotalCloseVotes,
+    COALESCE(tp.ReopenCount, 0) AS TotalReopenVotes
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.ViewCount DESC, 
+    tp.AnswerCount DESC;

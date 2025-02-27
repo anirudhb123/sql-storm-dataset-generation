@@ -1,0 +1,55 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(COALESCE(ws.ws_ext_sales_price, 0) + COALESCE(cs.cs_ext_sales_price, 0) + COALESCE(ss.ss_ext_sales_price, 0)) AS total_sales,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        dd.d_year,
+        da.ca_state
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk 
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk 
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk 
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk 
+    JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk OR cs.cs_sold_date_sk = dd.d_date_sk OR ss.ss_sold_date_sk = dd.d_date_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk 
+    WHERE 
+        dd.d_year >= 2021 AND 
+        dd.d_year <= 2023
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status, dd.d_year, da.ca_state
+),
+Summary AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT cs.c_customer_id) AS customer_count,
+        AVG(cs.total_sales) AS avg_sales,
+        MAX(cs.total_sales) AS max_sales,
+        MIN(cs.total_sales) AS min_sales,
+        SUM(cs.total_sales) AS total_sales
+    FROM 
+        CustomerSales cs 
+    JOIN 
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender
+)
+SELECT 
+    gender, 
+    customer_count, 
+    avg_sales, 
+    max_sales, 
+    min_sales, 
+    total_sales
+FROM 
+    Summary
+ORDER BY 
+    total_sales DESC;

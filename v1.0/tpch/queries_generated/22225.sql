@@ -1,0 +1,77 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= CURRENT_DATE - INTERVAL '1 year'
+),
+max_discount_supplier AS (
+    SELECT 
+        ps.ps_suppkey,
+        MAX(l.l_discount) AS max_discount
+    FROM 
+        partsupp ps
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY 
+        ps.ps_suppkey
+),
+customer_info AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        n.n_name AS nation_name,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY c.c_acctbal DESC) AS region_rank
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+),
+outer_joined AS (
+    SELECT 
+        r.r_name,
+        coalesce(c.c_name, 'No Name') AS customer_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty
+    FROM 
+        region r
+    LEFT OUTER JOIN customer_info c ON c.region_rank = 1
+    LEFT OUTER JOIN ranked_orders o ON o.o_orderkey = c.c_custkey
+    LEFT JOIN lineitem l ON l.l_orderkey = o.o_orderkey
+    LEFT JOIN partsupp ps ON ps.ps_suppkey = l.l_suppkey
+    LEFT JOIN part p ON p.p_partkey = l.l_partkey
+)
+SELECT 
+    oj.r_name,
+    oj.customer_name,
+    COUNT(oj.o_orderkey) AS total_orders,
+    SUM(oj.o_totalprice) AS total_spent,
+    MAX(mds.max_discount) AS max_discount,
+    CASE 
+        WHEN MAX(oj.ps_availqty) IS NULL THEN 'No Stock'
+        ELSE MAX(oj.ps_availqty)::text || ' Available'
+    END AS stock_status
+FROM 
+    outer_joined oj
+JOIN 
+    max_discount_supplier mds ON mds.ps_suppkey = oj.ps_suppkey
+WHERE 
+    oj.o_orderdate IS NOT NULL 
+    AND (oj.o_totalprice BETWEEN 1000 AND 5000 OR oj.o_totalprice IS NULL)
+GROUP BY 
+    oj.r_name, oj.customer_name
+HAVING 
+    COUNT(oj.o_orderkey) > 5 
+ORDER BY 
+    total_spent DESC, customer_name ASC
+FETCH FIRST 10 ROWS ONLY;

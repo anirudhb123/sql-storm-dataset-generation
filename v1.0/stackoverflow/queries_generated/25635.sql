@@ -1,0 +1,62 @@
+WITH UserRankings AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 0
+),
+TopQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        COUNT(a.Id) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id
+    HAVING 
+        COUNT(a.Id) > 0
+),
+TopTags AS (
+    SELECT 
+        t.TagName,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY 
+        t.TagName
+    ORDER BY 
+        PostCount DESC
+    LIMIT 10
+)
+SELECT 
+    UR.DisplayName AS TopUser,
+    UR.Reputation AS UserReputation,
+    TQ.Title AS TopQuestion,
+    TQ.CreationDate AS QuestionDate,
+    TQ.Score AS QuestionScore,
+    TT.TagName AS TopTag,
+    TT.PostCount AS TagUsage
+FROM 
+    UserRankings UR
+JOIN 
+    TopQuestions TQ ON UR.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = TQ.PostId LIMIT 1)
+JOIN 
+    TopTags TT ON TT.TagName = ANY(string_to_array((SELECT Tags FROM Posts WHERE Id = TQ.PostId LIMIT 1), ','))
+WHERE 
+    UR.ReputationRank <= 10
+ORDER BY 
+    UR.Reputation DESC, 
+    TQ.Score DESC;

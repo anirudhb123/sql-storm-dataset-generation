@@ -1,0 +1,57 @@
+WITH PartStats AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+NationStats AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_name AS region_name,
+        SUM(s.s_acctbal) AS total_account_balance,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        n.n_nationkey, n.n_name, r.r_name
+)
+SELECT 
+    p.p_name,
+    p.total_available,
+    p.avg_supply_cost,
+    n.n_name AS nation_name,
+    n.region_name,
+    n.total_account_balance,
+    n.supplier_count AS nation_supplier_count,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders
+FROM 
+    PartStats p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    supplier s ON l.l_suppkey = s.s_suppkey
+JOIN 
+    NationStats n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    o.o_orderdate BETWEEN '2021-01-01' AND '2021-12-31'
+GROUP BY 
+    p.p_name, p.total_available, p.avg_supply_cost, n.n_name, n.region_name, n.total_account_balance
+HAVING 
+    TOTAL_ORDER_COUNT > 10
+ORDER BY 
+    p.total_available DESC, n.total_account_balance DESC;

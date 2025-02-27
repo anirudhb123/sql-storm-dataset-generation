@@ -1,0 +1,62 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier WHERE s_acctbal IS NOT NULL)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5 AND s.s_acctbal IS NOT NULL
+),
+AggregatedSales AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN '2021-01-01' AND '2021-12-31'
+    GROUP BY o.o_orderkey
+),
+RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_customerkey,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice) DESC) AS order_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_customerkey, o.o_orderstatus
+),
+RegionStats AS (
+    SELECT 
+        r.r_regionkey,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count,
+        SUM(CASE WHEN s.s_acctbal IS NOT NULL THEN s.s_acctbal ELSE 0 END) AS total_account_balance
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey
+)
+SELECT 
+    rh.s_name,
+    rh.level,
+    gs.o_orderkey,
+    gs.total_sales,
+    CASE 
+        WHEN r.order_rank = 1 THEN 'Top Order'
+        ELSE 'Other'
+    END AS order_status,
+    COALESCE(rs.nation_count, 0) AS nation_count,
+    CASE 
+        WHEN rs.total_account_balance < 1000 THEN 'Low Balance'
+        WHEN rs.total_account_balance BETWEEN 1000 AND 5000 THEN 'Medium Balance'
+        ELSE 'High Balance'
+    END AS account_balance_category
+FROM SupplierHierarchy rh
+JOIN AggregatedSales gs ON rh.s_suppkey = gs.o_orderkey
+FULL OUTER JOIN RankedOrders r ON gs.o_orderkey = r.o_orderkey
+LEFT JOIN RegionStats rs ON rh.s_nationkey = rs.r_regionkey
+WHERE (rh.level % 2 = 0 OR gs.total_sales IS NULL) 
+AND (gs.total_sales > 1000 OR gs.total_sales IS NULL)
+ORDER BY rh.s_name, gs.total_sales DESC, r.order_rank;

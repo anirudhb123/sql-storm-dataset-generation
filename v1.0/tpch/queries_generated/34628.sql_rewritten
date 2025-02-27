@@ -1,0 +1,44 @@
+WITH RECURSIVE supplier_sales AS (
+    SELECT s.s_suppkey, s.s_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '1996-01-01' AND l.l_shipdate < '1997-01-01'
+    GROUP BY s.s_suppkey, s.s_name
+    UNION ALL
+    SELECT ss.s_suppkey, ss.s_name, ss.total_sales
+    FROM supplier_sales ss
+    WHERE ss.total_sales > 1000
+    ORDER BY total_sales DESC
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders, 
+           SUM(o.o_totalprice) AS total_spent, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+),
+nation_supplier AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+total_summary AS (
+    SELECT ns.n_name, COALESCE(ct.total_orders, 0) AS total_orders, 
+           COALESCE(ct.total_spent, 0) AS total_spent, 
+           ns.supplier_count
+    FROM nation_supplier ns
+    LEFT JOIN customer_order_summary ct ON ns.n_nationkey = ct.c_nationkey
+)
+SELECT ts.n_name, ts.total_orders, ts.total_spent, ts.supplier_count,
+       CASE 
+           WHEN ts.total_spent > 10000 THEN 'High Value'
+           WHEN ts.total_spent BETWEEN 5000 AND 10000 THEN 'Medium Value'
+           ELSE 'Low Value' 
+       END AS customer_value_category
+FROM total_summary ts
+JOIN supplier_sales ss ON ts.supplier_count > 0
+WHERE ts.total_orders > 0
+ORDER BY ts.total_spent DESC;

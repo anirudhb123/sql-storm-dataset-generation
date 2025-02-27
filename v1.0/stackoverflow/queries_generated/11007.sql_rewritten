@@ -1,0 +1,60 @@
+WITH PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(C.AnswerCount, 0) AS AnswerCount,
+        COALESCE(C.CommentCount, 0) AS CommentCount,
+        COALESCE(B.BadgeCount, 0) AS BadgeCount,
+        U.Reputation,
+        ROW_NUMBER() OVER (PARTITION BY P.PostTypeId ORDER BY P.CreationDate DESC) AS Rank
+    FROM 
+        Posts P
+    LEFT JOIN (
+        SELECT 
+            ParentId, 
+            COUNT(*) AS AnswerCount,
+            SUM(CommentCount) AS CommentCount
+        FROM (
+            SELECT 
+                ParentId, 
+                COUNT(*) AS CommentCount
+            FROM 
+                Comments
+            GROUP BY 
+                ParentId
+        ) AS CommentCounts
+        GROUP BY 
+            ParentId
+    ) C ON P.Id = C.ParentId
+    LEFT JOIN (
+        SELECT 
+            UserId, 
+            COUNT(*) AS BadgeCount
+        FROM 
+            Badges 
+        GROUP BY 
+            UserId
+    ) B ON P.OwnerUserId = B.UserId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+)
+
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.AnswerCount,
+    PS.CommentCount,
+    PS.BadgeCount,
+    PS.Reputation
+FROM 
+    PostStats PS
+WHERE 
+    PS.Rank <= 10
+ORDER BY 
+    PS.CreationDate DESC;

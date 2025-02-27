@@ -1,0 +1,32 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_web_site_sk,
+        SUM(ws.ws_ext_sales_price) AS Total_Sales,
+        COUNT(ws.ws_order_number) AS Total_Orders
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year = 2022
+    AND cd.cd_gender = 'F'
+    GROUP BY ws.ws_web_site_sk
+), TopSales AS (
+    SELECT
+        ws.ws_web_site_id,
+        sd.Total_Sales,
+        sd.Total_Orders,
+        DENSE_RANK() OVER (ORDER BY sd.Total_Sales DESC) AS Sales_Rank
+    FROM SalesData sd
+    JOIN web_site ws ON sd.ws_web_site_sk = ws.web_site_sk
+)
+SELECT 
+    ws.ws_web_site_id,
+    ts.Total_Sales,
+    ts.Total_Orders,
+    ts.Sales_Rank,
+    (SELECT AVG(ts2.Total_Sales) FROM TopSales ts2) AS Avg_Sales
+FROM TopSales ts
+JOIN web_site ws ON ts.ws_web_site_id = ws.web_site_id
+WHERE ts.Sales_Rank <= 10
+ORDER BY ts.Sales_Rank;

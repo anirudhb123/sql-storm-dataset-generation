@@ -1,0 +1,116 @@
+
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text,
+        1 AS Level
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13)  
+
+    UNION ALL
+
+    SELECT 
+        ph.Id,
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ph.Text,
+        rp.Level + 1
+    FROM 
+        PostHistory ph
+    JOIN RecursivePostHistory rp ON ph.PostId = rp.PostId
+    WHERE 
+        rp.Level < 3  
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COALESCE(rp.Level, 0) AS CloseOpenLevel,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        RecursivePostHistory rp ON p.Id = rp.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, rp.Level
+),
+
+FinalStats AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.CloseOpenLevel,
+        ps.ViewCount,
+        ps.CommentCount,
+        ps.VoteCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ur.DisplayName AS TopUser,
+        ur.Reputation AS TopUserReputation,
+        ur.BadgeCount
+    FROM 
+        PostStats ps
+    JOIN 
+        UserReputation ur ON ur.UserId = (
+            SELECT 
+                p.OwnerUserId 
+            FROM 
+                Posts p 
+            WHERE 
+                p.Id = ps.PostId 
+            ORDER BY 
+                p.CreationDate
+            LIMIT 1
+        )
+    WHERE 
+        ps.CommentCount > 0 OR ps.UpVotes > 0
+)
+
+SELECT 
+    *,
+    CASE 
+        WHEN CloseOpenLevel > 0 THEN 'Post is Closed/Reopened'
+        ELSE 'Post is Active'
+    END AS PostStatus,
+    (ViewCount - (UpVotes - DownVotes)) AS NetEngagement
+FROM 
+    FinalStats
+ORDER BY 
+    ViewCount DESC, UpVotes DESC
+LIMIT 100;

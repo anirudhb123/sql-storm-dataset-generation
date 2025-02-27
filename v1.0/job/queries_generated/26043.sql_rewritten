@@ -1,0 +1,61 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ci.nr_order) AS actor_rank
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year >= 2000
+), 
+
+GenreCount AS (
+    SELECT 
+        t.id AS movie_id,
+        COUNT(DISTINCT m.keyword) AS genre_count
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword m ON mk.keyword_id = m.id
+    GROUP BY 
+        t.id
+),
+
+ActorInfo AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        pi.info AS actor_bio
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        person_info pi ON a.person_id = pi.person_id
+    WHERE 
+        pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+)
+
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    rm.actor_name,
+    gc.genre_count,
+    ai.actor_bio,
+    rm.actor_rank
+FROM 
+    RankedMovies rm
+JOIN 
+    GenreCount gc ON rm.movie_id = gc.movie_id
+JOIN 
+    ActorInfo ai ON rm.actor_name = ai.name
+WHERE 
+    rm.actor_rank <= 3  
+ORDER BY 
+    rm.production_year DESC, 
+    gc.genre_count DESC;

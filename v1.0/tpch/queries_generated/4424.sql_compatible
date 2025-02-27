@@ -1,0 +1,67 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus, 
+        o.o_totalprice, 
+        o.o_orderdate, 
+        o.o_orderpriority, 
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_status
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+SupplierPartDetails AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_name,
+        p.p_brand,
+        p.p_retailprice,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) AS rn
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerSummary AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_name,
+    s.p_name,
+    s.p_retailprice,
+    s.ps_availqty,
+    CASE 
+        WHEN cs.total_spent IS NULL THEN 'No orders'
+        WHEN cs.total_spent > 10000 THEN 'High Value'
+        ELSE 'Regular'
+    END AS customer_value,
+    ro.o_orderstatus,
+    ro.o_orderdate,
+    ro.o_totalprice
+FROM 
+    SupplierPartDetails s
+LEFT JOIN 
+    RankedOrders ro ON s.ps_partkey = ro.o_orderkey
+JOIN 
+    CustomerSummary cs ON ro.o_orderkey = cs.c_custkey
+WHERE 
+    s.rn = 1
+AND 
+    ro.rank_status <= 10
+ORDER BY 
+    customer_value DESC, 
+    ro.o_totalprice DESC;

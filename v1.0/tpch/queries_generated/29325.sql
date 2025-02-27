@@ -1,0 +1,56 @@
+WITH part_supplier_details AS (
+    SELECT 
+        p.p_name,
+        s.s_name AS supplier_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        CONCAT(s.s_name, ' supplies ', p.p_name, ' at a cost of $', ps.ps_supplycost) AS supply_info
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_orderkey) AS total_lines,
+        GROUP_CONCAT(DISTINCT CONCAT(l.l_returnflag, l.l_linestatus) ORDER BY l.l_linenumber) AS line_flags
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus
+),
+nested_supplier_order AS (
+    SELECT 
+        psd.p_name,
+        psd.supplier_name,
+        oss.o_orderkey,
+        oss.total_price,
+        oss.total_lines,
+        oss.line_flags
+    FROM 
+        part_supplier_details psd
+    JOIN 
+        order_summary oss ON psd.ps_availqty > 0
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT nso.o_orderkey) AS order_count,
+    SUM(nso.total_price) AS total_revenue,
+    STRING_AGG(nso.supplier_name, ', ') AS suppliers_list
+FROM 
+    nested_supplier_order nso
+JOIN 
+    supplier s ON nso.supplier_name = s.s_name
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+GROUP BY 
+    n.n_name
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT ws_bill_customer_sk, 
+           SUM(ws_net_paid) AS total_sales
+    FROM web_sales 
+    GROUP BY ws_bill_customer_sk
+    HAVING SUM(ws_net_paid) > 100
+    UNION ALL
+    SELECT s.ss_customer_sk, 
+           SUM(s.ss_net_paid) AS total_sales
+    FROM store_sales s
+    INNER JOIN SalesHierarchy sh ON s.ss_customer_sk = sh.ws_bill_customer_sk
+    GROUP BY s.ss_customer_sk
+),
+FilteredDemographics AS (
+    SELECT cd.*, 
+           CASE 
+               WHEN cd_credit_rating IS NULL THEN 'Unknown' 
+               ELSE cd_credit_rating 
+           END AS computed_credit_rating
+    FROM customer_demographics cd
+    WHERE cd_dep_count > 0
+),
+AggregateReturns AS (
+    SELECT sr_reason_sk, 
+           COUNT(*) AS total_returns, 
+           SUM(sr_return_amt) AS total_return_amount
+    FROM store_returns
+    GROUP BY sr_reason_sk
+),
+MaxReturnReason AS (
+    SELECT r.r_reason_desc, 
+           ar.total_returns, 
+           ar.total_return_amount
+    FROM reason r
+    INNER JOIN AggregateReturns ar ON r.r_reason_sk = ar.sr_reason_sk
+    WHERE ar.total_return_amount = (SELECT MAX(total_return_amount) FROM AggregateReturns)
+)
+SELECT ca.ca_state, 
+       COUNT(DISTINCT c.c_customer_sk) AS unique_customers,
+       AVG(fd.cd_credit_rating) AS avg_credit_rating,
+       SUM(COALESCE(mr.total_returns, 0)) AS total_max_reason_returns,
+       MAX(sh.total_sales) AS max_sales_per_customer
+FROM customer c
+LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN FilteredDemographics fd ON c.c_current_cdemo_sk = fd.cd_demo_sk
+LEFT JOIN MaxReturnReason mr ON 1=1
+LEFT JOIN SalesHierarchy sh ON sh.ws_bill_customer_sk = c.c_customer_sk
+WHERE ca.ca_state IS NOT NULL
+AND (c.c_birth_year IS NULL OR c.c_birth_year > 1990)
+GROUP BY ca.ca_state
+ORDER BY unique_customers DESC, ca.ca_state;

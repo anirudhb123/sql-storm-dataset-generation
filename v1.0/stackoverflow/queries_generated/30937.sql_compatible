@@ -1,0 +1,88 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        0 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+    UNION ALL
+    SELECT
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        r.Level + 1
+    FROM Posts p
+    JOIN RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserActivity AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(p.ViewCount) AS TotalViews,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE u.Reputation > 0
+    GROUP BY u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        p.OwnerUserId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(COUNT(c.Id), 0) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= CURRENT_DATE - INTERVAL '30 days' 
+    GROUP BY p.Id, p.Title, p.Score, p.AcceptedAnswerId, p.OwnerUserId
+),
+FinalOutput AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        pa.PostId,
+        pa.Title,
+        pa.Score,
+        pa.AcceptedAnswerId,
+        pa.UpVotes,
+        pa.DownVotes,
+        pa.CommentCount,
+        ph.Level,
+        u.TotalViews,
+        u.TotalPosts,
+        u.TotalComments
+    FROM UserActivity u
+    JOIN PostStats pa ON u.UserId = pa.OwnerUserId
+    LEFT JOIN RecursivePostHierarchy ph ON pa.PostId = ph.PostId
+)
+SELECT 
+    fo.DisplayName,
+    fo.Title,
+    fo.Score,
+    fo.UpVotes - fo.DownVotes AS NetVotes,
+    fo.TotalViews,
+    STRING_AGG(DISTINCT ph.Title, ', ') AS ChildPostTitles
+FROM FinalOutput fo
+LEFT JOIN RecursivePostHierarchy ph ON fo.PostId = ph.ParentId
+WHERE fo.TotalPosts > 5
+GROUP BY 
+    fo.DisplayName, 
+    fo.Title, 
+    fo.Score, 
+    fo.UpVotes, 
+    fo.DownVotes,
+    fo.TotalViews
+ORDER BY fo.TotalViews DESC, NetVotes DESC;

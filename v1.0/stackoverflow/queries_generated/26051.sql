@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ARRAY_AGG(DISTINCT t.TagName) AS TagsArray,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS TagName ON true
+    LEFT JOIN 
+        Tags t ON t.TagName = TagName
+    WHERE 
+        p.CreationDate >= current_date - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount, p.OwnerUserId
+), 
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId, 
+        COUNT(b.Id) AS BadgeCount,
+        ARRAY_AGG(b.Name) AS BadgeNames
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+TopPosters AS (
+    SELECT 
+        up.UserId,
+        SUM(p.Score) AS TotalScore,
+        COUNT(p.Id) AS PostCount
+    FROM 
+        Users up
+    JOIN 
+        Posts p ON p.OwnerUserId = up.Id
+    WHERE 
+        up.CreationDate >= current_date - INTERVAL '1 year'
+    GROUP BY 
+        up.UserId
+),
+FinalReport AS (
+    SELECT 
+        u.DisplayName,
+        r.PostId,
+        r.Title,
+        r.TagsArray,
+        r.CreationDate,
+        r.Score,
+        r.ViewCount,
+        ub.BadgeCount,
+        ub.BadgeNames,
+        tp.TotalScore,
+        tp.PostCount
+    FROM 
+        RankedPosts r
+    JOIN 
+        Users u ON u.Id = r.OwnerUserId
+    LEFT JOIN 
+        UserBadges ub ON ub.UserId = u.Id
+    LEFT JOIN 
+        TopPosters tp ON tp.UserId = u.Id
+    WHERE 
+        r.PostRank <= 5
+)
+
+SELECT 
+    * 
+FROM 
+    FinalReport 
+ORDER BY 
+    TotalScore DESC, 
+    CreationDate DESC;

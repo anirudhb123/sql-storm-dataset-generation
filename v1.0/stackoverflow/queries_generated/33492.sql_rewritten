@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE
+        p.ParentId IS NULL
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(v.VoteTypeId = 2) AS TotalUpvotes, 
+        SUM(v.VoteTypeId = 3) AS TotalDownvotes 
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id
+),
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.Score,
+        RANK() OVER (ORDER BY p.Score DESC, p.ViewCount DESC) AS PopularityRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+)
+SELECT 
+    up.UserId,
+    up.DisplayName,
+    up.TotalPosts,
+    up.TotalComments,
+    up.TotalUpvotes,
+    up.TotalDownvotes,
+    pp.PostId,
+    pp.Title AS PopularPostTitle,
+    pp.ViewCount,
+    pp.Score,
+    pp.PopularityRank,
+    CASE 
+        WHEN pp.PopularityRank <= 10 THEN 'Top 10% Posts'
+        ELSE 'Other Posts'
+    END AS PopularityCategory,
+    COUNT(DISTINCT ph.PostId) AS AnswerCount
+FROM 
+    UserStats up
+LEFT JOIN 
+    PopularPosts pp ON up.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = pp.PostId)
+LEFT JOIN 
+    Posts ph ON pp.PostId = ph.ParentId 
+GROUP BY 
+    up.UserId, pp.PostId
+HAVING 
+    up.TotalPosts > 5 
+ORDER BY 
+    up.TotalUpvotes DESC, up.TotalDownvotes ASC, pp.ViewCount DESC;

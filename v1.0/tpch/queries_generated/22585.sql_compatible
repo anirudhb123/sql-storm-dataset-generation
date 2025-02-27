@@ -1,0 +1,75 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rank,
+        n.n_name AS nation_name
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        p.p_retailprice > 100
+    GROUP BY 
+        p.p_partkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) >= 1000
+),
+DiscountedOrders AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_discount > 0.05
+    GROUP BY 
+        l.l_orderkey
+),
+ShippedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        COUNT(l.l_orderkey) AS line_count
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'F'
+    GROUP BY 
+        o.o_orderkey
+    HAVING 
+        COUNT(l.l_orderkey) > 1
+)
+SELECT 
+    r.s_name AS supplier_name,
+    r.nation_name,
+    COALESCE(hp.total_value, 0) AS total_part_value,
+    COALESCE(do.order_total, 0) AS discounted_order_amount,
+    so.line_count AS number_of_lines
+FROM 
+    RankedSuppliers r
+LEFT JOIN 
+    HighValueParts hp ON hp.p_partkey = r.s_suppkey
+LEFT JOIN 
+    DiscountedOrders do ON do.l_orderkey = r.s_suppkey
+LEFT JOIN 
+    ShippedOrders so ON so.o_orderkey = r.s_suppkey
+WHERE 
+    r.rank = 1
+ORDER BY 
+    r.nation_name, r.s_name
+LIMIT 10;

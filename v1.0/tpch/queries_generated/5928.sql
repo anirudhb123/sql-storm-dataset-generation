@@ -1,0 +1,34 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY s.s_suppkey, s.s_name, s.s_acctbal, n.n_regionkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name AS region_name, 
+        rs.s_name AS supplier_name, 
+        rs.total_supply_cost
+    FROM RankedSuppliers rs
+    JOIN region r ON rs.rank <= 5 AND r.r_regionkey = n.n_regionkey
+    ORDER BY r.r_name, rs.total_supply_cost DESC
+)
+SELECT 
+    o.o_orderkey, 
+    c.c_name AS customer_name, 
+    l.l_quantity, 
+    l.l_extendedprice, 
+    ts.region_name, 
+    ts.supplier_name
+FROM orders o
+JOIN customer c ON o.o_custkey = c.c_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN TopSuppliers ts ON l.l_suppkey = ts.s_suppkey
+WHERE o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+ORDER BY ts.region_name, ts.total_supply_cost DESC, o.o_orderkey;

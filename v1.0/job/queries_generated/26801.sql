@@ -1,0 +1,54 @@
+WITH CombinedTitles AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        k.keyword AS movie_keyword,
+        c.kind AS company_type,
+        p.gender AS person_gender,
+        COUNT(DISTINCT ca.person_id) AS actor_count
+    FROM 
+        aka_title a
+    JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies mc ON a.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type c ON mc.company_type_id = c.id
+    JOIN 
+        cast_info ca ON a.id = ca.movie_id
+    JOIN 
+        aka_name p ON ca.person_id = p.person_id
+    WHERE 
+        a.production_year BETWEEN 1990 AND 2020
+    GROUP BY 
+        a.title, a.production_year, k.keyword, c.kind, p.gender
+),
+Top10Movies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        movie_keyword,
+        company_type,
+        person_gender,
+        actor_count,
+        ROW_NUMBER() OVER (PARTITION BY company_type ORDER BY actor_count DESC) AS rank
+    FROM 
+        CombinedTitles
+)
+SELECT 
+    movie_title,
+    production_year,
+    movie_keyword,
+    company_type,
+    person_gender,
+    actor_count
+FROM 
+    Top10Movies
+WHERE 
+    rank <= 10
+ORDER BY 
+    company_type, actor_count DESC;

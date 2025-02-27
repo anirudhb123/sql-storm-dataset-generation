@@ -1,0 +1,69 @@
+
+WITH AddressDetails AS (
+    SELECT
+        ca.ca_address_id,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        CONCAT(ca.ca_street_number, ' ', ca.ca_street_name, ' ', ca.ca_street_type) AS full_address,
+        LENGTH(ca.ca_street_name) AS street_name_length,
+        LENGTH(ca.ca_city) AS city_length,
+        LENGTH(ca.ca_zip) AS zip_length
+    FROM
+        customer_address ca
+),
+GenderDemo AS (
+    SELECT
+        cd.cd_gender,
+        COUNT(c.c_customer_sk) AS customer_count,
+        SUM(cd.cd_dep_count) AS total_dependents,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY
+        cd.cd_gender
+),
+SalesOverview AS (
+    SELECT
+        'web' AS sale_type,
+        SUM(ws.ws_net_sales) AS total_sales,
+        COUNT(ws.ws_order_number) AS order_count
+    FROM
+        web_sales ws
+    UNION ALL
+    SELECT
+        'catalog' AS sale_type,
+        SUM(cs.cs_net_sales) AS total_sales,
+        COUNT(cs.cs_order_number) AS order_count
+    FROM
+        catalog_sales cs
+    UNION ALL
+    SELECT
+        'store' AS sale_type,
+        SUM(ss.ss_net_sales) AS total_sales,
+        COUNT(ss.ss_ticket_number) AS order_count
+    FROM
+        store_sales ss
+)
+SELECT
+    ad.ca_city,
+    ad.ca_state,
+    ad.ca_zip,
+    ad.full_address,
+    gd.cd_gender,
+    gd.customer_count,
+    gd.total_dependents,
+    gd.avg_purchase_estimate,
+    so.sale_type,
+    so.total_sales,
+    so.order_count
+FROM
+    AddressDetails ad
+JOIN
+    GenderDemo gd ON ad.ca_state = 'CA' -- Only California addresses
+JOIN
+    SalesOverview so ON so.sale_type = 'web' -- Focusing on web sales
+ORDER BY
+    gd.customer_count DESC, so.total_sales DESC;

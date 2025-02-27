@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS RankByCreation,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseActions,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeleteActions,
+        MAX(ph.CreationDate) AS LastActionDate
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CommentCount,
+    COALESCE(pht.CloseActions, 0) AS CloseActionsCount,
+    COALESCE(pht.DeleteActions, 0) AS DeleteActionsCount,
+    ub.BadgeCount,
+    ub.Badges,
+    CASE 
+        WHEN rp.ViewCount IS NULL OR rp.ViewCount = 0 THEN 'No Views' 
+        ELSE 'Viewed' 
+    END AS ViewStatus,
+    CASE 
+        WHEN rp.RankByCreation <= 3 THEN 'Top 3 Recent Posts' 
+        ELSE 'Other Posts' 
+    END AS RankStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    PostHistorySummary pht ON rp.PostId = pht.PostId
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerUserId = ub.UserId
+WHERE 
+    (rp.Score > 10 OR ub.BadgeCount > 0)
+ORDER BY 
+    rp.Score DESC, rp.ViewCount ASC
+FETCH FIRST 100 ROWS ONLY;
+

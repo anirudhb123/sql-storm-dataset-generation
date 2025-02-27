@@ -1,0 +1,45 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_suppkey
+    WHERE s.s_acctbal > 1000
+),
+top_nations AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+    HAVING COUNT(DISTINCT s.s_suppkey) > 5
+),
+part_details AS (
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, SUM(ps.ps_availqty) AS total_availqty, 
+           SUM(ps.ps_supplycost) AS total_supplycost, COUNT(DISTINCT ps.ps_suppkey) AS supplier_association
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_mfgr, p.p_brand
+    HAVING SUM(ps.ps_availqty) > 100
+),
+order_summary AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS price_after_discount
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1997-01-01'
+)
+SELECT 
+    ns.n_name AS nation_name,
+    pd.p_name AS part_name,
+    pd.total_availqty,
+    os.o_totalprice,
+    EXISTS (SELECT 1 FROM supplier_hierarchy sh WHERE sh.s_suppkey = os.o_orderkey) AS has_high_balance_supplier
+FROM top_nations ns
+JOIN part_details pd ON ns.n_nationkey = pd.p_partkey
+FULL OUTER JOIN order_summary os ON pd.p_brand = os.o_orderkey
+WHERE pd.supplier_association > 2 AND (os.price_after_discount IS NOT NULL OR pd.total_supplycost > 200)
+ORDER BY ns.n_name, pd.p_name;

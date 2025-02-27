@@ -1,0 +1,54 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        rk.rank AS title_rank
+    FROM title m
+    JOIN aka_title a ON a.movie_id = m.id
+    JOIN movie_keyword mk ON mk.movie_id = m.id
+    JOIN keyword k ON k.id = mk.keyword_id
+    JOIN (
+        SELECT 
+            movie_id,
+            RANK() OVER (PARTITION BY production_year ORDER BY LENGTH(title)) AS rank
+        FROM title
+    ) rk ON rk.movie_id = m.id
+    WHERE m.production_year BETWEEN 2000 AND 2023
+),
+
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        COUNT(c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT ak.name, ', ') AS cast_names
+    FROM cast_info c 
+    JOIN aka_name ak ON ak.person_id = c.person_id
+    WHERE c.nr_order IS NOT NULL
+    GROUP BY c.movie_id
+),
+
+MovieInfo AS (
+    SELECT 
+        mi.movie_id,
+        STRING_AGG(DISTINCT it.info, '; ') AS info_details
+    FROM movie_info mi
+    JOIN info_type it ON it.id = mi.info_type_id
+    WHERE LENGTH(mi.info) > 5
+    GROUP BY mi.movie_id
+)
+
+SELECT 
+    rm.movie_id,
+    rm.movie_title,
+    rm.production_year,
+    rm.title_rank,
+    cd.total_cast,
+    cd.cast_names,
+    mi.info_details
+FROM RankedMovies rm
+LEFT JOIN CastDetails cd ON cd.movie_id = rm.movie_id
+LEFT JOIN MovieInfo mi ON mi.movie_id = rm.movie_id
+WHERE cd.total_cast > 0
+ORDER BY rm.production_year DESC, rm.title_rank ASC;

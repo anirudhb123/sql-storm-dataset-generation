@@ -1,0 +1,56 @@
+WITH RecursivePostHierarchy AS (
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        0 AS Level,
+        NULL AS ParentPostId
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+    
+    UNION ALL
+    
+    
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        Level + 1 AS Level,
+        p.ParentId
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy pp ON p.ParentId = pp.PostId
+)
+
+
+SELECT 
+    ph.PostId,
+    ph.Title,
+    COUNT(DISTINCT c.Id) AS CommentCount,
+    COUNT(DISTINCT v.Id) AS VoteCount,
+    MAX(CASE WHEN ph.Level = 0 THEN ph.CreationDate END) AS QuestionCreationDate,
+    MIN(CASE WHEN ph.Level = 1 THEN ph.CreationDate END) AS FirstAnswerCreationDate,
+    SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+    SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+FROM 
+    RecursivePostHierarchy ph
+LEFT JOIN 
+    Comments c ON c.PostId = ph.PostId
+LEFT JOIN 
+    Votes v ON v.PostId = ph.PostId
+LEFT JOIN 
+    Posts p ON p.Id = ph.PostId
+LEFT JOIN 
+    (SELECT 
+         pt.Id, 
+         pt.TagName 
+     FROM Tags pt) t ON t.Id = ANY (string_to_array(p.Tags, ',')::int[]) 
+GROUP BY 
+    ph.PostId, ph.Title
+ORDER BY 
+    VoteCount DESC, CommentCount DESC;

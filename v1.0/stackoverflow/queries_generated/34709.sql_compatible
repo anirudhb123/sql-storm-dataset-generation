@@ -1,0 +1,79 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ParentId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.ParentId,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+), 
+
+UserReputationAndBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.Reputation
+),
+
+PostsWithVoteStats AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS Upvotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS Downvotes,
+        COUNT(v.Id) AS TotalVotes,
+        COALESCE(NULLIF(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0), 0) - 
+        COALESCE(NULLIF(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0), 0) AS VoteScore
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id, p.Title, p.OwnerUserId
+)
+
+SELECT 
+    pwh.PostId,
+    pwh.Title,
+    pwh.CreationDate,
+    up.Reputation,
+    up.BadgeCount,
+    up.GoldBadges,
+    up.SilverBadges,
+    up.BronzeBadges,
+    pvs.Upvotes,
+    pvs.Downvotes,
+    pvs.TotalVotes,
+    pvs.VoteScore,
+    COUNT(c.Id) AS CommentCount,
+    MAX(c.CreationDate) AS LastCommentDate
+FROM RecursivePostHierarchy pwh
+JOIN UserReputationAndBadges up ON pwh.OwnerUserId = up.UserId
+JOIN PostsWithVoteStats pvs ON pwh.PostId = pvs.Id
+LEFT JOIN Comments c ON pwh.PostId = c.PostId
+WHERE pwh.Level <= 1  
+GROUP BY 
+    pwh.PostId, pwh.Title, pwh.CreationDate,
+    up.Reputation, up.BadgeCount, 
+    up.GoldBadges, up.SilverBadges, up.BronzeBadges,
+    pvs.Upvotes, pvs.Downvotes, pvs.TotalVotes, pvs.VoteScore
+ORDER BY pvs.VoteScore DESC, pwh.CreationDate DESC;

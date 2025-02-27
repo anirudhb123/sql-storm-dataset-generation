@@ -1,0 +1,57 @@
+WITH RankedUsers AS (
+    SELECT 
+        u.Id, 
+        u.DisplayName, 
+        u.Reputation, 
+        u.CreationDate, 
+        u.Views,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+    WHERE u.Reputation > 1000
+), PostsWithTags AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.Body, 
+        p.CreationDate, 
+        p.AnswerCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId, 
+            REGEXP_SPLIT_TO_TABLE(Tags, '<>') AS TagName
+        FROM Posts
+    ) t ON p.Id = t.PostId 
+    GROUP BY p.Id
+), RecentPostHistory AS (
+    SELECT 
+        ph.PostId, 
+        ph.PostHistoryTypeId, 
+        ph.CreationDate, 
+        ph.UserId, 
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM PostHistory ph
+    WHERE ph.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+)
+SELECT 
+    ru.DisplayName,
+    ru.Reputation,
+    p.Title,
+    p.Tags,
+    COALESCE(rp.comment, 'No recent activity') AS RecentActivity,
+    CASE 
+        WHEN p.AnswerCount > 0 THEN 'Answered'
+        ELSE 'Unanswered'
+    END AS Status,
+    COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+    COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes
+FROM RankedUsers ru
+JOIN PostsWithTags p ON ru.Id = p.OwnerUserId
+LEFT JOIN RecentPostHistory rp ON p.PostId = rp.PostId AND rp.rn = 1
+LEFT JOIN Votes v ON p.PostId = v.PostId
+WHERE ru.ReputationRank <= 10
+GROUP BY ru.Id, ru.DisplayName, ru.Reputation, p.PostId, p.Title, p.Tags, rp.comment
+ORDER BY ru.Reputation DESC, p.CreationDate DESC
+LIMIT 50;

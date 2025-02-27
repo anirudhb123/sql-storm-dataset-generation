@@ -1,0 +1,47 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= DATE '2023-01-01' AND l.l_shipdate <= DATE '2023-12-31'
+    GROUP BY o.o_orderkey, o.o_orderdate, o.o_custkey
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT ps.ps_partkey) AS supplied_parts,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+CustomerRevenue AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(ro.total_revenue), 0) AS total_spent
+    FROM customer c
+    LEFT JOIN RankedOrders ro ON c.c_custkey = ro.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT 
+    cr.c_custkey,
+    cr.c_name,
+    cr.total_spent,
+    ss.s_suppkey,
+    ss.s_name,
+    ss.supplied_parts,
+    ss.total_supply_cost,
+    CASE 
+        WHEN cr.total_spent > 10000 THEN 'Premium'
+        WHEN cr.total_spent BETWEEN 5000 AND 10000 THEN 'Standard'
+        ELSE 'Basic'
+    END AS customer_segment
+FROM CustomerRevenue cr
+FULL OUTER JOIN SupplierStats ss ON (cr.total_spent > 0 AND ss.supplied_parts > 0)
+WHERE ss.total_supply_cost IS NOT NULL OR cr.total_spent IS NOT NULL
+ORDER BY cr.c_custkey, ss.s_suppkey;

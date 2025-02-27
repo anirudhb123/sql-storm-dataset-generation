@@ -1,0 +1,73 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        d.d_year,
+        cd.cd_gender,
+        RANK() OVER (PARTITION BY cd.cd_gender, d.d_year ORDER BY c.c_birth_year DESC) AS rank_by_year,
+        COUNT(CASE WHEN cd.cd_marital_status = 'M' THEN 1 END) OVER (PARTITION BY cd.cd_gender) AS married_count,
+        COALESCE(SUM(ws.ws_net_profit) FILTER (WHERE ws.ws_quantity > 0), 0) AS total_profit
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        date_dim d ON c.c_first_sales_date_sk = d.d_date_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        d.d_year BETWEEN 2015 AND 2023
+    GROUP BY 
+        c.c_customer_sk,
+        c.c_customer_id,
+        d.d_year,
+        cd.cd_gender
+),
+CustomerReturns AS (
+    SELECT 
+        sr.sr_customer_sk,
+        SUM(sr.sr_return_quantity) AS total_returns
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        rc.c_customer_id,
+        rc.d_year,
+        rc.cd_gender,
+        rc.rank_by_year,
+        rc.married_count,
+        COALESCE(cr.total_returns, 0) AS total_returns,
+        rc.total_profit
+    FROM 
+        RankedCustomers rc
+    LEFT JOIN 
+        CustomerReturns cr ON rc.c_customer_sk = cr.sr_customer_sk
+)
+SELECT 
+    fr.c_customer_id,
+    fr.d_year,
+    fr.cd_gender,
+    fr.rank_by_year,
+    fr.married_count,
+    fr.total_returns,
+    CASE 
+        WHEN fr.total_returns > 10 THEN 'High Return Rate'
+        WHEN fr.total_returns BETWEEN 1 AND 10 THEN 'Moderate Return Rate'
+        ELSE 'No Returns'
+    END AS return_category,
+    CASE 
+        WHEN fr.total_profit IS NULL THEN 'Profit not available'
+        WHEN fr.total_profit = 0 THEN 'Break-even'
+        ELSE 'Profitable'
+    END AS profit_status
+FROM 
+    FinalReport fr
+WHERE 
+    fr.married_count > 5
+ORDER BY 
+    fr.d_year DESC, fr.rank_by_year
+LIMIT 100 OFFSET 50;

@@ -1,0 +1,54 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        t.title,
+        1 AS depth
+    FROM 
+        aka_title AS t
+    JOIN 
+        movie_companies AS mc ON t.movie_id = mc.movie_id
+    WHERE 
+        mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Production')
+    
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        t.title,
+        mh.depth + 1
+    FROM 
+        MovieHierarchy AS mh
+    JOIN 
+        movie_link AS ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title AS t ON ml.linked_movie_id = t.movie_id
+)
+SELECT 
+    mv.movie_id,
+    mv.title,
+    COALESCE(NULLIF(mi.info, ''), 'No Info') AS info,
+    m.title AS related_title,
+    COUNT(c.id) AS cast_count,
+    STRING_AGG(DISTINCT a.name, ', ') AS actors,
+    ROW_NUMBER() OVER(PARTITION BY mv.movie_id ORDER BY c.nr_order) AS actor_rank
+FROM 
+    MovieHierarchy AS mv
+LEFT JOIN 
+    movie_info AS mi ON mv.movie_id = mi.movie_id
+LEFT JOIN 
+    cast_info AS c ON mv.movie_id = c.movie_id
+LEFT JOIN 
+    aka_name AS a ON c.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword AS mk ON mv.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+WHERE 
+    mv.depth < 3
+    AND (mi.info_type_id IS NULL OR mi.info_type_id <> (SELECT id FROM info_type WHERE info = 'Synopsis'))
+GROUP BY 
+    mv.movie_id, mv.title, mi.info, related_title
+ORDER BY 
+    mv.movie_id, actor_rank DESC
+LIMIT 100;

@@ -1,0 +1,70 @@
+WITH RecursiveTagPaths AS (
+    SELECT t.Id AS TagId, t.TagName AS TagName, 
+           1 AS Depth, 
+           t.IsModeratorOnly, 
+           t.IsRequired,
+           COUNT(p.Id) FILTER (WHERE p.Id IS NOT NULL) AS RelatedPosts
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.Id
+    UNION ALL
+    SELECT t.Id AS TagId, t.TagName AS TagName, 
+           r.Depth + 1 AS Depth, 
+           t.IsModeratorOnly, 
+           t.IsRequired,
+           COUNT(p.Id) FILTER (WHERE p.Id IS NOT NULL) AS RelatedPosts
+    FROM Tags t
+    INNER JOIN RecursiveTagPaths r ON t.Id = r.TagId -- Hypothetical self-join for deeper analysis
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.Id, r.Depth
+),
+PostScoreSummary AS (
+    SELECT p.Id AS PostId,
+           SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+           SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+           COUNT(c.Id) AS CommentCount,
+           p.CreationDate,
+           EXTRACT(YEAR FROM p.CreationDate) AS PostYear
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY p.Id, p.CreationDate
+),
+UserReputationHistory AS (
+    SELECT u.Id AS UserId, 
+           u.DisplayName, 
+           u.Reputation,
+           u.CreationDate,
+           u.LastAccessDate,
+           ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY u.CreationDate DESC) AS Rnk
+    FROM Users u
+    WHERE u.Reputation IS NOT NULL
+),
+RecentPostSummary AS (
+    SELECT p.Id AS PostId,
+           p.Title,
+           p.CreationDate,
+           ps.UpVotes,
+           ps.DownVotes,
+           ps.CommentCount,
+           u.DisplayName AS OwnerDisplayName,
+           ARRAY_AGG(t.TagName) AS Tags
+    FROM Posts p
+    JOIN PostScoreSummary ps ON p.Id = ps.PostId
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Tags t ON p.Tags LIKE '%' || t.TagName || '%'
+    WHERE p.CreationDate > NOW() - INTERVAL '30 DAYS'
+    GROUP BY p.Id, u.DisplayName
+),
+FinalReport AS (
+    SELECT rtp.*, rps.*, u.Reputation AS UserReputation 
+    FROM RecentPostSummary rps
+    LEFT JOIN RecursiveTagPaths rtp ON rps.Tags @> ARRAY[rtp.TagName] -- condition for tags
+    LEFT JOIN UserReputationHistory u ON rps.OwnerDisplayName = u.DisplayName 
+    WHERE rtp.Depth <= 3 AND rtp.RelatedPosts > 5
+)
+SELECT *,
+       ROUND(UpVotes::NUMERIC / NULLIF((UpVotes + DownVotes), 0) * 100, 2) AS UpVotePercentage
+FROM FinalReport
+ORDER BY UserReputation DESC, CreationDate DESC
+LIMIT 100;

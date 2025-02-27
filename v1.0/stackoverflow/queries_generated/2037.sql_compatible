@@ -1,0 +1,33 @@
+
+WITH UserReputation AS (
+    SELECT Id, DisplayName, Reputation, 
+           ROW_NUMBER() OVER (ORDER BY Reputation DESC) AS ReputationRank,
+           SUM(UpVotes - DownVotes) OVER (PARTITION BY Location) AS NetVotesByLocation
+    FROM Users
+), PostDetails AS (
+    SELECT p.Id AS PostId, p.Title, p.Body, p.CreationDate, 
+           p.OwnerUserId, p.Score, p.ViewCount, COUNT(c.Id) AS CommentCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 YEAR'
+    GROUP BY p.Id, p.Title, p.Body, p.CreationDate, p.OwnerUserId, p.Score, p.ViewCount
+), ClosedPosts AS (
+    SELECT ph.PostId, ph.CreationDate, 
+           STRING_AGG(ph.Comment, ', ') AS CloseReasons,
+           MAX(ph.CreationDate) AS LastClosedDate
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11)
+    GROUP BY ph.PostId
+), TopPosts AS (
+    SELECT pd.PostId, pd.Title, pd.Score, pd.ViewCount, 
+           COALESCE(cp.CloseReasons, 'Not Closed') AS CloseReasons
+    FROM PostDetails pd
+    LEFT JOIN ClosedPosts cp ON pd.PostId = cp.PostId
+    WHERE pd.Score > 10
+)
+SELECT ur.DisplayName, ur.Reputation, ur.NetVotesByLocation, 
+       tp.Title, tp.ViewCount, tp.CloseReasons
+FROM UserReputation ur
+JOIN TopPosts tp ON ur.Id = tp.OwnerUserId
+WHERE ur.ReputationRank <= 10
+ORDER BY ur.Reputation DESC, tp.ViewCount DESC;

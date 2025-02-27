@@ -1,0 +1,62 @@
+
+WITH RECURSIVE Inventory_CTE AS (
+    SELECT
+        inv_Date_Sk,
+        inv_Item_Sk,
+        inv_Warehouse_Sk,
+        inv_Quantity_On_Hand,
+        1 AS recursion_level
+    FROM inventory
+    WHERE inv_Quantity_On_Hand IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        i.inv_Date_Sk,
+        i.inv_Item_Sk,
+        i.inv_Warehouse_Sk,
+        CASE
+            WHEN iv.inv_Quantity_On_Hand IS NULL THEN 0 
+            ELSE iv.inv_Quantity_On_Hand + i.inv_Quantity_On_Hand 
+        END,
+        recursion_level + 1
+    FROM inventory i
+    JOIN Inventory_CTE iv ON i.inv_Item_Sk = iv.inv_Item_Sk AND i.inv_Warehouse_Sk = iv.inv_Warehouse_Sk
+    WHERE recursion_level < 5 -- limit to avoid infinite loop
+)
+
+SELECT 
+    ca_state,
+    COUNT(DISTINCT c_customer_sk) AS customer_count,
+    SUM(CASE WHEN cd_gender = 'F' THEN 1 ELSE 0 END) AS female_customer_count,
+    SUM(CASE WHEN cd_marital_status = 'M' THEN 1 ELSE 0 END) AS married_customer_count,
+    MAX(iQuantity) AS max_inventory,
+    MIN(iQuantity) AS min_inventory,
+    STRING_AGG(DISTINCT iw.inv_item_sk::text, ', ') AS item_ids
+FROM customer_address ca
+LEFT JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+LEFT JOIN (
+    SELECT 
+        inv_item_sk,
+        MAX(inv_quantity_on_hand) AS iQuantity
+    FROM Inventory_CTE
+    GROUP BY inv_item_sk
+) i ON i.inv_item_sk = c.c_current_cdemo_sk
+LEFT JOIN (
+    SELECT 
+        inv_item_sk,
+        SUM(inv_quantity_on_hand) AS total_quantity
+    FROM inventory
+    GROUP BY inv_item_sk
+    HAVING SUM(inv_quantity_on_hand) < 0 -- focusing on negative inventory edge cases
+) inv ON inv.inv_item_sk = c.c_current_cdemo_sk
+WHERE ca_state IS NOT NULL 
+GROUP BY ca_state
+HAVING COUNT(DISTINCT c_customer_sk) > COALESCE(NULLIF((SELECT AVG(customer_count) FROM (
+                SELECT COUNT(DISTINCT c_customer_sk) AS customer_count
+                FROM customer_address ca_inner
+                GROUP BY ca_state
+            ) avg_count), 0), 1)
+ORDER BY customer_count DESC
+LIMIT 10;

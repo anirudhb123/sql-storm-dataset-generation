@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.Score > 0
+), 
+UserActivity AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 6 THEN 1 ELSE 0 END), 0) AS CloseVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id
+), 
+PostHistoryAggregated AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount,
+        MAX(ph.CreationDate) AS LastModified
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13) 
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    COALESCE(SUM(up.UpVotes), 0) AS TotalUpVotes,
+    COALESCE(SUM(up.DownVotes), 0) AS TotalDownVotes,
+    COALESCE(SUM(ph.HistoryCount), 0) AS TotalHistoryEntries,
+    COALESCE(MAX(ph.LastModified), 'No Modifications') AS LastPostModification,
+    STRING_AGG(DISTINCT rp.Title, '; ') AS TopPosts
+FROM 
+    Users u
+LEFT JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId AND rp.PostRank <= 3
+LEFT JOIN 
+    UserActivity up ON u.Id = up.Id
+LEFT JOIN 
+    PostHistoryAggregated ph ON u.Id = (SELECT OwnerUserId FROM Posts WHERE Id = ph.PostId)
+WHERE 
+    u.Reputation > 1000
+GROUP BY 
+    u.Id, u.DisplayName
+ORDER BY 
+    TotalPosts DESC, TotalUpVotes DESC;

@@ -1,0 +1,101 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_paid DESC) AS rnk
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_net_paid > (SELECT AVG(ws2.ws_net_paid) FROM web_sales ws2 WHERE ws2.ws_sold_date_sk >= 500 AND ws2.ws_sold_date_sk <= 600)
+),
+CustomerReturns AS (
+    SELECT 
+        sr.scr_order_number,
+        COALESCE(SUM(sr.sr_return_quantity), 0) AS total_returned,
+        SUM(CASE WHEN sr.sr_return_quantity IS NOT NULL THEN sr.sr_return_quantity ELSE 0 END) AS total_returned_non_null
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr_returned_date_sk
+),
+SalesSummary AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity_sold,
+        SUM(ws.ws_net_paid) AS total_net_paid,
+        COUNT(DISTINCT ws.ws_order_number) AS unique_orders
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d.d_date_sk FROM date_dim d WHERE d.d_year = 2023)
+    GROUP BY 
+        ws.ws_item_sk
+)
+
+SELECT 
+    i.i_item_id,
+    COALESCE(rs.total_returned, 0) AS returns,
+    ss.total_quantity_sold,
+    ss.total_net_paid,
+    NULLIF(ss.total_net_paid / NULLIF(ss.total_quantity_sold, 0), 0) AS avg_price,
+    (CASE 
+        WHEN ss.total_net_paid = 0 THEN 'No Sales' 
+        WHEN ss.total_net_paid > 0 AND COALESCE(rs.total_returned, 0) > 0 THEN 'Sales with Returns' 
+        ELSE 'Regular Sales' 
+    END) AS sale_type
+FROM 
+    item i
+LEFT JOIN 
+    (SELECT * FROM CustomerReturns cr WHERE cr.total_returned > 0) rs ON i.i_item_sk = rs.scr_order_number
+JOIN 
+    SalesSummary ss ON i.i_item_sk = ss.ws_item_sk
+WHERE 
+    i.i_rec_start_date < NOW() 
+AND 
+    EXISTS (
+        SELECT 1 
+        FROM customer_demographics cd 
+        WHERE cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_customer_sk = ss.unique_orders)
+        AND cd.cd_gender = 'M'
+    )
+ORDER BY 
+    avg_price DESC, returns DESC
+LIMIT 10;
+
+WITH RECURSIVE complicated_dates AS (
+    SELECT MIN(d_date_sk) AS date_sk FROM date_dim
+    UNION ALL
+    SELECT date_sk + 1 FROM complicated_dates WHERE date_sk + 1 <= (SELECT MAX(d_date_sk) FROM date_dim)
+),
+AggregatedReturns AS (
+    SELECT 
+        cr.cr_returning_customer_sk,
+        SUM(cr.cr_return_quantity) AS total_returned_items
+    FROM 
+        catalog_returns cr
+    WHERE 
+        cr.cr_returned_date_sk IN (SELECT date_sk FROM complicated_dates)
+    GROUP BY 
+        cr.cr_returning_customer_sk
+)
+
+SELECT 
+    cd.cd_demo_sk,
+    SUM(ar.total_returned_items) AS total_items_returned,
+    COUNT(DISTINCT cs.cs_order_number) AS total_orders
+FROM 
+    customer_demographics cd
+LEFT JOIN 
+    AggregatedReturns ar ON cd.cd_demo_sk = ar.cr_returning_customer_sk
+LEFT JOIN 
+    catalog_sales cs ON cd.cd_demo_sk = cs.cs_bill_customer_sk
+GROUP BY 
+    cd.cd_demo_sk 
+HAVING 
+    COUNT(DISTINCT cs.cs_order_number) > 5 
+AND 
+    COALESCE(SUM(ar.total_returned_items), 0) > 3 
+ORDER BY 
+    total_items_returned DESC;

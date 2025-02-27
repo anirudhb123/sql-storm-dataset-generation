@@ -1,0 +1,48 @@
+
+WITH RECURSIVE AddressHierarchy AS (
+    SELECT ca_address_sk, 
+           ca_address_id, 
+           ca_street_number, 
+           ca_street_name, 
+           ca_street_type, 
+           ca_suite_number, 
+           ca_city, 
+           ca_county, 
+           ca_state, 
+           ca_zip, 
+           ca_country, 
+           1 AS level
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+
+    UNION ALL
+
+    SELECT a.ca_address_sk, 
+           a.ca_address_id, 
+           a.ca_street_number, 
+           CONCAT(a.ca_street_name, ' ', ah.level) AS ca_street_name,
+           a.ca_street_type, 
+           a.ca_suite_number, 
+           a.ca_city, 
+           a.ca_county, 
+           a.ca_state, 
+           a.ca_zip, 
+           a.ca_country,
+           ah.level + 1
+    FROM customer_address a
+    JOIN AddressHierarchy ah ON a.ca_city = ah.ca_city
+    WHERE ah.level < 5
+),
+FilteredAddresses AS (
+    SELECT ca_city, 
+           ca_state, 
+           STRING_AGG(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, ' ', ca_suite_number), ', ') AS full_address
+    FROM AddressHierarchy
+    GROUP BY ca_city, ca_state
+)
+SELECT ca_city, 
+       ca_state, 
+       full_address,
+       CONCAT('Address in ', ca_city, ', ', ca_state, ': ', full_address) AS description
+FROM FilteredAddresses
+ORDER BY ca_city, ca_state;

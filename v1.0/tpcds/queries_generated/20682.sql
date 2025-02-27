@@ -1,0 +1,38 @@
+
+WITH RECURSIVE AddressCTE AS (
+    SELECT ca_address_sk, ca_city, ca_state, ca_country, 1 AS address_level
+    FROM customer_address
+    WHERE ca_country = 'USA'
+    UNION ALL
+    SELECT a.ca_address_sk, a.ca_city, a.ca_state, a.ca_country, ac.address_level + 1
+    FROM customer_address a
+    JOIN AddressCTE ac ON a.ca_address_sk = ac.ca_address_sk - 1
+    WHERE ac.address_level < 5
+),
+SalesCTE AS (
+    SELECT ws.web_site_sk, SUM(ws.ws_sales_price) AS total_sales
+    FROM web_sales ws
+    JOIN time_dim td ON ws.ws_sold_date_sk = td.d_date_sk
+    WHERE td.d_year = 2023
+    GROUP BY ws.web_site_sk
+),
+ReturnCTE AS (
+    SELECT w.ws_web_page_sk, SUM(w.wr_return_amount) AS total_returns
+    FROM web_returns w
+    GROUP BY w.ws_web_page_sk
+),
+FinalSales AS (
+    SELECT s.web_site_id, COALESCE(s.total_sales, 0) AS total_sales, COALESCE(r.total_returns, 0) AS total_returns
+    FROM SalesCTE s
+    FULL OUTER JOIN ReturnCTE r ON s.web_site_sk = r.ws_web_page_sk
+)
+SELECT a.ca_city, a.ca_state, fs.web_site_id, fs.total_sales, fs.total_returns, 
+       CASE 
+            WHEN fs.total_sales > fs.total_returns * 2 THEN 'Profitable'
+            WHEN fs.total_sales < fs.total_returns THEN 'Unprofitable'
+            ELSE 'Break Even'
+       END AS profitability_status
+FROM AddressCTE a
+JOIN FinalSales fs ON a.address_level = MOD(a.ca_address_sk, 5)
+WHERE a.ca_state IS NULL OR a.ca_city IS NOT NULL
+ORDER BY a.ca_city DESC, fs.total_sales + fs.total_returns DESC;

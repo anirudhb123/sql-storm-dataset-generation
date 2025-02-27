@@ -1,0 +1,65 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, at.id) AS rn
+    FROM aka_title at
+    WHERE at.production_year IS NOT NULL
+),
+
+actor_details AS (
+    SELECT 
+        ak.id AS actor_id,
+        ak.name,
+        ci.movie_id,
+        rt.role,
+        COUNT(DISTINCT ci.movie_id) OVER (PARTITION BY ak.id) AS movie_count,
+        DENSE_RANK() OVER (PARTITION BY ak.id ORDER BY ak.name) AS actor_rank
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN role_type rt ON ci.role_id = rt.id
+    WHERE ak.name IS NOT NULL AND ak.name <> ''
+),
+
+movie_keyword_summary AS (
+    SELECT
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+),
+
+full_movie_details AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        ad.name AS actor_name,
+        ad.role,
+        COALESCE(mk.keywords, 'No Keywords') AS keywords,
+        ad.movie_count,
+        (SELECT COUNT(DISTINCT mc.company_id) 
+         FROM movie_companies mc 
+         WHERE mc.movie_id = rm.movie_id
+         AND mc.company_type_id IN (SELECT id FROM company_type WHERE kind = 'Distributor')) AS distributor_count
+    FROM ranked_movies rm
+    LEFT JOIN actor_details ad ON rm.movie_id = ad.movie_id
+    LEFT JOIN movie_keyword_summary mk ON rm.movie_id = mk.movie_id
+)
+
+SELECT 
+    fmd.title,
+    fmd.production_year,
+    fmd.actor_name,
+    fmd.role,
+    fmd.keywords,
+    fmd.movie_count,
+    fmd.distributor_count
+FROM full_movie_details fmd
+WHERE (fmd.distributor_count IS NULL OR fmd.distributor_count > 0)
+AND (fmd.movie_count >= 2 OR (fmd.actor_name IS NOT NULL AND fmd.actor_name LIKE '%Smith%'))
+ORDER BY fmd.production_year DESC, fmd.title ASC
+OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY;

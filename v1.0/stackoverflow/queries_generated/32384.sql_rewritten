@@ -1,0 +1,81 @@
+WITH RECURSIVE UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY BadgeCount DESC) AS Rank
+    FROM 
+        UserBadgeCounts
+    WHERE 
+        BadgeCount > 0
+),
+RecentPostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews,
+        AVG(COALESCE(p.Score, 0)) AS AvgScore
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY 
+        p.OwnerUserId
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COALESCE(rp.PostCount, 0) AS RecentPostCount,
+        COALESCE(rp.TotalViews, 0) AS RecentTotalViews,
+        COALESCE(rp.AvgScore, 0) AS RecentAvgScore,
+        COALESCE(tb.BadgeCount, 0) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        RecentPostStats rp ON u.Id = rp.OwnerUserId
+    LEFT JOIN 
+        TopUsers tb ON u.Id = tb.UserId
+),
+AggregatedUserStats AS (
+    SELECT 
+        u.UserId,
+        AVG(ups.RecentAvgScore) AS AvgScore,
+        SUM(ups.RecentTotalViews) AS TotalViews,
+        SUM(ups.RecentPostCount) AS TotalPosts,
+        MAX(ups.BadgeCount) AS MaxBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserPostStats ups ON u.Id = ups.UserId
+    GROUP BY 
+        u.UserId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    AS.UserId,
+    aus.AvgScore,
+    aus.TotalViews,
+    aus.TotalPosts,
+    aus.MaxBadges,
+    CASE 
+        WHEN aus.MaxBadges > 5 THEN 'Expert'
+        WHEN aus.MaxBadges BETWEEN 3 AND 5 THEN 'Pro'
+        ELSE 'Novice'
+    END AS UserLevel
+FROM 
+    Users u
+LEFT JOIN 
+    AggregatedUserStats aus ON u.Id = aus.UserId
+ORDER BY 
+    aus.TotalViews DESC, aus.TotalPosts DESC;

@@ -1,0 +1,44 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey, 
+           CAST(s.s_name AS varchar(255)) AS supplier_path
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, s.s_nationkey,
+           CONCAT(sh.supplier_path, ' -> ', s.s_name)
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON sh.s_suppkey = s.s_suppkey
+    WHERE s.s_acctbal = sh.s_acctbal
+), 
+
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderdate
+), 
+
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, od.total_revenue
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    JOIN OrderDetails od ON o.o_orderkey = od.o_orderkey
+), 
+
+RankedCustomers AS (
+    SELECT c.*, 
+           RANK() OVER (PARTITION BY c.c_nationkey ORDER BY c.total_revenue DESC) AS revenue_rank
+    FROM CustomerOrders c
+)
+
+SELECT r.r_name, SUM(rc.total_revenue) AS total_revenue, 
+       COUNT(DISTINCT rc.c_custkey) AS unique_customers
+FROM ranked_customers rc
+JOIN nation n ON rc.c_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE rc.revenue_rank <= 10
+GROUP BY r.r_name
+ORDER BY total_revenue DESC
+LIMIT 5

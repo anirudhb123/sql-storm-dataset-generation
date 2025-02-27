@@ -1,0 +1,56 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS year_rank
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv series')) 
+        AND m.production_year IS NOT NULL
+), 
+TopMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.year_rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_id,
+        tm.title,
+        tm.production_year,
+        COALESCE(AVG(mi.info)::text, 'N/A') AS avg_rating,
+        STRING_AGG(DISTINCT c.name, ', ') FILTER (WHERE c.name IS NOT NULL) AS cast_names
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        complete_cast cc ON tm.movie_id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_info mi ON tm.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        tm.movie_id, tm.title, tm.production_year
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.avg_rating,
+    md.cast_names
+FROM 
+    MovieDetails md
+WHERE 
+    md.avg_rating != 'N/A'
+    AND (md.production_year > 2000 OR md.avg_rating::numeric > 7.0)
+ORDER BY 
+    md.production_year DESC, 
+    md.avg_rating DESC;

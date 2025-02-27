@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rnk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022)
+),
+TotalReturns AS (
+    SELECT 
+        cr_item_sk,
+        SUM(cr_return_quantity) AS total_returned,
+        SUM(cr_return_amt) AS total_return_amt
+    FROM 
+        catalog_returns
+    GROUP BY 
+        cr_item_sk
+),
+StoreSalesByWarehouse AS (
+    SELECT 
+        ss_item_sk,
+        ss_store_sk,
+        SUM(ss_net_profit) AS total_profit
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_item_sk, 
+        ss_store_sk
+),
+SalesComparison AS (
+    SELECT 
+        a.ws_item_sk,
+        a.ws_sales_price,
+        COALESCE(b.total_returned, 0) AS total_returned,
+        COALESCE(b.total_return_amt, 0) AS total_return_amt,
+        COALESCE(c.total_profit, 0) AS total_profit
+    FROM 
+        RankedSales a
+    LEFT JOIN 
+        TotalReturns b ON a.ws_item_sk = b.cr_item_sk
+    LEFT JOIN 
+        StoreSalesByWarehouse c ON a.ws_item_sk = c.ss_item_sk
+    WHERE 
+        a.rnk = 1
+)
+SELECT 
+    item.i_item_id,
+    item.i_item_desc,
+    sales.ws_sales_price,
+    sales.total_returned,
+    sales.total_return_amt,
+    sales.total_profit,
+    (sales.ws_sales_price - sales.total_return_amt + sales.total_profit) AS net_performance
+FROM 
+    SalesComparison sales
+JOIN 
+    item ON sales.ws_item_sk = item.i_item_sk
+WHERE 
+    sales.ws_sales_price IS NOT NULL 
+    AND sales.total_profit <= 200
+ORDER BY 
+    net_performance DESC
+FETCH FIRST 10 ROWS ONLY;

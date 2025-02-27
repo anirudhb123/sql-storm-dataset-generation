@@ -1,0 +1,64 @@
+
+WITH RECURSIVE item_sales AS (
+    SELECT ws_item_sk, SUM(ws_quantity) AS total_quantity, SUM(ws_net_profit) AS total_profit
+    FROM web_sales
+    WHERE ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY ws_item_sk
+    UNION ALL
+    SELECT cs_item_sk, SUM(cs_quantity), SUM(cs_net_profit)
+    FROM catalog_sales
+    WHERE cs_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY cs_item_sk
+),
+address_info AS (
+    SELECT 
+        ca_address_id,
+        STRING_AGG(ca_street_number || ' ' || ca_street_name || ' ' || ca_street_type, ', ') AS full_address,
+        ca_city,
+        ca_state
+    FROM customer_address
+    GROUP BY ca_address_id, ca_city, ca_state
+),
+customer_info AS (
+    SELECT 
+        customer.c_customer_id,
+        customer.c_first_name,
+        customer.c_last_name,
+        customer.c_birth_year,
+        cd_gender,
+        COUNT(DISTINCT crt.cr_item_sk) AS catalog_returns,
+        COALESCE(COUNT(DISTINCT wr.wr_item_sk), 0) AS web_returns
+    FROM customer
+    LEFT JOIN customer_demographics ON customer.c_current_cdemo_sk = customer_demographics.cd_demo_sk
+    LEFT JOIN catalog_returns crt ON customer.c_customer_sk = crt.cr_returning_customer_sk
+    LEFT JOIN web_returns wr ON customer.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY customer.c_customer_id, customer.c_first_name, customer.c_last_name, customer.c_birth_year, cd_gender
+),
+sales_summary AS (
+    SELECT 
+        i_sales.ws_item_sk,
+        i_sales.total_quantity,
+        i_sales.total_profit,
+        ROW_NUMBER() OVER (PARTITION BY i_sales.ws_item_sk ORDER BY i_sales.total_profit DESC) AS rank
+    FROM item_sales i_sales
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.catalog_returns,
+    ci.web_returns,
+    ai.full_address,
+    ss.total_quantity,
+    ss.total_profit,
+    CASE 
+        WHEN ci.c_birth_year < 1980 THEN 'Baby Boomer'
+        WHEN ci.c_birth_year BETWEEN 1980 AND 1996 THEN 'Millennial'
+        ELSE 'Gen Z'
+    END AS demographic
+FROM customer_info ci
+LEFT JOIN address_info ai ON ci.c_customer_id = ai.ca_address_id
+LEFT JOIN sales_summary ss ON ci.c_customer_id = ss.ws_item_sk
+WHERE ss.rank <= 10
+AND (ci.catalog_returns > 5 OR ci.web_returns > 2)
+ORDER BY ci.c_last_name, ci.c_first_name;

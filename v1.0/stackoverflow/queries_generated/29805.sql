@@ -1,0 +1,76 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        COUNT(DISTINCT B.Id) AS TotalBadges,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty,
+        MAX(U.CreationDate) AS AccountCreated
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    WHERE 
+        U.Reputation > 1000
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalComments,
+        TotalBadges,
+        TotalBounty,
+        RANK() OVER (ORDER BY TotalPosts DESC, TotalBounty DESC) AS PostRank
+    FROM 
+        UserActivity
+    WHERE 
+        TotalPosts > 0
+),
+UserPostAnalytics AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS PostsMade,
+        AVG(P.Score) AS AverageScore,
+        SUM(CASE WHEN PH.PostHistoryTypeId IN (10, 11) THEN 1 ELSE 0 END) AS CloseReactions,
+        STRING_AGG(DISTINCT T.TagName, ', ') AS AssociatedTags
+    FROM 
+        TopUsers U
+    JOIN 
+        Posts P ON U.UserId = P.OwnerUserId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(P.Tags, ',')) AS tag(T) ON TRUE
+    GROUP BY 
+        U.UserId, U.DisplayName
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.PostsMade,
+    U.AverageScore,
+    U.CloseReactions,
+    U.AssociatedTags,
+    R.PostRank  
+FROM 
+    UserPostAnalytics U
+JOIN 
+    TopUsers R ON U.UserId = R.UserId
+WHERE 
+    R.PostRank <= 10
+ORDER BY 
+    R.PostRank;

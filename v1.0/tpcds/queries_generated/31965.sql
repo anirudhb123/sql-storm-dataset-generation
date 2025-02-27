@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SalesAggregate AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(ws_order_number) AS total_orders,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2450000 AND 2450600
+    GROUP BY 
+        ws_item_sk
+), FilteredSales AS (
+    SELECT 
+        sa.ws_item_sk,
+        sa.total_net_profit,
+        sa.total_orders,
+        ROW_NUMBER() OVER (ORDER BY sa.total_net_profit DESC) AS profit_rank,
+        i.i_product_name
+    FROM 
+        SalesAggregate sa
+    JOIN 
+        item i ON sa.ws_item_sk = i.i_item_sk
+    WHERE 
+        sa.rank <= 10
+)
+SELECT 
+    coalesce(f.total_net_profit, 0) AS Total_Net_Profit,
+    f.total_orders AS Total_Orders,
+    f.i_product_name AS Product_Name,
+    d.d_year AS Sales_Year
+FROM 
+    FilteredSales f
+FULL OUTER JOIN 
+    date_dim d ON d.d_date_sk = (SELECT MAX(d2.d_date_sk) 
+                                  FROM date_dim d2 
+                                  WHERE d2.d_date BETWEEN '2023-01-01' AND '2023-12-31')
+WHERE 
+    f.total_orders IS NOT NULL OR d.d_year IS NOT NULL
+ORDER BY 
+    Total_Net_Profit DESC
+LIMIT 5;

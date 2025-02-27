@@ -1,0 +1,86 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        u.UpVotes,
+        u.DownVotes,
+        DENSE_RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE 
+                WHEN v.VoteTypeId = 2 THEN 1
+                WHEN v.VoteTypeId = 3 THEN -1
+                ELSE 0
+            END) AS VoteBalance
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName, u.Reputation, u.Views, u.UpVotes, u.DownVotes
+),
+
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AcceptedAnswerId,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(ah.Text, 'No Accepted Answer') AS AcceptedAnswer,
+        CASE 
+            WHEN p.ViewCount IS NULL THEN 'No Views'
+            ELSE CASE 
+                WHEN p.ViewCount < 10 THEN 'Few Views' 
+                WHEN p.ViewCount < 100 THEN 'Moderate Views' 
+                ELSE 'Many Views' 
+            END 
+        END AS ViewCategory,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT l.RelatedPostId) AS RelatedLinksCount
+    FROM Posts p
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Posts ah ON p.AcceptedAnswerId = ah.Id
+    LEFT JOIN PostLinks l ON p.Id = l.PostId
+    GROUP BY p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AcceptedAnswerId, u.DisplayName, ah.Text
+),
+
+CombinedStats AS (
+    SELECT 
+        ds.PostId,
+        ds.Title,
+        ds.OwnerDisplayName,
+        ds.CreationDate,
+        us.UserId,
+        us.ReputationRank,
+        ds.ViewCategory,
+        ds.CommentCount,
+        us.BadgeCount,
+        us.VoteBalance
+    FROM PostDetails ds
+    JOIN UserStats us ON ds.OwnerDisplayName = us.DisplayName
+    WHERE us.Reputation > 1000
+)
+
+SELECT 
+    cs.PostId,
+    cs.Title,
+    cs.OwnerDisplayName,
+    cs.CreationDate,
+    cs.ReputationRank,
+    cs.ViewCategory,
+    cs.CommentCount,
+    cs.BadgeCount,
+    cs.VoteBalance,
+    CASE 
+        WHEN cs.VoteBalance > 0 THEN 'Positive'
+        WHEN cs.VoteBalance < 0 THEN 'Negative'
+        ELSE 'Neutral'
+    END AS VoteStatus
+FROM CombinedStats cs
+ORDER BY cs.ReputationRank DESC, cs.ViewCount DESC
+LIMIT 100;
+
+This SQL query provides a detailed performance benchmarking by combining various constructs such as CTEs for improved readability and organization, along with analytics using window functions, LEFT JOINs to aggregate associated information, and case logic for enhanced categorizations. It organizes user statistics and post details while incorporating intricate logic around user reputation and post visibility, yielding a consolidated view of high-reputation users and their contributions in the context of posts.

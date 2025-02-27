@@ -1,0 +1,80 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS OrderRank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2021-01-01'
+        AND o.o_orderdate < DATE '2023-01-01'
+),
+SupplierMetrics AS (
+    SELECT 
+        s.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        COUNT(DISTINCT ps.ps_partkey) AS UniquePartsSupplied
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+OutOfStockParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(SUM(ps.ps_availqty), 0) AS AvailableQuantity
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_availqty) IS NULL OR SUM(ps.ps_availqty) = 0
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS OrderCount,
+        SUM(o.o_totalprice) AS TotalSpent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) < 5 OR SUM(o.o_totalprice) IS NULL
+)
+SELECT 
+    r.o_orderkey,
+    COALESCE(c.c_name, 'Unknown Customer') AS CustomerName,
+    r.o_orderdate,
+    r.o_totalprice,
+    sm.TotalSupplyCost,
+    os.AvailableQuantity AS OutOfStockQuantity,
+    cm.OrderCount AS CustomerOrderCount,
+    cm.TotalSpent AS CustomerTotalSpent,
+    CASE 
+        WHEN r.OrderRank = 1 THEN 'Top Order'
+        ELSE 'Regular Order'
+    END AS OrderType
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    SupplierMetrics sm ON sm.TotalSupplyCost IS NOT NULL
+LEFT JOIN 
+    OutOfStockParts os ON os.AvailableQuantity = 0
+LEFT JOIN 
+    CustomerOrders cm ON r.o_orderkey = cm.c_custkey
+WHERE 
+    r.o_totalprice > (SELECT AVG(o_totalprice) FROM orders) 
+    OR (sm.UniquePartsSupplied > 10 AND os.p_partkey IS NULL)
+ORDER BY 
+    r.o_orderdate DESC, 
+    r.o_totalprice ASC;

@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= (cast('2024-10-01' as date) - INTERVAL '90 days')
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        AVG(b.Class) AS AvgBadgeClass
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryTypesWithComments AS (
+    SELECT 
+        ph.PostId,
+        COUNT(c.Id) AS CommentCount,
+        STRING_AGG(c.Text, ' | ') AS AllComments,
+        MAX(ph.CreationDate) AS LastChangeDate
+    FROM 
+        PostHistory ph
+    LEFT JOIN 
+        Comments c ON ph.PostId = c.PostId
+    WHERE 
+        ph.CreationDate >= (cast('2024-10-01' as date) - INTERVAL '180 days')
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.PostId,
+    p.Title,
+    p.Score,
+    COALESCE(pb.BadgeCount, 0) AS BadgeCount,
+    COALESCE(pb.AvgBadgeClass, 0) AS AvgBadgeClass,
+    phc.CommentCount,
+    phc.AllComments,
+    phc.LastChangeDate,
+    CASE
+        WHEN p.Score > 50 THEN 'High Score!'
+        WHEN p.Score BETWEEN 20 AND 50 THEN 'Medium Score!'
+        ELSE 'Low Score'
+    END AS ScoreCategory,
+    CASE 
+        WHEN phc.CommentCount > 0 THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus
+FROM 
+    RankedPosts p
+LEFT JOIN 
+    UserBadges pb ON p.OwnerUserId = pb.UserId
+LEFT JOIN 
+    PostHistoryTypesWithComments phc ON p.PostId = phc.PostId
+WHERE 
+    p.Rank = 1
+    AND (p.Score IS NOT NULL OR p.ViewCount IS NOT NULL)
+    AND (p.Tags IS NOT NULL AND p.Tags != '')
+ORDER BY 
+    p.Score DESC, 
+    p.ViewCount DESC, 
+    phc.LastChangeDate DESC 
+LIMIT 50;

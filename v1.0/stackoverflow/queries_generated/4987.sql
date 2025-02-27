@@ -1,0 +1,78 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC NULLS LAST) AS ScoreRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= '2022-01-01'
+),
+
+UserEngagement AS (
+    SELECT
+        u.Id AS UserId,
+        COUNT(DISTINCT v.Id) AS TotalVotes,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    ue.TotalVotes,
+    ue.TotalComments,
+    ue.GoldBadges,
+    ue.SilverBadges,
+    ue.BronzeBadges,
+    CASE 
+        WHEN ue.TotalVotes IS NULL THEN 'No Engagement'
+        WHEN ue.TotalVotes > 50 THEN 'Highly Engaged'
+        WHEN ue.TotalVotes > 20 THEN 'Moderately Engaged'
+        ELSE 'Low Engagement'
+    END AS EngagementLevel
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserEngagement ue ON rp.PostId = ue.UserId
+WHERE 
+    rp.ScoreRank <= 10
+ORDER BY 
+    rp.ViewCount DESC
+LIMIT 100
+UNION ALL
+SELECT 
+    null AS PostId,
+    'Total Users Engaged' AS Title,
+    NULL AS CreationDate,
+    NULL AS Score,
+    NULL AS ViewCount,
+    COUNT(*) AS TotalVotes,
+    NULL AS TotalComments,
+    NULL AS GoldBadges,
+    NULL AS SilverBadges,
+    NULL AS BronzeBadges,
+    NULL AS EngagementLevel
+FROM 
+    Users
+WHERE 
+    Reputation > 0;

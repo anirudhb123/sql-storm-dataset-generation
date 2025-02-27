@@ -1,0 +1,72 @@
+WITH RECURSIVE UserPostStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS QuestionCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END), 0) AS AnswerCount,
+        COALESCE(SUM(CASE WHEN P.PostTypeId IN (1, 2) THEN P.Score ELSE 0 END), 0) AS TotalScore,
+        COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN P.ViewCount ELSE 0 END), 0) AS TotalViews,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(CASE WHEN P.PostTypeId = 1 THEN P.ViewCount ELSE 0 END), 0) DESC) AS ViewRanking
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+), 
+UserBadges AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        SUM(CASE WHEN B.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN B.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN B.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+), 
+PostActivity AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8  
+    GROUP BY 
+        P.Id
+)
+SELECT 
+    U.DisplayName,
+    UPS.QuestionCount,
+    UPS.AnswerCount,
+    UPS.TotalScore,
+    UPS.TotalViews,
+    UBad.BadgeCount,
+    UBad.GoldBadges,
+    UBad.SilverBadges,
+    UBad.BronzeBadges,
+    PA.PostId,
+    PA.Title,
+    PA.CreationDate,
+    PA.CommentCount,
+    PA.TotalBounty,
+    UPS.ViewRanking
+FROM 
+    UserPostStats UPS
+JOIN 
+    UserBadges UBad ON UPS.UserId = UBad.UserId
+JOIN 
+    PostActivity PA ON UPS.UserId = PA.PostId 
+WHERE 
+    UPS.QuestionCount > 5
+ORDER BY 
+    UPS.TotalScore DESC;

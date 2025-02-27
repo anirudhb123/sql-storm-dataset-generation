@@ -1,0 +1,88 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id,
+        U.DisplayName,
+        U.Reputation,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM Users U
+),
+RecentPostStats AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(CASE WHEN P.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN P.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        COUNT(CASE WHEN P.ViewCount > 100 THEN 1 END) AS PopularPosts,
+        SUM(P.Score) AS TotalScore,
+        MAX(P.CreationDate) AS LastPostDate
+    FROM Posts P
+    WHERE P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY P.OwnerUserId
+),
+BadgeCounts AS (
+    SELECT 
+        B.UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM Badges B
+    GROUP BY B.UserId
+),
+UserPerformance AS (
+    SELECT 
+        UR.DisplayName,
+        UR.Reputation,
+        RP.TotalQuestions,
+        RP.TotalAnswers,
+        RP.PopularPosts,
+        RP.TotalScore,
+        COALESCE(BC.GoldBadges, 0) AS GoldBadges,
+        COALESCE(BC.SilverBadges, 0) AS SilverBadges,
+        COALESCE(BC.BronzeBadges, 0) AS BronzeBadges,
+        UR.Rank
+    FROM UserReputation UR
+    LEFT JOIN RecentPostStats RP ON UR.Id = RP.OwnerUserId
+    LEFT JOIN BadgeCounts BC ON UR.Id = BC.UserId
+)
+SELECT 
+    UP.DisplayName,
+    UP.Reputation,
+    UP.TotalQuestions,
+    UP.TotalAnswers,
+    UP.PopularPosts,
+    UP.TotalScore,
+    UP.GoldBadges,
+    UP.SilverBadges,
+    UP.BronzeBadges,
+    UP.Rank,
+    CASE 
+        WHEN UP.Reputation > 5000 THEN 'Legend'
+        WHEN UP.Reputation BETWEEN 3000 AND 5000 THEN 'Veteran'
+        ELSE 'Novice'
+    END AS ReputationTier,
+    (SELECT COUNT(*) FROM Users U WHERE U.Reputation > UP.Reputation) AS UsersAbove,
+    (SELECT COUNT(*) FROM Users U WHERE U.Reputation < UP.Reputation) AS UsersBelow,
+    NULLIF((SUM(UP.TotalQuestions) FILTER (WHERE UP.TotalQuestions IS NOT NULL)), 0) AS TotalQuestionsFallback,
+    COALESCE(NULLIF((SELECT MIN(UP2.TotalQuestions) FROM UserPerformance UP2 WHERE UP2.Reputation IS NOT NULL), 0), 1) AS MinQuestionsFallback
+FROM UserPerformance UP
+WHERE UP.TotalAnswers IS NOT NULL
+ORDER BY UP.TotalScore DESC, UP.Reputation DESC
+FETCH FIRST 10 ROWS ONLY;
+
+-- Additional complexity with outer joins to include users with no posts
+LEFT JOIN (
+    SELECT 
+        U.Id AS UserId,
+        COALESCE(P.TotalQuestions, 0) AS Questions,
+        COALESCE(P.TotalAnswers, 0) AS Answers
+    FROM Users U
+    LEFT JOIN (
+        SELECT 
+            OwnerUserId,
+            COUNT(CASE WHEN PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+            COUNT(CASE WHEN PostTypeId = 2 THEN 1 END) AS TotalAnswers
+        FROM Posts
+        GROUP BY OwnerUserId
+    ) P ON U.Id = P.OwnerUserId
+) AS PostCounts ON UP.Id = PostCounts.UserId
+WHERE (PostCounts.Questions IS NULL OR PostCounts.Answers IS NULL)
+ORDER BY UP.DisplayName;

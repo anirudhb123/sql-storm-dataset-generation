@@ -1,0 +1,33 @@
+WITH SupplierDetails AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal,
+           CONCAT('Supplier Name: ', s.s_name, ', Nation Key: ', s.s_nationkey, 
+                  ', Account Balance: ', FORMAT(s.s_acctbal, 2)) AS detailed_info
+    FROM supplier s
+    WHERE s.s_acctbal > 1000
+), NationDetails AS (
+    SELECT n.n_nationkey, n.n_name,
+           CONCAT('Nation Name: ', n.n_name, ', Region Key: ', n.n_regionkey) AS nation_info
+    FROM nation n
+    WHERE n.n_nationkey IN (SELECT DISTINCT s_nationkey FROM SupplierDetails)
+), PartDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_brand, p.p_retailprice,
+           CONCAT('Part Name: ', p.p_name, ', Brand: ', p.p_brand, 
+                  ', Retail Price: ', FORMAT(p.p_retailprice, 2)) AS part_info
+    FROM part p
+    WHERE p.p_retailprice > 50
+), OrderDetails AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate,
+           CONCAT('Order Date: ', FORMAT(o.o_orderdate, 'yyyy-MM-dd'), 
+                  ', Total Price: ', FORMAT(o.o_totalprice, 2)) AS order_info
+    FROM orders o
+    WHERE o.o_totalprice > 100
+)
+SELECT sd.detailed_info, nd.nation_info, pd.part_info, od.order_info 
+FROM SupplierDetails sd
+JOIN NationDetails nd ON sd.s_nationkey = nd.n_nationkey
+JOIN partsupp ps ON ps.ps_suppkey = sd.s_suppkey
+JOIN PartDetails pd ON pd.p_partkey = ps.ps_partkey
+JOIN lineitem li ON li.l_orderkey IN (SELECT o.o_orderkey FROM OrderDetails od WHERE od.o_orderkey = li.l_orderkey)
+JOIN OrderDetails od ON li.l_orderkey = od.o_orderkey
+WHERE sd.s_acctbal >= 5000
+ORDER BY sd.s_name, od.o_orderdate DESC;

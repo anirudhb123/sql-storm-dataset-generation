@@ -1,0 +1,49 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        kt.kind_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        AVG(CASE WHEN mi.info_type_id = 1 THEN CAST(mi.info AS FLOAT) END) AS avg_rating,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_per_year
+    FROM 
+        title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        kind_type kt ON t.kind_id = kt.id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    GROUP BY 
+        t.id, t.title, kt.kind_id, t.production_year
+),
+SelectedMovies AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.actor_count, 
+        rm.avg_rating
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.actor_count > 5 AND 
+        rm.avg_rating IS NOT NULL
+)
+SELECT 
+    sm.title, 
+    sm.actor_count,
+    COALESCE(sm.avg_rating, 0) AS average_rating,
+    'This movie has a large cast!' AS comments
+FROM 
+    SelectedMovies sm
+WHERE 
+    sm.actor_count > (
+        SELECT 
+            AVG(actor_count) 
+        FROM 
+            SelectedMovies
+    )
+ORDER BY 
+    sm.avg_rating DESC
+LIMIT 10;

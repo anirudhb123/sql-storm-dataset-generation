@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank,
+        u.DisplayName AS AuthorDisplayName,
+        ARRAY_TO_STRING(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'), ', ') AS ParsedTags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.ParsedTags,
+        rp.AuthorDisplayName
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.PostRank <= 5 
+),
+PostComments AS (
+    SELECT 
+        c.PostId,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Comments c
+    GROUP BY 
+        c.PostId
+),
+FinalBenchmark AS (
+    SELECT 
+        tp.PostId,
+        tp.Title,
+        tp.CreationDate,
+        tp.Score,
+        tp.ViewCount,
+        tp.ParsedTags,
+        tp.AuthorDisplayName,
+        COALESCE(pc.CommentCount, 0) AS CommentCount
+    FROM 
+        TopPosts tp
+    LEFT JOIN 
+        PostComments pc ON tp.PostId = pc.PostId
+)
+SELECT 
+    fb.PostId,
+    fb.Title,
+    fb.CreationDate,
+    fb.Score,
+    fb.ViewCount,
+    fb.ParsedTags,
+    fb.AuthorDisplayName,
+    fb.CommentCount,
+    (fb.Score * 1.0 / NULLIF(fb.ViewCount, 0)) AS ScoreToViewRatio
+FROM 
+    FinalBenchmark fb
+ORDER BY 
+    fb.ScoreToViewRatio DESC;

@@ -1,0 +1,44 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalSupplyCost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS Rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+FilteredSuppliers AS (
+    SELECT
+        rs.s_suppkey,
+        rs.s_name,
+        n.n_name AS NationName,
+        rs.TotalSupplyCost
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation n ON rs.s_nationkey = n.n_nationkey
+    WHERE 
+        rs.Rank <= 3
+)
+SELECT 
+    ps.p_partkey,
+    p.p_name,
+    COUNT(DISTINCT fs.s_suppkey) AS SupplierCount,
+    SUM(fs.TotalSupplyCost) AS TotalCost
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    FilteredSuppliers fs ON ps.ps_suppkey = fs.s_suppkey
+GROUP BY 
+    ps.p_partkey, p.p_name
+ORDER BY 
+    SupplierCount DESC, TotalCost DESC;

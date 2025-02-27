@@ -1,0 +1,79 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+), 
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        ck.name AS character_name,
+        m.title AS movie_title,
+        COUNT(ci.id) AS role_count
+    FROM 
+        cast_info ci
+    INNER JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        char_name ck ON ci.role_id = ck.id
+    LEFT JOIN 
+        aka_title m ON ci.movie_id = m.id
+    GROUP BY 
+        ak.name, ck.name, m.title
+), 
+movie_stats AS (
+    SELECT 
+        mh.title AS movie_title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS unique_actors,
+        AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS has_note_percentage,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS year_rank
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    GROUP BY 
+        mh.title, mh.production_year
+)
+SELECT 
+    ms.movie_title,
+    ms.production_year,
+    ms.unique_actors,
+    ms.has_note_percentage,
+    CASE 
+        WHEN ms.year_rank = 1 THEN 'Top of the Year'
+        WHEN ms.unique_actors > 10 THEN 'High Cast Count'
+        ELSE 'Standard'
+    END AS classification,
+    COALESCE(ai.actor_name, 'No Actor') AS featured_actor,
+    COALESCE(ai.character_name, 'No Character') AS character,
+    ai.role_count AS actor_role_count
+FROM 
+    movie_stats ms
+LEFT JOIN 
+    actor_info ai ON ms.movie_title = ai.movie_title
+WHERE 
+    ms.production_year > (SELECT MAX(production_year) - 5 FROM aka_title)
+ORDER BY 
+    ms.production_year DESC, ms.unique_actors DESC
+LIMIT 100;

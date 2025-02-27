@@ -1,0 +1,67 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT m.id AS movie_id, 
+           m.title AS movie_title, 
+           m.production_year, 
+           1 AS level
+    FROM aka_title m
+
+    UNION ALL
+
+    SELECT m.id AS movie_id, 
+           CONCAT(mh.movie_title, ' -> ', m.title) AS movie_title,
+           m.production_year, 
+           mh.level + 1
+    FROM aka_title m
+    JOIN movie_link ml ON m.id = ml.linked_movie_id
+    JOIN movie_hierarchy mh ON ml.movie_id = mh.movie_id
+),
+
+top_movies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_by_cast_count
+    FROM aka_title at
+    LEFT JOIN cast_info ci ON at.id = ci.movie_id
+    GROUP BY at.id, at.title, at.production_year
+),
+
+cast_stats AS (
+    SELECT 
+        ak.name AS actor_name,
+        at.title,
+        COUNT(ci.id) AS num_roles,
+        AVG(COALESCE(ci.nr_order, 0)) AS avg_order
+    FROM aka_name ak
+    JOIN cast_info ci ON ak.person_id = ci.person_id
+    JOIN aka_title at ON ci.movie_id = at.id
+    GROUP BY ak.name, at.title
+),
+
+keyword_count AS (
+    SELECT 
+        at.id AS movie_id,
+        COUNT(mk.keyword_id) AS total_keywords
+    FROM aka_title at
+    LEFT JOIN movie_keyword mk ON at.id = mk.movie_id
+    GROUP BY at.id
+)
+
+SELECT 
+    mh.movie_id,
+    mh.movie_title,
+    mh.production_year,
+    COALESCE(tc.rank_by_cast_count, 'N/A') AS cast_rank,
+    cs.actor_name,
+    cs.num_roles,
+    cs.avg_order,
+    kc.total_keywords,
+    mh.level
+FROM movie_hierarchy mh
+LEFT JOIN top_movies tc ON mh.movie_id = tc.movie_id
+LEFT JOIN cast_stats cs ON mh.movie_title = cs.title
+LEFT JOIN keyword_count kc ON mh.movie_id = kc.movie_id
+WHERE mh.level <= 3
+ORDER BY mh.production_year DESC, mh.level ASC;

@@ -1,0 +1,47 @@
+WITH RECURSIVE SuppCTE AS (
+    SELECT s_suppkey, s_name, s_acctbal FROM supplier
+    WHERE s_acctbal IS NOT NULL
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal
+    FROM supplier s
+    JOIN SuppCTE cte ON s.s_suppkey = cte.s_suppkey + 1
+),
+PartStats AS (
+    SELECT
+        p.p_partkey,
+        COUNT(ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM part p
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS price_rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT
+    r.r_name,
+    n.n_name,
+    p.p_name,
+    COALESCE(ps.avg_supply_cost, 0) as avg_supply_cost,
+    o.total_price,
+    CASE 
+        WHEN o.total_price > 1000 THEN 'High Value'
+        WHEN o.total_price BETWEEN 500 AND 1000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS price_category,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY o.total_price DESC) AS order_rank
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier s ON n.n_nationkey = s.s_nationkey
+FULL OUTER JOIN PartStats ps ON s.s_suppkey = ps.supplier_count
+LEFT JOIN OrderDetails o ON s.s_suppkey = o.o_orderkey
+WHERE o.o_orderkey IS NULL OR p.p_type LIKE '%' || n.n_name || '%'
+  AND (ps.supplier_count IS NULL OR ps.supplier_count > 10)
+ORDER BY r.r_name, n.n_name, order_rank
+LIMIT 100 OFFSET 50;

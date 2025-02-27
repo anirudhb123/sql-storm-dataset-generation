@@ -1,0 +1,63 @@
+WITH RECURSIVE sales_hierarchy AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        ss_item_sk,
+        ss_quantity,
+        ss_net_paid,
+        1 AS level
+    FROM 
+        store_sales
+    JOIN 
+        store ON store_sales.ss_store_sk = store.s_store_sk
+    WHERE 
+        ss_sold_date_sk = (SELECT MAX(ss_sold_date_sk) FROM store_sales)
+
+    UNION ALL
+
+    SELECT 
+        sh.s_store_sk,
+        sh.s_store_name,
+        ss.ss_item_sk,
+        ss.ss_quantity,
+        ss.ss_net_paid,
+        sh.level + 1
+    FROM 
+        sales_hierarchy sh
+    JOIN 
+        store_sales ss ON sh.ss_item_sk = ss.ss_item_sk AND sh.s_store_sk != ss.ss_store_sk
+    WHERE 
+        sh.level < 5
+),
+sales_summary AS (
+    SELECT 
+        w.w_warehouse_name,
+        SUM(ss.ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss.ss_item_sk) AS unique_items_sold
+    FROM 
+        warehouse w
+    LEFT JOIN 
+        store s ON w.w_warehouse_sk = s.s_warehouse_sk
+    LEFT JOIN 
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    WHERE 
+        ss.ss_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_date = cast('2002-10-01' as date) - INTERVAL '30 DAYS')
+        AND (SELECT d_date_sk FROM date_dim WHERE d_date = cast('2002-10-01' as date))
+    GROUP BY 
+        w.w_warehouse_name
+)
+SELECT 
+    sh.s_store_name,
+    sh.ss_item_sk,
+    sh.ss_quantity,
+    sh.ss_net_paid,
+    ss.total_sales,
+    ss.unique_items_sold
+FROM 
+    sales_hierarchy sh
+JOIN 
+    sales_summary ss ON sh.s_store_name = ss.w_warehouse_name
+ORDER BY 
+    ss.total_sales DESC,
+    sh.ss_net_paid DESC
+LIMIT 10;

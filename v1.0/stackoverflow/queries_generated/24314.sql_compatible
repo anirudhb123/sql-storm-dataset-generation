@@ -1,0 +1,94 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS PostRank,
+        COUNT(*) OVER (PARTITION BY p.OwnerUserId) AS TotalPosts,
+        COALESCE(SUM(v.BountyAmount), 0) OVER (PARTITION BY p.Id) AS TotalBounties
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9)  
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+        AND p.Score IS NOT NULL
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation, 
+        u.DisplayName, 
+        COALESCE(SUM(b.Class), 0) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10  
+        AND ph.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+OpenPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 11  
+        AND ph.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+),
+PostInteractions AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(cp.Comment, op.Comment, 'N/A') AS InteractionComment
+    FROM 
+        Posts p
+    LEFT JOIN 
+        ClosedPosts cp ON p.Id = cp.PostId
+    LEFT JOIN 
+        OpenPosts op ON p.Id = op.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    u.DisplayName,
+    rp.Score,
+    rp.ViewCount,
+    rp.PostRank,
+    rp.TotalPosts,
+    rp.TotalBounties,
+    COALESCE(pi.InteractionComment, 'No interactions') AS InteractionComment,
+    CASE 
+        WHEN u.Reputation >= 1000 THEN 'High'
+        WHEN u.Reputation BETWEEN 500 AND 999 THEN 'Medium'
+        ELSE 'Low'
+    END AS ReputationCategory
+FROM 
+    RankedPosts rp
+JOIN 
+    Users u ON rp.OwnerUserId = u.Id
+LEFT JOIN 
+    PostInteractions pi ON rp.PostId = pi.PostId
+WHERE 
+    (rp.TotalPosts > 10 OR rp.Score > 50)
+    AND rp.PostRank <= 3
+ORDER BY 
+    ReputationCategory DESC, 
+    rp.ViewCount DESC, 
+    rp.Score DESC;

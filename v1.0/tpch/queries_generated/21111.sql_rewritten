@@ -1,0 +1,81 @@
+WITH SupplierAgg AS (
+    SELECT 
+        s.s_nationkey,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count,
+        SUM(s.s_acctbal) AS total_account_balance
+    FROM 
+        supplier s
+    GROUP BY 
+        s.s_nationkey
+), PartSup AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+), OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        l.l_partkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        DENSE_RANK() OVER (PARTITION BY o.o_orderkey ORDER BY l.l_quantity DESC) AS item_rank
+    FROM 
+        orders o 
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' AND 
+        o.o_orderstatus IN ('F', 'O')
+), RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS retail_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size IS NOT NULL AND 
+        p.p_retailprice IS NOT NULL
+), NullCheck AS (
+    SELECT 
+        np.n_nationkey,
+        COUNT(DISTINCT c.c_custkey) AS customer_count
+    FROM 
+        nation np
+    LEFT JOIN 
+        customer c ON np.n_nationkey = c.c_nationkey AND c.c_acctbal IS NOT NULL
+    GROUP BY 
+        np.n_nationkey
+)
+SELECT 
+    r.r_name,
+    COALESCE(sa.supplier_count, 0) AS supplier_count,
+    COALESCE(sa.total_account_balance, 0) AS total_account_balance,
+    COALESCE(ps.total_available_qty, 0) AS total_available_qty,
+    COUNT(od.o_orderkey) AS order_count,
+    SUM(od.l_quantity * (1 - od.l_discount)) AS total_revenue,
+    MAX(rp.p_retailprice) OVER () AS max_retail_price,
+    AVG(rp.p_retailprice) OVER () AS avg_retail_price
+FROM 
+    region r
+LEFT JOIN 
+    SupplierAgg sa ON r.r_regionkey = sa.s_nationkey
+LEFT JOIN 
+    PartSup ps ON ps.ps_partkey IN (SELECT p.p_partkey FROM RankedParts p WHERE p.retail_rank = 1)
+LEFT JOIN 
+    OrderDetails od ON od.l_partkey IN (SELECT rp.p_partkey FROM RankedParts rp WHERE rp.retail_rank <= 5)
+LEFT JOIN 
+    NullCheck nc ON nc.n_nationkey = r.r_regionkey
+WHERE 
+    r.r_name NOT LIKE '%region%'
+GROUP BY 
+    r.r_name
+HAVING 
+    COUNT(DISTINCT od.o_orderkey) > 10 OR SUM(od.l_quantity) IS NULL
+ORDER BY 
+    total_revenue DESC, r.r_name ASC;

@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title, 
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.production_year DESC, mt.title) AS year_rank
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        k.keyword LIKE 'Action%'
+),
+TopMovies AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.year_rank <= 10
+),
+MovieCompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT cc.person_id) AS cast_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    LEFT JOIN 
+        complete_cast cc ON mc.movie_id = cc.movie_id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+)
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    mci.company_name,
+    mci.company_type,
+    mci.cast_count,
+    COALESCE(NULLIF(mci.cast_count, 0), 'No cast available') AS cast_status
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    MovieCompanyInfo mci ON tm.movie_id = mci.movie_id
+WHERE 
+    mci.cast_count IS NULL OR mci.cast_count > 5
+ORDER BY 
+    tm.production_year DESC, 
+    tm.title ASC;

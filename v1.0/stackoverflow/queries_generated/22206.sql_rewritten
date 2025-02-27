@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COUNT(DISTINCT v.UserId) OVER (PARTITION BY p.Id) AS VoteCount,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted' 
+            ELSE 'Not Accepted' 
+        END AS AnswerStatus
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+), UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS BadgeNames
+    FROM Badges b
+    GROUP BY b.UserId
+), MaximumVotes AS (
+    SELECT 
+        PostId,
+        MAX(VoteCount) AS MaxVotes
+    FROM RankedPosts
+    GROUP BY PostId
+), FilteredPosts AS (
+    SELECT 
+        rp.*,
+        ub.BadgeCount,
+        ub.BadgeNames,
+        mv.MaxVotes
+    FROM RankedPosts rp
+    LEFT JOIN UserBadges ub ON rp.Id = ub.UserId
+    LEFT JOIN MaximumVotes mv ON rp.Id = mv.PostId
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.CreationDate,
+    fp.Score,
+    fp.Rank,
+    COALESCE(fp.BadgeCount, 0) AS BadgeCount,
+    fp.BadgeNames,
+    CASE 
+        WHEN fp.Score >= 10 THEN 'Hot Post'
+        WHEN fp.VoteCount IS NULL THEN 'No Votes Yet'
+        ELSE 'Regular Post'
+    END AS PostCategory,
+    CASE 
+        WHEN fp.MaxVotes > 5 THEN 'Highly Voted'
+        ELSE 'Moderately Voted'
+    END AS VoteCategory,
+    CASE 
+        WHEN fp.AnswerStatus IS NULL THEN 'Pending'
+        ELSE fp.AnswerStatus
+    END AS ResponseStatus
+FROM FilteredPosts fp
+WHERE (fp.BadgeCount IS NOT NULL OR fp.Score > 0)
+  AND (fp.Rank <= 5 OR fp.VoteCount < 2)
+ORDER BY fp.CreationDate DESC
+LIMIT 50
+OFFSET 100;

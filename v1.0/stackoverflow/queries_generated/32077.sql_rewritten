@@ -1,0 +1,64 @@
+WITH RecursiveTagSuggestions AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(Posts.Id) DESC) AS TagRank
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(Posts.Tags, '::int'))
+    GROUP BY 
+        Tags.TagName
+), 
+UserPostStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        SUM(P.Score) AS TotalScore
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    WHERE 
+        U.Reputation > 1000 
+    GROUP BY 
+        U.Id
+), 
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        MAX(PH.CreationDate) AS LastChanged,
+        LISTAGG(PHT.Name, ', ') WITHIN GROUP (ORDER BY PH.CreationDate) AS EditTypes
+    FROM 
+        PostHistory PH
+    JOIN 
+        PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY 
+        PH.PostId
+)
+
+SELECT 
+    U.DisplayName,
+    UPS.TotalPosts,
+    UPS.TotalQuestions,
+    UPS.TotalAnswers,
+    UPS.TotalScore,
+    R.TagName,
+    R.PostCount,
+    PHS.LastChanged,
+    PHS.EditTypes
+FROM 
+    UserPostStatistics UPS
+JOIN 
+    Users U ON UPS.UserId = U.Id
+LEFT JOIN 
+    RecursiveTagSuggestions R ON R.TagRank <= 5
+LEFT JOIN 
+    PostHistorySummary PHS ON PHS.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.Id)
+ORDER BY 
+    UPS.TotalScore DESC, 
+    UPS.TotalPosts DESC
+LIMIT 10;

@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = p.Id AND v.VoteTypeId = 3) AS DownvoteCount
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= CURRENT_TIMESTAMP - INTERVAL '1 year'
+), 
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.UpvoteCount,
+        rp.DownvoteCount,
+        CASE 
+            WHEN rp.UpvoteCount + rp.DownvoteCount = 0 THEN NULL 
+            ELSE (1.0 * rp.UpvoteCount / (rp.UpvoteCount + rp.DownvoteCount)) 
+        END AS UpvoteRate,
+        CASE 
+            WHEN rp.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 
+        END AS IsAccepted
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.CreationDate,
+    ps.UpvoteCount,
+    ps.DownvoteCount,
+    ps.UpvoteRate,
+    ps.IsAccepted,
+    COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+    COUNT(c.Id) AS CommentCount,
+    COALESCE(SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END), 0) AS GoldBadges,
+    COALESCE(SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END), 0) AS SilverBadges,
+    COALESCE(SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END), 0) AS BronzeBadges
+FROM 
+    PostStats ps
+LEFT JOIN 
+    Users u ON ps.PostId = u.Id
+LEFT JOIN 
+    Comments c ON ps.PostId = c.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+WHERE 
+    ps.Rank <= 5 -- Top 5 posts per user based on score
+GROUP BY 
+    ps.PostId, ps.Title, ps.Score, ps.ViewCount, ps.CreationDate, ps.UpvoteCount, ps.DownvoteCount, 
+    ps.UpvoteRate, ps.IsAccepted, u.DisplayName
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+LIMIT 100;

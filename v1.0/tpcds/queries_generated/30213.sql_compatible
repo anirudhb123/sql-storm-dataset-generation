@@ -1,0 +1,87 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_profit,
+        COUNT(ws_order_number) AS total_orders,
+        1 AS level
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY 
+        ws_bill_customer_sk
+    
+    UNION ALL
+    
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_net_profit) + c.total_profit,
+        c.total_orders + COUNT(ws.ws_order_number),
+        c.level + 1
+    FROM 
+        web_sales ws
+    JOIN 
+        Sales_CTE c ON c.ws_bill_customer_sk = ws.ws_bill_customer_sk 
+    WHERE 
+        ws_sold_date_sk < (SELECT MAX(d_date_sk) FROM date_dim) - c.level
+    GROUP BY 
+        ws.bill_customer_sk, c.total_profit, c.total_orders, c.level
+),
+Customer_Stats AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        COALESCE(s.total_profit, 0) AS total_profit,
+        COALESCE(s.total_orders, 0) AS total_orders,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(s.total_profit, 0) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        (SELECT 
+            ws_bill_customer_sk,
+            total_profit,
+            total_orders
+        FROM 
+            Sales_CTE
+        WHERE 
+            level = (SELECT MAX(level) FROM Sales_CTE)) s ON c.c_customer_sk = s.ws_bill_customer_sk
+),
+Top_Customers AS (
+    SELECT c.*, d.d_month_seq, d.d_year
+    FROM Customer_Stats c
+    JOIN date_dim d ON d.d_date_sk = (SELECT MAX(d_date_sk) FROM date_dim)
+    WHERE rank <= 10
+),
+Customer_Address AS (
+    SELECT 
+        ca.*, 
+        c.c_customer_id, 
+        addr.ca_city,
+        addr.ca_state,
+        addr.ca_country
+    FROM 
+        customer c
+    JOIN 
+        customer_address addr ON c.c_current_addr_sk = addr.ca_address_sk
+)
+SELECT 
+    t.c_first_name,
+    t.c_last_name,
+    t.total_profit,
+    t.total_orders,
+    ca.ca_city,
+    ca.ca_state,
+    ca.ca_country,
+    (SELECT COUNT(*) 
+     FROM web_sales ws 
+     WHERE ws_bill_customer_sk = t.c_customer_sk 
+       AND ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = d.d_year) 
+                                AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = d.d_year)) AS order_count_last_year
+FROM 
+    Top_Customers t
+JOIN 
+    Customer_Address ca ON t.c_customer_sk = ca.c_customer_sk
+ORDER BY 
+    t.total_profit DESC;

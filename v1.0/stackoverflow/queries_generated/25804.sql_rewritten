@@ -1,0 +1,84 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Tags t ON t.Id = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')::int[])
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.ViewCount, p.Score, p.AnswerCount, p.CommentCount
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.ViewCount) AS TotalViews,
+        SUM(p.Score) AS TotalScore,
+        COUNT(DISTINCT b.Id) AS TotalBadges,
+        STRING_AGG(DISTINCT CASE WHEN b.Class = 1 THEN b.Name END, ', ') AS GoldBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.UserDisplayName,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        COUNT(*) AS ChangeCount,
+        STRING_AGG(DISTINCT ph.Text, '; ') AS HistoryDescriptions
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (1, 4, 5, 24) 
+    GROUP BY 
+        ph.PostId, ph.UserId, ph.UserDisplayName, ph.CreationDate, ph.PostHistoryTypeId, ph.Comment
+)
+SELECT 
+    ua.UserId,
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.TotalViews,
+    ua.TotalScore,
+    ua.TotalBadges,
+    ua.GoldBadges,
+    rp.PostId,
+    rp.Title AS PostTitle,
+    rp.CreationDate AS PostCreationDate,
+    rp.ViewCount AS PostViewCount,
+    rp.Score AS PostScore,
+    rp.AnswerCount AS PostAnswerCount,
+    rp.CommentCount AS PostCommentCount,
+    rp.Tags AS PostTags,
+    ph.PostHistoryTypeId,
+    ph.HistoryDescriptions,
+    ph.ChangeCount
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    RankedPosts rp ON ua.UserId = rp.OwnerUserId
+LEFT JOIN 
+    PostHistoryDetails ph ON rp.PostId = ph.PostId
+WHERE 
+    ua.TotalPosts > 10 
+ORDER BY 
+    ua.TotalScore DESC, rp.ViewCount DESC;

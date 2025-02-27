@@ -1,0 +1,43 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_address, s_nationkey, s_acctbal, s_comment, 0 AS level 
+    FROM supplier 
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_address, s.s_nationkey, s.s_acctbal, s.s_comment, sh.level + 1 
+    FROM supplier s 
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey 
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) AND sh.level < 3
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_amount,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_custkey
+),
+CustomerDetails AS (
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, COALESCE(SUM(os.total_amount), 0) AS total_spent 
+    FROM customer c
+    LEFT JOIN OrderSummary os ON c.c_custkey = os.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+)
+SELECT 
+    r.r_name AS region_name,
+    n.n_name AS nation_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    AVG(cd.total_spent) AS avg_spent,
+    SUM(CASE WHEN cd.total_spent > 1000 THEN 1 ELSE 0 END) AS high_value_customers,
+    STRING_AGG(DISTINCT CONCAT(s.s_name, ': ', s.s_comment) ORDER BY s.s_name) AS supplier_comments
+FROM region r
+JOIN nation n ON n.n_regionkey = r.r_regionkey
+JOIN customer c ON c.c_nationkey = n.n_nationkey
+LEFT JOIN CustomerDetails cd ON cd.c_custkey = c.c_custkey
+LEFT JOIN supplier s ON s.s_nationkey = n.n_nationkey
+JOIN SupplierHierarchy sh ON sh.s_nationkey = n.n_nationkey
+WHERE cd.total_spent IS NOT NULL
+GROUP BY r.r_name, n.n_name
+HAVING AVG(cd.total_spent) > 500
+ORDER BY region_name, nation_name;

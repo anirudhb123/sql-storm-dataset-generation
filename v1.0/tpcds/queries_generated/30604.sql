@@ -1,0 +1,62 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_net_paid,
+        1 AS Level
+    FROM 
+        web_sales
+    WHERE 
+        ws_net_paid > 100
+    UNION ALL
+    SELECT 
+        cs_item_sk,
+        cs_sales_price,
+        cs_quantity,
+        cs_net_paid,
+        Level + 1
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_net_paid > (SELECT AVG(ws_net_paid) FROM web_sales) 
+        AND cs_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_net_paid > 100)
+)
+SELECT 
+    s.ws_item_sk,
+    SUM(s.ws_sales_price) AS Total_Sales_Price,
+    COUNT(s.ws_quantity) AS Total_Quantity_Sold,
+    SUM(s.ws_net_paid) AS Total_Net_Paid,
+    MAX(d.d_year) AS Max_Year,
+    MIN(d.d_year) AS Min_Year,
+    COUNT(DISTINCT c.c_customer_id) AS Unique_Customers,
+    CASE 
+        WHEN MAX(s.ws_net_paid) IS NULL THEN 'No Sales' 
+        ELSE 'Sales Recorded' 
+    END AS Sales_Status
+FROM 
+    web_sales s
+LEFT JOIN 
+    customer c ON s.ws_bill_customer_sk = c.c_customer_sk
+INNER JOIN 
+    date_dim d ON s.ws_sold_date_sk = d.d_date_sk
+LEFT JOIN 
+    (SELECT 
+        ws_item_sk,
+        SUM(ws_net_paid) AS Total_Net_Paid
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+    HAVING 
+        SUM(ws_net_paid) > 500) AS SalesSummary ON s.ws_item_sk = SalesSummary.ws_item_sk
+WHERE 
+    d.d_year BETWEEN 2020 AND 2023
+GROUP BY 
+    s.ws_item_sk
+HAVING 
+    SUM(s.ws_net_paid) > 1000
+ORDER BY 
+    Total_Net_Paid DESC
+LIMIT 10;

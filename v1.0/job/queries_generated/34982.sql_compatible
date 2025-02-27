@@ -1,0 +1,60 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        NULL AS parent_id,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie') 
+
+    UNION ALL
+
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.movie_id AS parent_id,
+        mh.depth + 1
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_link ml ON ml.linked_movie_id = mt.id
+    JOIN 
+        MovieHierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    m.movie_title,
+    m.production_year,
+    COUNT(DISTINCT cc.person_id) AS cast_count,
+    STRING_AGG(DISTINCT ak.name, ', ') AS actor_names,
+    COALESCE(SUM(CASE WHEN mi.info = 'Oscar Winner' THEN 1 ELSE 0 END), 0) AS oscar_winners,
+    AVG(CASE 
+        WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating') 
+        THEN CAST(mi.info AS float) 
+        ELSE NULL END) AS avg_rating,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT cc.person_id) DESC) AS rank_by_cast
+FROM 
+    MovieHierarchy m
+LEFT JOIN 
+    complete_cast cc ON cc.movie_id = m.movie_id
+LEFT JOIN 
+    cast_info ci ON ci.movie_id = m.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = ci.person_id
+LEFT JOIN 
+    movie_info mi ON mi.movie_id = m.movie_id
+WHERE 
+    m.production_year >= 2000
+GROUP BY 
+    m.movie_id,
+    m.movie_title,
+    m.production_year
+HAVING 
+    COUNT(DISTINCT cc.person_id) > 5
+ORDER BY 
+    m.production_year DESC, 
+    cast_count DESC;

@@ -1,0 +1,66 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ca.movie_id,
+        1 AS level
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ca ON a.person_id = ca.person_id
+    WHERE 
+        a.name IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        ca.movie_id,
+        h.level + 1
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ca ON a.person_id = ca.person_id
+    JOIN 
+        ActorHierarchy h ON ca.movie_id = h.movie_id
+    WHERE 
+        a.name IS NOT NULL AND h.level < 3
+),
+LatestMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.kind_id ORDER BY m.production_year DESC) AS rn
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        k.keyword
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+)
+SELECT 
+    h.actor_name,
+    h.movie_id, 
+    lm.title,
+    lm.production_year,
+    COALESCE(mk.keyword, 'No Keywords') AS keyword,
+    COUNT(DISTINCT h.actor_id) OVER (PARTITION BY h.movie_id) AS total_actors,
+    AVG(CASE WHEN h.level > 1 THEN h.level END) OVER (PARTITION BY h.movie_id) AS avg_hierarchy_level
+FROM 
+    ActorHierarchy h
+JOIN 
+    LatestMovies lm ON h.movie_id = lm.title
+LEFT JOIN 
+    MovieKeywords mk ON h.movie_id = mk.movie_id
+WHERE 
+    lm.rn <= 5
+ORDER BY 
+    h.movie_id, h.actor_name;

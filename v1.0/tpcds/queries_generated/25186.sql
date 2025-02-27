@@ -1,0 +1,40 @@
+
+WITH AddressComponents AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(TRIM(ca_street_number), ' ', TRIM(ca_street_name), ' ', TRIM(ca_street_type), 
+               CASE WHEN ca_suite_number IS NOT NULL AND ca_suite_number <> '' 
+                    THEN CONCAT(', Suite ', TRIM(ca_suite_number)) ELSE '' END) AS FullAddress,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+SalesAnalysis AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_quantity) AS TotalQuantity,
+        SUM(ws.ws_sales_price) AS TotalSales,
+        COUNT(DISTINCT ws.ws_order_number) AS TotalOrders
+    FROM 
+        web_sales ws
+    JOIN 
+        web_page wp ON ws.ws_web_page_sk = wp.wp_web_page_sk
+    WHERE 
+        wp.wp_autogen_flag = 'Y'
+    GROUP BY 
+        ws.web_site_sk
+)
+SELECT 
+    CONCAT(ac.FullAddress, ', ', ac.ca_city, ', ', ac.ca_state, ' ', ac.ca_zip) AS FullAddress,
+    sa.TotalQuantity,
+    sa.TotalSales,
+    sa.TotalOrders
+FROM 
+    AddressComponents ac
+JOIN 
+    SalesAnalysis sa ON ac.ca_address_sk = sa.web_site_sk
+ORDER BY 
+    TotalSales DESC
+LIMIT 100;

@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        COUNT(DISTINCT c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        AVG(u.Reputation) AS AverageReputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        CASE 
+            WHEN AVG(u.Reputation) > 1000 THEN 'High Reputation'
+            WHEN AVG(u.Reputation) IS NULL THEN 'No Reputation'
+            ELSE 'Moderate Reputation'
+        END AS ReputationCategory
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+ActivityWindow AS (
+    SELECT 
+        p.Id AS PostId,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        SUM(COALESCE(v.VoteTypeId = 2, 0)::int) OVER (PARTITION BY p.Id) AS TotalUpvotes,
+        SUM(COALESCE(v.VoteTypeId = 3, 0)::int) OVER (PARTITION BY p.Id) AS TotalDownvotes,
+        COUNT(DISTINCT c.Id) AS TotalComments
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        MIN(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS FirstClosed,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 11 THEN ph.CreationDate END) AS FirstReopened,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 12) THEN 1 END) AS TotalClose,
+        MAX(ph.CreationDate) AS LastActivityDate
+    FROM PostHistory ph
+    GROUP BY ph.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    us.DisplayName AS Owner,
+    COALESCE(ps.FirstClosed, 'Never') AS FirstClosed,
+    COALESCE(ps.FirstReopened, 'Never') AS FirstReopened,
+    us.TotalBadges,
+    us.TotalPosts,
+    aw.TotalUpvotes - aw.TotalDownvotes AS Score,
+    CASE
+        WHEN aw.TotalComments > 5 THEN 'Highly Discussed'
+        ELSE 'Less Discussed'
+    END AS DiscussionLevel
+FROM RankedPosts rp
+JOIN UserStatistics us ON rp.OwnerUserId = us.UserId
+LEFT JOIN PostHistoryDetails ps ON rp.PostId = ps.PostId
+JOIN ActivityWindow aw ON rp.PostId = aw.PostId
+WHERE rp.Rank <= 5
+  AND us.ReputationCategory != 'No Reputation'
+  AND (aw.TotalUpvotes > 0 OR aw.TotalDownvotes > 0)
+ORDER BY rp.CreationDate DESC, Score DESC;

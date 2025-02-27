@@ -1,0 +1,58 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        k.keyword AS movie_keyword,
+        c.name AS company_name,
+        a.name AS actor_name,
+        r.role AS actor_role,
+        COUNT(mk.id) AS keyword_count
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        title tt ON t.id = tt.id
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+        AND c.country_code = 'USA'
+    GROUP BY 
+        t.title, t.production_year, k.keyword, c.name, a.name, r.role
+    HAVING 
+        COUNT(mk.id) > 1
+),
+
+AvgKeywordCount AS (
+    SELECT 
+        AVG(keyword_count) AS average_keyword_count
+    FROM 
+        MovieDetails
+)
+
+SELECT 
+    md.movie_title, 
+    md.production_year, 
+    md.movie_keyword,
+    md.company_name,
+    md.actor_name,
+    md.actor_role,
+    akc.average_keyword_count
+FROM 
+    MovieDetails md
+CROSS JOIN 
+    AvgKeywordCount akc
+ORDER BY 
+    md.production_year DESC, 
+    md.keyword_count DESC;
+
+This SQL query generates a detailed listing of movies, their production years, associated keywords, company names, actor information, and their roles for movies produced between 2000 and 2023, specifically from companies based in the USA. It also calculates the average number of keywords associated with these movies, allowing for analysis of string processing through the aggregation and joining of multiple tables.

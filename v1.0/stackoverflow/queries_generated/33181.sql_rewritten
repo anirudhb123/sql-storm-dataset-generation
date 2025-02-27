@@ -1,0 +1,85 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.PostTypeId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        p.Id, 
+        p.Title, 
+        p.OwnerUserId, 
+        p.PostTypeId,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        Posts a ON p.ParentId = a.Id
+    WHERE 
+        a.PostTypeId = 1  
+), 
+
+UserPostStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 1 THEN p.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN p.PostTypeId = 2 THEN p.Id END) AS TotalAnswers,
+        SUM(COALESCE(p.Score, 0)) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+
+VotesSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    u.DisplayName,
+    ups.TotalPosts,
+    ups.TotalQuestions,
+    ups.TotalAnswers,
+    ups.TotalScore,
+    SUM(COALESCE(vs.UpVotes, 0)) AS TotalUpVotes,
+    SUM(COALESCE(vs.DownVotes, 0)) AS TotalDownVotes,
+    COUNT(DISTINCT r.PostId) AS LinkedPostsCount,
+    STRING_AGG(DISTINCT rp.Title, '; ') AS RelatedPostTitles
+FROM 
+    UserPostStatistics ups
+INNER JOIN 
+    Users u ON ups.UserId = u.Id
+LEFT JOIN 
+    VotesSummary vs ON vs.PostId IN (
+        SELECT PostId FROM Posts WHERE OwnerUserId = u.Id
+    )
+LEFT JOIN 
+    PostLinks pl ON pl.PostId IN (
+        SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.Id
+    )
+LEFT JOIN 
+    Posts rp ON pl.RelatedPostId = rp.Id
+LEFT JOIN 
+    RecursivePostHierarchy r ON r.OwnerUserId = u.Id
+GROUP BY 
+    u.DisplayName, ups.TotalPosts, ups.TotalQuestions, ups.TotalAnswers, ups.TotalScore
+ORDER BY 
+    TotalScore DESC;

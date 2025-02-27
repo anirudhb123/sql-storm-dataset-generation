@@ -1,0 +1,78 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        1 AS Level
+    FROM 
+        Posts AS p
+    WHERE 
+        p.PostTypeId = 2 
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.ParentId,
+        p.Title,
+        p.OwnerUserId,
+        r.Level + 1
+    FROM 
+        Posts AS p
+    INNER JOIN 
+        RecursivePostHierarchy AS r ON p.Id = r.ParentId
+    WHERE 
+        p.PostTypeId = 2 
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount
+    FROM 
+        Users AS u
+    LEFT JOIN 
+        Posts AS p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes
+    FROM 
+        Posts AS p
+    LEFT JOIN 
+        Votes AS v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+)
+
+SELECT 
+    up.DisplayName,
+    up.Reputation,
+    up.PostCount,
+    up.QuestionCount,
+    up.AnswerCount,
+    ph.Level,
+    ph.Title AS AnswerTitle,
+    pvs.UpVotes,
+    pvs.DownVotes
+FROM 
+    UserReputation AS up
+JOIN 
+    RecursivePostHierarchy AS ph ON up.UserId = ph.OwnerUserId
+JOIN 
+    PostVoteSummary AS pvs ON ph.PostId = pvs.PostId
+WHERE 
+    up.Reputation > 1000 
+ORDER BY 
+    up.Reputation DESC,
+    ph.Level,
+    AnswerTitle;

@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name, 1 AS level
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal > 10000
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, n.n_name AS nation_name, sh.level + 1
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+RankedParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM part p
+    WHERE p.p_size BETWEEN 1 AND 20
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '2023-01-01' 
+      AND o.o_orderdate < DATE '2024-01-01'
+    GROUP BY o.o_orderkey
+),
+CustomerRevenue AS (
+    SELECT c.c_custkey, c.c_name, SUM(os.total_revenue) AS total_spending
+    FROM customer c
+    JOIN OrderSummary os ON c.c_custkey = os.o_orderkey
+    GROUP BY c.c_custkey, c.c_name
+)
+SELECT sh.nation_name, COUNT(DISTINCT cr.c_custkey) AS num_customers, AVG(cr.total_spending) AS avg_spending,
+       COUNT(DISTINCT rp.p_partkey) AS top_parts
+FROM SupplierHierarchy sh
+LEFT JOIN customer cr ON sh.s_suppkey = cr.c_custkey
+LEFT JOIN RankedParts rp ON cr.c_custkey = rp.p_partkey
+GROUP BY sh.nation_name
+HAVING AVG(cr.total_spending) > (
+    SELECT AVG(total_spending) FROM CustomerRevenue
+    WHERE total_spending IS NOT NULL
+) 
+ORDER BY num_customers DESC;

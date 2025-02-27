@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        DENSE_RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sales_price DESC) AS price_rank
+    FROM
+        web_sales ws
+    WHERE
+        ws.ws_sales_price IS NOT NULL
+),
+CustomerReturns AS (
+    SELECT
+        wr.wr_returning_customer_sk,
+        SUM(wr.wr_return_amt_inc_tax) AS total_returned_amount,
+        COUNT(DISTINCT wr.wr_order_number) AS return_count
+    FROM
+        web_returns wr
+    GROUP BY
+        wr.wr_returning_customer_sk
+),
+ItemReturns AS (
+    SELECT
+        cr.cr_item_sk,
+        SUM(cr.cr_return_amount) AS total_return_amt,
+        COUNT(cr.cr_order_number) AS order_count
+    FROM
+        catalog_returns cr
+    GROUP BY
+        cr.cr_item_sk
+),
+SalesSummary AS (
+    SELECT
+        i.i_item_id,
+        SUM(ws.ws_quantity) AS total_sold_quantity,
+        AVG(ws.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        COALESCE(ir.total_return_amt, 0) AS total_return_amount,
+        COALESCE(cr.total_returned_amount, 0) AS total_web_returned_amount
+    FROM
+        item i
+    LEFT JOIN
+        web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    LEFT JOIN
+        ItemReturns ir ON ir.cr_item_sk = i.i_item_sk
+    LEFT JOIN
+        CustomerReturns cr ON cr.wr_returning_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        i.i_item_id
+)
+SELECT
+    ss.i_item_id,
+    ss.total_sold_quantity,
+    ss.avg_sales_price,
+    ss.order_count,
+    ss.total_return_amount,
+    ss.total_web_returned_amount,
+    COALESCE(RS.price_rank, 0) AS highest_price_rank
+FROM
+    SalesSummary ss
+LEFT JOIN
+    RankedSales RS ON ss.i_item_id = RS.ws_item_sk
+WHERE
+    ss.total_sold_quantity > (SELECT AVG(total_sold_quantity) FROM SalesSummary)
+    OR ss.total_return_amount > 100
+ORDER BY
+    ss.avg_sales_price DESC,
+    ss.total_sold_quantity ASC NULLS LAST
+LIMIT 100;

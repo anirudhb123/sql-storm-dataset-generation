@@ -1,0 +1,33 @@
+WITH Supplier_Avg_Cost AS (
+    SELECT ps_suppkey, AVG(ps_supplycost) AS avg_supply_cost
+    FROM partsupp
+    GROUP BY ps_suppkey
+),
+Top_Suppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sac.avg_supply_cost
+    FROM supplier s
+    JOIN Supplier_Avg_Cost sac ON s.s_suppkey = sac.ps_suppkey
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+)
+SELECT 
+    n.n_name AS nation_name,
+    r.r_name AS region_name,
+    COUNT(DISTINCT c.c_custkey) AS customer_count,
+    SUM(o.o_totalprice) AS total_order_value,
+    AVG(oi.avg_discounted_price) AS avg_discounted_price
+FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN customer c ON n.n_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN (
+    SELECT l.orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS avg_discounted_price
+    FROM lineitem l
+    GROUP BY l.orderkey
+) oi ON o.o_orderkey = oi.orderkey
+LEFT JOIN Top_Suppliers ts ON c.c_nationkey = ts.s_suppkey
+WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate <= '2023-12-31'
+AND (o.o_orderstatus IS NULL OR o.o_orderstatus IN ('O', 'F'))
+GROUP BY n.n_name, r.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 0
+ORDER BY total_order_value DESC, customer_count DESC
+LIMIT 10;

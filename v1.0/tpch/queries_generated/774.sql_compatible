@@ -1,0 +1,94 @@
+
+WITH SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 1000
+),
+LineItemStatistics AS (
+    SELECT 
+        l.l_orderkey,
+        AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_line_price,
+        COUNT(*) AS item_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+FilteredParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        sa.total_avail_qty,
+        ls.avg_line_price,
+        COALESCE(n.n_name, 'Unknown') AS nation_name
+    FROM 
+        part p
+    LEFT JOIN 
+        SupplierAvailability sa ON p.p_partkey = sa.ps_partkey
+    LEFT JOIN (
+        SELECT 
+            l_orderkey,
+            COUNT(*) AS line_item_count
+        FROM 
+            lineitem
+        GROUP BY 
+            l_orderkey
+    ) li ON li.l_orderkey = (SELECT MIN(l_orderkey) FROM lineitem WHERE l_partkey = p.p_partkey)
+    LEFT JOIN 
+        nation n ON n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey) LIMIT 1)
+),
+CombinedInfo AS (
+    SELECT 
+        f.p_partkey,
+        f.p_name,
+        f.p_brand,
+        f.total_avail_qty,
+        f.avg_line_price,
+        tc.total_spent
+    FROM 
+        FilteredParts f
+    LEFT JOIN 
+        TopCustomers tc ON f.p_partkey = (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA') LIMIT 1) LIMIT 1)
+)
+
+SELECT 
+    ci.p_partkey,
+    ci.p_name,
+    ci.p_brand,
+    ci.total_avail_qty,
+    ci.avg_line_price,
+    COALESCE(ci.total_spent, 0) AS total_spent,
+    CASE 
+        WHEN ci.total_avail_qty IS NULL THEN 'Unavailable'
+        WHEN ci.total_avail_qty < 50 THEN 'Low Stock'
+        ELSE 'In Stock'
+    END AS stock_status,
+    RANK() OVER (ORDER BY ci.total_spent DESC) AS rank_order
+FROM 
+    CombinedInfo ci
+WHERE 
+    ci.total_spent IS NOT NULL
+ORDER BY 
+    ci.rank_order, ci.p_partkey;

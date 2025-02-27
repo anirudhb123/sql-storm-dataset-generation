@@ -1,0 +1,21 @@
+SELECT 
+    p.p_name, 
+    COUNT(DISTINCT ps.s_suppkey) AS supplier_count, 
+    SUM(CASE WHEN l_discount > 0 THEN l_extendedprice * (1 - l_discount) ELSE 0 END) AS total_discounted_price,
+    SUBSTRING(p.p_comment, 1, 10) AS short_comment, 
+    CONCAT('Part: ', p.p_name, ' | Size: ', CAST(p.p_size AS VARCHAR), ' | Retail Price: ', CAST(p.p_retailprice AS VARCHAR)) AS detailed_info
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    lineitem l ON ps.ps_suppkey = l.l_suppkey
+WHERE 
+    p.p_retailprice > 100 AND 
+    l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY 
+    p.p_name, p.p_comment, p.p_size, p.p_retailprice
+HAVING 
+    COUNT(DISTINCT ps.s_suppkey) > 5
+ORDER BY 
+    total_discounted_price DESC;

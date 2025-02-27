@@ -1,0 +1,71 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+),
+AvailableParts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey
+    HAVING 
+        COUNT(o.o_orderkey) > 5
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        AVG(s.s_acctbal) AS avg_balance,
+        SUM(p.ps_supplycost * p.ps_availqty) AS total_supply_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp p ON s.s_suppkey = p.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+SELECT 
+    r.r_name,
+    n.n_name,
+    p.p_name,
+    rp.price_rank,
+    ca.order_count,
+    ca.total_spent,
+    ss.avg_balance,
+    ss.total_supply_value
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    RankedParts rp ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_supplycost < 20.00)
+LEFT JOIN 
+    AvailableParts ap ON rp.p_partkey = ap.ps_partkey
+LEFT JOIN 
+    CustomerOrders ca ON ca.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = n.n_nationkey ORDER BY c.c_acctbal DESC LIMIT 1)
+LEFT JOIN 
+    SupplierStats ss ON ss.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = rp.p_partkey ORDER BY ps.ps_availqty DESC LIMIT 1)
+WHERE 
+    rp.price_rank <= 5 
+AND 
+    (ap.total_available IS NULL OR ap.total_available > 10)
+ORDER BY 
+    r.r_name, n.n_name, rp.price_rank;

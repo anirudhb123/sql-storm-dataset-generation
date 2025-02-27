@@ -1,0 +1,81 @@
+WITH RECURSIVE ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+),
+supplier_stats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+customer_orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+filtered_lines AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    c.customer_name,
+    coalesce(co.order_count, 0) AS order_count,
+    coalesce(co.total_spent, 0) AS total_spent,
+    s.s_name AS supplier_name,
+    ss.total_supply_cost,
+    r.o_orderkey,
+    r.order_rank
+FROM 
+    customer_orders co
+FULL OUTER JOIN 
+    customer c ON c.c_custkey = co.c_custkey
+LEFT JOIN 
+    ranked_orders r ON r.o_orderkey = (SELECT MAX(o2.o_orderkey) 
+                                         FROM orders AS o2 
+                                         WHERE o2.o_orderstatus = 'F' 
+                                         AND o2.o_orderkey > r.o_orderkey)
+LEFT JOIN 
+    supplier_stats ss ON ss.s_suppkey = (
+        SELECT 
+            ps.ps_suppkey 
+        FROM 
+            partsupp ps 
+        JOIN 
+            lineitem l ON l.l_partkey = ps.ps_partkey 
+        WHERE 
+            l.l_orderkey = r.o_orderkey 
+        LIMIT 1
+    )
+WHERE 
+    r.order_rank <= 10
+ORDER BY 
+    c.c_custkey, ss.total_supply_cost DESC;

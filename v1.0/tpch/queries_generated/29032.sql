@@ -1,0 +1,41 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_address,
+        n.n_name AS nation_name,
+        COUNT(ps.ps_partkey) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supplycost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY COUNT(ps.ps_partkey) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_address, n.n_name
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name AS region_name,
+        COUNT(rs.s_name) AS top_supplier_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    JOIN 
+        RankedSuppliers rs ON n.n_nationkey = rs.n_nationkey
+    WHERE 
+        rs.supplier_rank <= 3
+    GROUP BY 
+        r.r_name
+)
+SELECT 
+    r.region_name,
+    r.top_supplier_count,
+    CONCAT('Region ', r.region_name, ' has ', r.top_supplier_count, ' top suppliers.') AS report
+FROM 
+    TopSuppliers r
+ORDER BY 
+    r.top_supplier_count DESC;

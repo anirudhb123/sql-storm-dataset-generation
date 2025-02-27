@@ -1,0 +1,80 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice, 
+        o.o_orderstatus, 
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1994-01-01' AND 
+        o.o_orderdate < DATE '1997-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+LineItemSummary AS (
+    SELECT 
+        l.l_orderkey, 
+        COUNT(*) AS line_item_count,
+        SUM(l.l_extendedprice) AS total_extended_price,
+        AVG(l.l_discount) AS avg_discount
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1996-01-01' AND 
+        l.l_shipdate < '1997-01-01' 
+    GROUP BY 
+        l.l_orderkey
+),
+CustomerRegion AS (
+    SELECT 
+        c.c_custkey, 
+        n.n_regionkey,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY c.c_acctbal DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.o_totalprice,
+    COUNT(DISTINCT li.l_orderkey) AS distinct_line_items,
+    COALESCE(SUM(sd.total_supplycost), 0) AS supplier_costs,
+    MAX(cr.rn) AS highest_region_customer_rank
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    LineItemSummary li ON o.o_orderkey = li.l_orderkey
+LEFT JOIN 
+    SupplierDetails sd ON EXISTS (
+        SELECT 1 FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT l.l_partkey 
+            FROM lineitem l WHERE l.l_orderkey = o.o_orderkey
+        )
+    )
+FULL OUTER JOIN 
+    CustomerRegion cr ON cr.c_custkey = CAST(o.o_orderstatus AS INTEGER)
+WHERE 
+    o.order_rank = 1 OR o.o_orderstatus = 'F'
+GROUP BY 
+    o.o_orderkey, o.o_orderdate, o.o_totalprice
+HAVING 
+    NULLIF(COUNT(DISTINCT li.line_item_count), 0) > 5 
+    OR SUM(sd.total_supplycost) IS NOT NULL
+ORDER BY 
+    o.o_totalprice DESC;

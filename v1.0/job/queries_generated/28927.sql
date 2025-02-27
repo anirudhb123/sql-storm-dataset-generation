@@ -1,0 +1,50 @@
+WITH movie_details AS (
+    SELECT 
+        title.title AS movie_title,
+        title.production_year,
+        aka_name.name AS actor_name,
+        role_type.role AS role_name,
+        company_name.name AS company_name,
+        GROUP_CONCAT(DISTINCT keyword.keyword) AS keywords
+    FROM 
+        title
+    JOIN 
+        movie_companies ON title.id = movie_companies.movie_id
+    JOIN 
+        company_name ON movie_companies.company_id = company_name.id
+    JOIN 
+        cast_info ON title.id = cast_info.movie_id
+    JOIN 
+        aka_name ON cast_info.person_id = aka_name.person_id
+    JOIN 
+        role_type ON cast_info.role_id = role_type.id
+    JOIN 
+        movie_keyword ON title.id = movie_keyword.movie_id
+    JOIN 
+        keyword ON movie_keyword.keyword_id = keyword.id
+    WHERE 
+        title.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        title.id, aka_name.name, role_type.role, company_name.name
+),
+ranking AS (
+    SELECT 
+        movie_details.*,
+        RANK() OVER (PARTITION BY movie_title ORDER BY production_year DESC) AS rank
+    FROM 
+        movie_details
+)
+SELECT 
+    rank,
+    movie_title,
+    production_year,
+    actor_name,
+    role_name,
+    company_name,
+    keywords
+FROM 
+    ranking
+WHERE 
+    rank = 1
+ORDER BY 
+    production_year DESC, movie_title;

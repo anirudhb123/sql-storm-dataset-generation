@@ -1,0 +1,52 @@
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS rank
+    FROM web_sales ws
+    JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE i.i_current_price > 0 AND ws.ws_sales_price IS NOT NULL
+    GROUP BY ws.web_site_sk, ws.ws_item_sk
+),
+FrequentReturns AS (
+    SELECT
+        wr.wr_item_sk,
+        COUNT(*) AS return_count,
+        SUM(wr.wr_return_amt_inc_tax) AS total_return_amount
+    FROM web_returns wr
+    GROUP BY wr.wr_item_sk
+    HAVING COUNT(*) > (
+        SELECT AVG(return_stats.return_count)
+        FROM (SELECT COUNT(*) AS return_count FROM web_returns GROUP BY wr_item_sk) return_stats
+    )
+),
+CombinedSales AS (
+    SELECT
+        rs.web_site_sk,
+        rs.ws_item_sk,
+        rs.total_quantity,
+        rs.total_sales,
+        COALESCE(fr.return_count, 0) AS return_count,
+        COALESCE(fr.total_return_amount, 0.00) AS total_return_amount,
+        CASE 
+            WHEN COALESCE(fr.return_count, 0) > 0 THEN 'High Return'
+            ELSE 'Low Return'
+        END AS return_label
+    FROM RankedSales rs
+    LEFT JOIN FrequentReturns fr ON rs.ws_item_sk = fr.wr_item_sk
+)
+SELECT
+    cs.web_site_sk,
+    cs.ws_item_sk,
+    cs.total_quantity,
+    cs.total_sales,
+    cs.return_count,
+    cs.total_return_amount,
+    cs.return_label
+FROM CombinedSales cs
+WHERE cs.total_sales > (SELECT AVG(total_sales) FROM CombinedSales)
+AND cs.return_label = 'Low Return'
+ORDER BY cs.total_quantity DESC, cs.total_sales DESC
+LIMIT 10;

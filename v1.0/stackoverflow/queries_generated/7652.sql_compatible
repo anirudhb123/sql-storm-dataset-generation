@@ -1,0 +1,50 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.AnswerCount,
+        p.CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.Score DESC) AS Rank,
+        u.DisplayName AS OwnerDisplayName,
+        STRING_AGG(CASE WHEN p.OwnerUserId IS NOT NULL THEN CONCAT(u.DisplayName, ' (', u.Reputation, ' rep)') ELSE 'Community Wiki' END, '; ') AS PostOwners
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATE_SUB(CAST('2024-10-01' AS DATE), INTERVAL 30 DAY)
+)
+
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.AnswerCount,
+    rp.CommentCount,
+    rp.Rank,
+    rp.PostOwners,
+    COUNT(pc.Id) AS CommentCount,
+    COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+    COUNT(DISTINCT b.Id) AS BadgeCount
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    Comments pc ON rp.PostId = pc.PostId
+LEFT JOIN 
+    Votes v ON rp.PostId = v.PostId AND v.VoteTypeId = 8
+LEFT JOIN 
+    Badges b ON b.UserId = rp.OwnerDisplayName
+WHERE 
+    rp.Rank <= 5
+GROUP BY 
+    rp.PostId, rp.Title, rp.CreationDate, rp.ViewCount, rp.Score, rp.AnswerCount, rp.CommentCount, rp.Rank, rp.PostOwners
+ORDER BY 
+    rp.ViewCount DESC;

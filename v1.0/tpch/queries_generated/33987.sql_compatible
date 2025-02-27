@@ -1,0 +1,59 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC)
+    FROM orders o
+    INNER JOIN OrderHierarchy oh ON o.o_orderkey < oh.o_orderkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+SupplierAggregate AS (
+    SELECT s.s_suppkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey
+),
+LineitemAnalysis AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+           AVG(l.l_tax) AS avg_tax, COUNT(l.l_linenumber) AS item_count
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY l.l_orderkey
+)
+SELECT DISTINCT
+    p.p_name,
+    p.p_brand,
+    r.r_name AS region_name,
+    COALESCE(SA.total_supplycost, 0) AS supply_cost,
+    LA.net_revenue,
+    LA.avg_tax,
+    CASE 
+        WHEN LA.item_count > 10 THEN 'High volume'
+        WHEN LA.item_count BETWEEN 5 AND 10 THEN 'Medium volume'
+        ELSE 'Low volume'
+    END AS volume_category
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN SupplierAggregate SA ON s.s_suppkey = SA.s_suppkey
+LEFT JOIN LineitemAnalysis LA ON LA.l_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    WHERE o.o_custkey = (
+        SELECT MIN(c.c_custkey) 
+        FROM customer c 
+        WHERE c.c_accountbal > 1000
+    )
+)
+WHERE p.p_retailprice > (
+    SELECT AVG(p2.p_retailprice) 
+    FROM part p2
+)
+AND (s.s_acctbal IS NULL OR s.s_acctbal > 100)
+ORDER BY LA.net_revenue DESC, p.p_name;

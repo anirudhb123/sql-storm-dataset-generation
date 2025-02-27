@@ -1,0 +1,54 @@
+WITH RankedSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+),
+CustomerTotalOrders AS (
+    SELECT
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+AvailableParts AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty,
+        SUM(ps.ps_supplycost) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+    GROUP BY p.p_partkey, p.p_name, ps.ps_availqty
+),
+FilteredOrders AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' 
+    GROUP BY o.o_orderkey
+)
+
+SELECT
+    r.r_name,
+    COUNT(DISTINCT ns.n_nationkey) AS nation_count,
+    SUM(CASE WHEN c.total_orders > 0 THEN 1 ELSE 0 END) AS active_customers,
+    SUM(COALESCE(a.ps_availqty, 0)) AS total_available_parts,
+    AVG(COALESCE(c.total_spent, 0)) AS avg_spent_per_customer,
+    MAX(s.s_acctbal) OVER (PARTITION BY r.r_regionkey) AS max_account_balance
+FROM region r
+LEFT JOIN nation ns ON r.r_regionkey = ns.n_regionkey
+LEFT JOIN RankedSuppliers s ON ns.n_nationkey = s.s_nationkey AND s.rank <= 5
+LEFT JOIN CustomerTotalOrders c ON c.c_custkey IN (SELECT DISTINCT o.o_custkey FROM orders o WHERE o.o_orderdate >= DATE '1997-01-01')
+LEFT JOIN AvailableParts a ON a.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_returnflag = 'N' AND l.l_shipdate < cast('1998-10-01' as date)) 
+GROUP BY r.r_name
+ORDER BY nation_count DESC, avg_spent_per_customer ASC
+LIMIT 10
+OFFSET (SELECT FLOOR(RANDOM() * COUNT(*) FROM nation) AS random_offset);

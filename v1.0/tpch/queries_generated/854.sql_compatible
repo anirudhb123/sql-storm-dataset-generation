@@ -1,0 +1,47 @@
+
+WITH SupplierRevenue AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * l.l_quantity) AS total_revenue,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+TopSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        sr.total_revenue,
+        RANK() OVER (ORDER BY sr.total_revenue DESC) AS revenue_rank
+    FROM 
+        supplier s
+    JOIN 
+        SupplierRevenue sr ON s.s_suppkey = sr.s_suppkey
+)
+SELECT 
+    ns.n_name AS nation_name,
+    COUNT(DISTINCT ts.s_suppkey) AS top_supplier_count,
+    AVG(ts.total_revenue) AS avg_revenue
+FROM 
+    nation ns
+LEFT JOIN 
+    TopSuppliers ts ON ns.n_nationkey = (SELECT s.n_nationkey FROM supplier s WHERE s.s_suppkey = ts.s_suppkey)
+WHERE 
+    ns.n_regionkey IS NOT NULL
+GROUP BY 
+    ns.n_name
+HAVING 
+    AVG(ts.total_revenue) > 10000
+ORDER BY 
+    top_supplier_count DESC;

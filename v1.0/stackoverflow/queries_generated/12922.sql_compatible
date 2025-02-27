@@ -1,0 +1,52 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(U.UpVotes) AS TotalUpVotes,
+        SUM(U.DownVotes) AS TotalDownVotes,
+        SUM(U.Views) AS TotalViews
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.DisplayName
+),
+PostStats AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        COALESCE((SELECT COUNT(*) FROM Comments C WHERE C.PostId = P.Id), 0) AS CommentCount,
+        COALESCE((SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 2), 0) AS UpVoteCount,
+        COALESCE((SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 3), 0) AS DownVoteCount
+    FROM Posts P
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        COUNT(*) AS HistoryEntryCount,
+        MAX(PH.CreationDate) AS LastModifiedDate
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostCount,
+    U.TotalUpVotes,
+    U.TotalDownVotes,
+    U.TotalViews,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.ViewCount,
+    P.CommentCount,
+    P.UpVoteCount,
+    P.DownVoteCount,
+    COALESCE(PH.HistoryEntryCount, 0) AS HistoryEntryCount,
+    PH.LastModifiedDate
+FROM UserStats U
+LEFT JOIN PostStats P ON U.UserId = P.OwnerUserId
+LEFT JOIN PostHistoryStats PH ON P.PostId = PH.PostId
+ORDER BY U.UserId, P.PostId;

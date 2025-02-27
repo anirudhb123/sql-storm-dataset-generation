@@ -1,0 +1,60 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.kind_id,
+        ARRAY[mt.title] AS title_path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        m.title,
+        m.production_year,
+        m.kind_id,
+        mh.title_path || m.title
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title m ON ml.movie_id = m.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mk.movie_id,
+    mk.title AS movie_title,
+    COALESCE(array_agg(DISTINCT ak.name ORDER BY ak.name), ARRAY[]::text[]) AS cast_names,
+    COUNT(DISTINCT mk.production_year) AS production_year_count,
+    SUM(CASE WHEN mk.kind_id IN (SELECT kind_id FROM kind_type WHERE kind LIKE 'Drama%') THEN 1 ELSE 0 END) AS drama_count,
+    STRING_AGG(mk.title, ', ') AS all_titles,
+    AVG(CASE WHEN mi.info_type_id = 101 THEN LENGTH(mi.info) END) AS avg_length_info
+FROM 
+    movie_hierarchy mk
+LEFT JOIN 
+    cast_info ci ON mk.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+LEFT JOIN 
+    movie_info mi ON mk.movie_id = mi.movie_id
+WHERE 
+    mk.production_year IS NOT NULL
+    AND EXISTS (
+        SELECT 1
+        FROM movie_keyword mk2
+        WHERE mk2.movie_id = mk.movie_id
+        AND mk2.keyword_id IN (SELECT id FROM keyword WHERE phonetic_code IS NOT NULL)
+    )
+GROUP BY 
+    mk.movie_id, mk.movie_title
+HAVING 
+    COUNT(DISTINCT ak.name) > 2
+ORDER BY 
+    drama_count DESC, production_year_count ASC NULLS LAST
+LIMIT 50;
+

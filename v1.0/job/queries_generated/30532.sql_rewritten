@@ -1,0 +1,50 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        array[mt.title] AS titles,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        a.title,
+        mh.titles || a.title,
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title a ON a.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON mh.movie_id = ml.movie_id
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.depth,
+    string_agg(t.title, ' -> ') AS linked_titles,
+    COALESCE(cast_info.nr_order, -1) AS cast_order,
+    COUNT(DISTINCT keyword.keyword) AS keyword_count
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_link ml ON ml.movie_id = mh.movie_id
+LEFT JOIN 
+    aka_title t ON t.id = ml.linked_movie_id
+LEFT JOIN 
+    cast_info ON cast_info.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword ON keyword.id = mk.keyword_id
+GROUP BY 
+    mh.movie_id, mh.title, mh.depth, cast_info.nr_order
+HAVING 
+    COUNT(DISTINCT keyword.keyword) > 3
+ORDER BY 
+    mh.depth DESC, mh.title ASC;

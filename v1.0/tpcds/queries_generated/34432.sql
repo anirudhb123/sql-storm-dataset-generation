@@ -1,0 +1,42 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_sales_price * ws_quantity) AS total_sales,
+        RANK() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_sales_price * ws_quantity) DESC) AS sales_rank
+    FROM web_sales
+    WHERE ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) - 30 FROM date_dim) AND (SELECT MAX(d_date_sk) FROM date_dim)
+    GROUP BY ws_item_sk
+),
+customer_sales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws_quantity) AS customer_total_quantity,
+        SUM(ws_sales_price * ws_quantity) AS customer_total_sales
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY c.c_customer_id
+),
+top_items AS (
+    SELECT 
+        item.i_item_id,
+        item.i_product_name,
+        SUM(ws.ws_quantity) AS total_quantity_sold
+    FROM item
+    JOIN web_sales ws ON item.i_item_sk = ws.ws_item_sk
+    GROUP BY item.i_item_id, item.i_product_name
+    ORDER BY total_quantity_sold DESC
+    LIMIT 10
+)
+SELECT 
+    t.item_id,
+    t.product_name,
+    COALESCE(cs.customer_total_quantity, 0) AS customer_quantity,
+    COALESCE(cs.customer_total_sales, 0) AS customer_sales,
+    ROUND(s.total_sales, 2) AS total_sales
+FROM top_items t
+LEFT JOIN customer_sales cs ON t.item_id = cs.c_customer_id
+JOIN sales_cte s ON t.item_id = s.ws_item_sk
+WHERE s.sales_rank <= 10
+ORDER BY t.total_quantity_sold DESC, customer_sales DESC;

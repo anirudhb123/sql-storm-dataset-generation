@@ -1,0 +1,55 @@
+WITH TagStats AS (
+    SELECT 
+        unnest(string_to_array(substring(Tags, 2, length(Tags) - 2), '><')) AS TagName,
+        COUNT(*) AS PostCount,
+        SUM(CASE WHEN PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        AVG(ViewCount) AS AvgViews,
+        AVG(CASE WHEN PostTypeId = 1 THEN Score ELSE NULL END) AS AvgQuestionScore,
+        AVG(CASE WHEN PostTypeId = 2 THEN Score ELSE NULL END) AS AvgAnswerScore
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        TagName
+),
+TopTags AS (
+    SELECT 
+        TagName, 
+        PostCount, 
+        QuestionCount, 
+        AnswerCount, 
+        AvgViews, 
+        AvgQuestionScore, 
+        AvgAnswerScore,
+        RANK() OVER (ORDER BY PostCount DESC) AS TagRank
+    FROM 
+        TagStats
+    WHERE 
+        PostCount > 10  
+)
+SELECT 
+    tt.TagName,
+    tt.PostCount,
+    tt.QuestionCount,
+    tt.AnswerCount,
+    tt.AvgViews,
+    tt.AvgQuestionScore,
+    tt.AvgAnswerScore,
+    u.DisplayName AS TopContributor,
+    u.Reputation AS ContributorReputation,
+    b.Name AS BadgeEarned,
+    b.Class AS BadgeClass
+FROM 
+    TopTags tt
+JOIN 
+    Posts p ON p.OwnerUserId = (SELECT OwnerUserId FROM Posts ps WHERE ps.Tags LIKE '%' || tt.TagName || '%')
+JOIN 
+    Users u ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON b.UserId = u.Id AND b.Date = (SELECT MAX(Date) FROM Badges WHERE UserId = u.Id)
+WHERE 
+    tt.TagRank <= 5  
+ORDER BY 
+    tt.TagRank;

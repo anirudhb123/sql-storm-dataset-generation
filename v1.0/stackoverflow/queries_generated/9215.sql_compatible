@@ -1,0 +1,79 @@
+
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswers
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+ActiveUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        QuestionCount,
+        AnswerCount,
+        TotalScore,
+        AcceptedAnswers,
+        RANK() OVER (ORDER BY TotalScore DESC) AS Rank
+    FROM 
+        UserPostStats
+    WHERE 
+        TotalPosts > 0
+),
+TopContributors AS (
+    SELECT 
+        *,
+        DENSE_RANK() OVER (ORDER BY TotalPosts DESC, TotalScore DESC) AS ContributionRank
+    FROM 
+        ActiveUsers
+    WHERE 
+        Rank <= 100
+),
+UserBadges AS (
+    SELECT 
+        ub.UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users ub
+    LEFT JOIN 
+        Badges b ON ub.Id = b.UserId
+    GROUP BY 
+        ub.UserId
+),
+FinalStats AS (
+    SELECT 
+        tc.DisplayName,
+        tc.TotalPosts,
+        tc.QuestionCount,
+        tc.AnswerCount,
+        tc.TotalScore,
+        tc.AcceptedAnswers,
+        COALESCE(ub.BadgeCount, 0) AS BadgeCount
+    FROM 
+        TopContributors tc
+    LEFT JOIN 
+        UserBadges ub ON tc.UserId = ub.UserId
+)
+SELECT 
+    DisplayName,
+    TotalPosts,
+    QuestionCount,
+    AnswerCount,
+    TotalScore,
+    AcceptedAnswers,
+    BadgeCount
+FROM 
+    FinalStats
+ORDER BY 
+    TotalScore DESC, 
+    TotalPosts DESC;

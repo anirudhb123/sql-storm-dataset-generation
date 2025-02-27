@@ -1,0 +1,20 @@
+
+WITH UserPostStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        COALESCE(AVG(v.Score), 0) AS AvgVoteScore
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY u.Id, u.Reputation
+)
+SELECT
+    ups.UserId,
+    ups.Reputation,
+    ups.PostCount,
+    ups.AvgVoteScore,
+    ROW_NUMBER() OVER (ORDER BY ups.Reputation DESC) AS ReputationRank
+FROM UserPostStats ups
+ORDER BY ups.Reputation DESC, ups.PostCount DESC;

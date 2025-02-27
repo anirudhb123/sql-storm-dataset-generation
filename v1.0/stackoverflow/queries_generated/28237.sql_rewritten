@@ -1,0 +1,83 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.PostTypeId IN (3, 4, 5) THEN 1 ELSE 0 END) AS WikiCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+TopTags AS (
+    SELECT 
+        T.TagName,
+        SUM(P.ViewCount) AS TotalViews,
+        COUNT(P.Id) AS PostCount,
+        COUNT(DISTINCT U.Id) AS UserCount
+    FROM 
+        Tags T
+    JOIN 
+        Posts P ON P.Tags LIKE '%' || T.TagName || '%'
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.PostTypeId = 1  
+    GROUP BY 
+        T.TagName
+    ORDER BY 
+        TotalViews DESC
+    LIMIT 10
+),
+PostStatistics AS (
+    SELECT 
+        P.Title,
+        P.ViewCount,
+        P.CreationDate,
+        U.DisplayName AS Owner,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(C.ID) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, U.DisplayName
+)
+SELECT 
+    UR.DisplayName AS UserName,
+    UR.Reputation,
+    UR.PostCount,
+    UR.QuestionCount,
+    UR.AnswerCount,
+    UR.WikiCount,
+    T.TagName,
+    T.TotalViews,
+    P.Title AS PostTitle,
+    P.ViewCount AS PostViewCount,
+    P.CreationDate AS PostCreationDate,
+    P.Owner AS PostOwner,
+    P.UpVotes,
+    P.DownVotes,
+    P.CommentCount
+FROM 
+    UserReputation UR
+JOIN 
+    TopTags T ON UR.QuestionCount > 0 
+JOIN 
+    PostStatistics P ON UR.UserId = P.Owner 
+ORDER BY 
+    UR.Reputation DESC, 
+    T.TotalViews DESC;

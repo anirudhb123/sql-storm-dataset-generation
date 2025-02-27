@@ -1,0 +1,47 @@
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT ca.id, ca.person_id, ca.movie_id, ca.nr_order
+    FROM cast_info AS ca
+    WHERE ca.person_id = (SELECT id FROM aka_name WHERE name = 'Leonardo DiCaprio' LIMIT 1)
+
+    UNION ALL
+
+    SELECT ca.id, ca.person_id, ca.movie_id, ca.nr_order
+    FROM cast_info AS ca
+    INNER JOIN ActorHierarchy AS ah ON ca.movie_id = ah.movie_id AND ca.nr_order > ah.nr_order
+),
+TitleInfo AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(mk.keyword) AS keyword_count,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM title AS t
+    LEFT JOIN movie_keyword AS mk ON t.id = mk.movie_id
+    GROUP BY t.id
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS companies,
+        MAX(ct.kind) AS company_type
+    FROM movie_companies AS mc
+    JOIN company_name AS cn ON mc.company_id = cn.id
+    JOIN company_type AS ct ON mc.company_type_id = ct.id
+    GROUP BY mc.movie_id
+)
+SELECT 
+    ah.movie_id,
+    ti.title,
+    ti.production_year,
+    ti.keyword_count,
+    ti.keywords,
+    ci.companies,
+    ci.company_type,
+    ROW_NUMBER() OVER (PARTITION BY ah.movie_id ORDER BY ah.nr_order) AS cast_order
+FROM ActorHierarchy AS ah
+JOIN TitleInfo AS ti ON ah.movie_id = ti.title_id
+LEFT JOIN CompanyInfo AS ci ON ah.movie_id = ci.movie_id
+WHERE ci.companies IS NOT NULL
+ORDER BY ah.movie_id, cast_order;
+

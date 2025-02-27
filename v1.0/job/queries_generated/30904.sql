@@ -1,0 +1,64 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id, 
+        t.title AS movie_title, 
+        1 AS level
+    FROM 
+        aka_title t
+    JOIN 
+        movie_info mi ON t.id = mi.movie_id 
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget')
+        AND mi.info IS NOT NULL
+    UNION ALL
+    SELECT 
+        mh.movie_id, 
+        CONCAT('  -- ', mh.movie_title) AS movie_title, 
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+)
+
+SELECT 
+    m.id AS movie_id, 
+    m.title AS movie_title,
+    COALESCE(cg.name, 'Unknown') AS genre,
+    COUNT(DISTINCT ci.person_id) AS actor_count,
+    COUNT(DISTINCT k.keyword) AS keyword_count,
+    ROUND(AVG(mi.info::numeric), 2) AS avg_budget,
+    STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+    RANK() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_by_actor_count
+FROM 
+    aka_title m
+LEFT JOIN 
+    movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'budget')
+LEFT JOIN 
+    cast_info ci ON m.id = ci.movie_id
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    complete_cast cc ON m.id = cc.movie_id
+LEFT JOIN 
+    aka_name a ON ci.person_id = a.person_id
+LEFT JOIN 
+    (SELECT DISTINCT 
+        mk.movie_id, 
+        c.kind AS name FROM movie_companies mk 
+      JOIN company_type c ON mk.company_type_id = c.id WHERE c.kind IS NOT NULL
+    ) cg ON m.id = cg.movie_id
+WHERE 
+    m.production_year > 2000 
+    AND m.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'feature'))
+GROUP BY 
+    m.id, m.title, cg.name
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 2 
+ORDER BY 
+    avg_budget DESC, actor_count DESC
+LIMIT 10;
+
+This SQL query generates a performance benchmark by querying complex relationships among movies, their titles, budgets, actors, genres, and keywords. It also includes recursive CTEs, window functions for ranking, and various joins to gather detailed information about the movies, while applying filters and aggregations to the data.

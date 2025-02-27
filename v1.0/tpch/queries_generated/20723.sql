@@ -1,0 +1,72 @@
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_custkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' AND o.o_orderdate < DATE '2023-01-01'
+    GROUP BY 
+        o.o_orderkey, c.c_name
+    HAVING 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+), FilteredSales AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN total_sales IS NULL THEN 'No Sales'
+            WHEN total_sales > 5000 THEN 'High Sales'
+            ELSE 'Moderate Sales'
+        END AS sales_category
+    FROM 
+        SalesCTE
+    WHERE 
+        sales_rank <= 10
+), NationInfo AS (
+    SELECT 
+        n.n_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) IS NOT NULL
+), FinalOutput AS (
+    SELECT 
+        fs.c_name,
+        fs.total_sales,
+        fs.sales_category,
+        ni.n_name,
+        ni.total_supply_cost
+    FROM 
+        FilteredSales fs
+    LEFT JOIN 
+        NationInfo ni ON fs.c_name = ni.n_name
+)
+SELECT 
+    fo.c_name,
+    fo.total_sales,
+    fo.sales_category,
+    COALESCE(fo.total_supply_cost, 0) AS supply_cost,
+    CASE 
+        WHEN fo.total_sales IS NULL THEN 'N/A'
+        ELSE CAST(fo.total_sales / NULLIF(fo.total_supply_cost, 0) AS DECIMAL(10, 2))
+    END AS sales_to_cost_ratio
+FROM 
+    FinalOutput fo
+WHERE 
+    (fo.total_sales IS NOT NULL AND fo.total_sales > 2000) OR (fo.supply_cost IS NULL)
+ORDER BY 
+    fo.sales_to_cost_ratio DESC NULLS LAST
+LIMIT 50;

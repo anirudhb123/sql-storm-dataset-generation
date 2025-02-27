@@ -1,0 +1,59 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_sold_date_sk DESC) AS rn,
+        CTE_Customer.c_customer_id,
+        CTE_Customer.c_preferred_cust_flag
+    FROM web_sales ws
+    JOIN customer CTE_Customer ON ws.ws_bill_customer_sk = CTE_Customer.c_customer_sk
+), CustomerSales AS (
+    SELECT 
+        sd.ws_item_sk,
+        SUM(sd.ws_sales_price * sd.ws_quantity) AS total_sales,
+        SUM(sd.ws_net_profit) AS total_profit,
+        COUNT(sd.c_customer_id) AS num_customers
+    FROM SalesData sd
+    WHERE sd.rn = 1
+    GROUP BY sd.ws_item_sk
+), ItemMetaData AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        i.i_current_price,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound
+    FROM item i
+    LEFT JOIN income_band ib ON i.i_current_price BETWEEN ib.ib_lower_bound AND ib.ib_upper_bound
+), FinalResults AS (
+    SELECT 
+        im.i_item_id,
+        im.i_item_desc,
+        COALESCE(cs.total_sales, 0) AS total_sales,
+        COALESCE(cs.total_profit, 0) AS total_profit,
+        CASE 
+            WHEN cs.num_customers IS NULL THEN 0 
+            ELSE cs.num_customers 
+        END AS num_customers,
+        im.i_current_price,
+        CASE 
+            WHEN im.ib_lower_bound IS NOT NULL AND im.ib_upper_bound IS NOT NULL THEN 
+                CONCAT('Income Band: $', im.ib_lower_bound, ' - $', im.ib_upper_bound) 
+            ELSE 'No Income Band' 
+        END AS income_band_desc
+    FROM ItemMetaData im
+    LEFT JOIN CustomerSales cs ON im.i_item_id = cs.ws_item_sk
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_sales > 10000 THEN 'High Seller'
+        WHEN total_sales BETWEEN 5000 AND 10000 THEN 'Moderate Seller'
+        ELSE 'Low Seller'
+    END AS sales_category
+FROM FinalResults
+ORDER BY total_sales DESC
+LIMIT 50;

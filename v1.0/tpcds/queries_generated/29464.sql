@@ -1,0 +1,52 @@
+
+WITH address_data AS (
+    SELECT 
+        ca_city,
+        ca_state,
+        ca_country,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        LENGTH(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS address_length
+    FROM 
+        customer_address
+),
+demographic_data AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        CONCAT(cd_gender, ' - ', cd_marital_status) AS demo_info
+    FROM 
+        customer_demographics
+),
+joined_data AS (
+    SELECT 
+        a.ca_city,
+        a.ca_state,
+        a.ca_country,
+        a.full_address,
+        a.address_length,
+        d.cd_gender,
+        d.cd_marital_status,
+        d.demo_info
+    FROM 
+        address_data a
+    JOIN 
+        demographic_data d ON d.cd_demo_sk = (
+            SELECT c.c_current_cdemo_sk 
+            FROM customer c 
+            WHERE c.c_current_addr_sk = a.ca_address_sk
+            LIMIT 1
+        )
+)
+SELECT 
+    ca_city,
+    ca_state,
+    ca_country,
+    COUNT(*) AS address_count,
+    AVG(address_length) AS avg_address_length,
+    STRING_AGG(DISTINCT demo_info, ', ') AS demographics_summary
+FROM 
+    joined_data
+GROUP BY 
+    ca_city, ca_state, ca_country
+ORDER BY 
+    address_count DESC, avg_address_length DESC;

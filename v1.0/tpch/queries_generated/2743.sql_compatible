@@ -1,0 +1,81 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_mfgr, 
+        p.p_brand, 
+        p.p_type, 
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+),
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        COUNT(ps.ps_availqty) AS total_parts,
+        SUM(ps.ps_supplycost) AS total_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+HighValueOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_totalprice,
+        COALESCE(SUM(l.l_discount * l.l_extendedprice), 0) AS total_discounted_value
+    FROM 
+        orders o
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_totalprice
+    HAVING 
+        o.o_totalprice > 1000.00
+),
+NationRegion AS (
+    SELECT 
+        n.n_name, 
+        r.r_name, 
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY 
+        n.n_name, r.r_name
+)
+SELECT 
+    rp.p_name,
+    rp.p_brand,
+    rp.p_retailprice,
+    COUNT(DISTINCT si.s_suppkey) AS supplier_count,
+    AVG(si.total_supplycost) AS avg_supply_cost,
+    n.n_name,
+    n.supplier_count,
+    SUM(hvo.total_discounted_value) AS total_order_value,
+    CASE 
+        WHEN SUM(hvo.total_discounted_value) = 0 THEN 'No Orders'
+        ELSE 'Orders Exist'
+    END AS order_status
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    SupplierInfo si ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = si.s_suppkey)
+LEFT JOIN 
+    HighValueOrders hvo ON rp.p_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = hvo.o_orderkey)
+LEFT JOIN 
+    NationRegion n ON n.n_name = (SELECT n.n_name FROM nation n WHERE n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = hvo.o_orderkey LIMIT 1)))
+GROUP BY 
+    rp.p_name, rp.p_brand, rp.p_retailprice, n.n_name, n.supplier_count
+HAVING 
+    COUNT(DISTINCT si.s_suppkey) > 0
+ORDER BY 
+    rp.p_retailprice DESC;

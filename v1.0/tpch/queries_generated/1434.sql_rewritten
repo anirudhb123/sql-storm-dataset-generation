@@ -1,0 +1,78 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate <= DATE '1997-12-31'
+),
+CustomerSales AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierAvailability AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        p.p_name,
+        ps.ps_availqty,
+        ps.ps_supplycost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    WHERE 
+        ps.ps_availqty > 0
+),
+SalesSummary AS (
+    SELECT 
+        cs.c_custkey,
+        cs.c_name,
+        cs.total_sales,
+        COALESCE(SUM(ra.total_sales), 0) AS avg_order_value,
+        COUNT(DISTINCT sa.s_suppkey) AS supplier_count
+    FROM 
+        CustomerSales cs
+    LEFT JOIN 
+        RankedOrders ra ON cs.order_count > 0 AND ra.o_orderkey = cs.c_custkey
+    LEFT JOIN 
+        SupplierAvailability sa ON sa.p_name LIKE '%' || cs.c_name || '%'
+    GROUP BY 
+        cs.c_custkey, cs.c_name, cs.total_sales
+)
+SELECT 
+    ss.c_name,
+    ss.total_sales,
+    ss.avg_order_value,
+    ss.supplier_count,
+    CASE 
+        WHEN ss.total_sales > 50000 THEN 'High Value'
+        WHEN ss.total_sales BETWEEN 10000 AND 50000 THEN 'Medium Value'
+        ELSE 'Low Value' 
+    END AS customer_value_segment
+FROM 
+    SalesSummary ss
+WHERE 
+    ss.total_sales IS NOT NULL
+ORDER BY 
+    ss.total_sales DESC
+LIMIT 10;

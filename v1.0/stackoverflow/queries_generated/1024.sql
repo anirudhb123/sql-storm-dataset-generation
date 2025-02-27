@@ -1,0 +1,64 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId AND V.VoteTypeId = 8  -- Bounty Start votes
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalBounty,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS RankByPosts,
+        RANK() OVER (ORDER BY TotalBounty DESC) AS RankByBounty
+    FROM 
+        UserStatistics
+)
+SELECT 
+    T.DisplayName,
+    T.TotalPosts,
+    T.TotalQuestions,
+    T.TotalAnswers,
+    T.TotalBounty,
+    CASE 
+        WHEN T.RankByPosts <= 10 THEN 'Top 10 by Posts'
+        WHEN T.RankByBounty <= 10 THEN 'Top 10 by Bounty'
+        ELSE 'Others'
+    END AS RankingCategory
+FROM 
+    TopUsers T
+WHERE 
+    (T.RankByPosts <= 10 OR T.RankByBounty <= 10)
+ORDER BY 
+    COALESCE(T.RankByPosts, 999), COALESCE(T.RankByBounty, 999)
+UNION ALL
+SELECT 
+    'Average' AS DisplayName,
+
+    AVG(TotalPosts) AS TotalPosts,
+    AVG(TotalQuestions) AS TotalQuestions,
+    AVG(TotalAnswers) AS TotalAnswers,
+    AVG(TotalBounty) AS TotalBounty,
+    'Overall Statistics' AS RankingCategory
+FROM 
+    UserStatistics
+WHERE 
+    TotalPosts > 0
+HAVING 
+    COUNT(UserId) > 0;

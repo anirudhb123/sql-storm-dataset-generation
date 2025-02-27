@@ -1,0 +1,65 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        STRING_AGG(DISTINCT a.name, ', ') AS actor_names,
+        COUNT(DISTINCT mc.company_id) AS production_company_count,
+        SUM(CASE WHEN t.kind_id = 1 THEN 1 ELSE 0 END) AS is_feature_length,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_order
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.actor_names,
+        md.production_company_count,
+        md.is_feature_length
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.production_company_count > 2 AND
+        md.is_feature_length = 1
+),
+CompletedMovies AS (
+    SELECT 
+        f.title,
+        f.production_year,
+        f.actor_names,
+        f.production_company_count,
+        COALESCE(MIN(mk.keyword), 'No Keywords') AS keywords
+    FROM 
+        FilteredMovies f
+    LEFT JOIN 
+        movie_keyword mk ON f.title = mk.movie_id
+    GROUP BY 
+        f.title, f.production_year, f.actor_names, f.production_company_count
+)
+SELECT 
+    cm.title,
+    cm.production_year,
+    cm.actor_names,
+    cm.production_company_count,
+    CASE 
+        WHEN cm.keywords IS NULL THEN 'No Keywords Found'
+        ELSE cm.keywords 
+    END AS keywords,
+    COUNT(*) OVER () AS total_movies
+FROM 
+    CompletedMovies cm
+WHERE 
+    cm.production_year BETWEEN 2015 AND 2020
+ORDER BY 
+    cm.production_year DESC, 
+    cm.title ASC;

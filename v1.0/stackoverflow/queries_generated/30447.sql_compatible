@@ -1,0 +1,103 @@
+
+WITH RecursiveTagCount AS (
+    SELECT 
+        Id,
+        TagName,
+        Count,
+        ExcerptPostId,
+        WikiPostId,
+        IsModeratorOnly,
+        IsRequired,
+        1 AS Level
+    FROM Tags
+    WHERE Count > 0
+
+    UNION ALL
+
+    SELECT 
+        t.Id,
+        t.TagName,
+        t.Count,
+        t.ExcerptPostId,
+        t.WikiPostId,
+        t.IsModeratorOnly,
+        t.IsRequired,
+        rc.Level + 1
+    FROM Tags t
+    JOIN RecursiveTagCount rc ON t.WikiPostId = rc.Id
+    WHERE t.Count > 0 AND rc.Level < 3
+),
+UserVoteSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    GROUP BY u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(ps.Score, 0) AS Score,
+        COALESCE(ps.ViewCount, 0) AS ViewCount,
+        COALESCE(ps.CommentCount, 0) AS CommentCount,
+        COALESCE(ps.FavoriteCount, 0) AS FavoriteCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(ps.Score, 0) DESC) AS Rank
+    FROM Posts p
+    LEFT JOIN (
+        SELECT 
+            PostId,
+            SUM(Score) AS Score,
+            SUM(CommentCount) AS CommentCount,
+            SUM(FavoriteCount) AS FavoriteCount,
+            SUM(ViewCount) AS ViewCount
+        FROM (
+            SELECT 
+                PostId,
+                Score,
+                CommentCount,
+                FavoriteCount,
+                ViewCount
+            FROM Posts
+            WHERE PostTypeId = 1 
+
+            UNION ALL
+
+            SELECT 
+                ParentId AS PostId,
+                0 AS Score,
+                COUNT(c.Id) AS CommentCount,
+                0 AS FavoriteCount,
+                0 AS ViewCount
+            FROM Posts p
+            LEFT JOIN Comments c ON p.Id = c.PostId
+            WHERE p.PostTypeId = 2 
+            GROUP BY ParentId
+        ) AS PostMetrics
+        GROUP BY PostId
+    ) ps ON p.Id = ps.PostId
+)
+SELECT 
+    uvs.UserId,
+    uvs.DisplayName,
+    pts.PostId,
+    pts.Title,
+    pts.Score,
+    pts.ViewCount,
+    pts.CommentCount,
+    pts.FavoriteCount,
+    rt.TagName,
+    rt.Count,
+    uvs.TotalVotes,
+    uvs.UpVotes,
+    uvs.DownVotes
+FROM UserVoteSummary uvs
+JOIN PostStatistics pts ON uvs.TotalVotes > 0
+LEFT JOIN RecursiveTagCount rt ON rt.Count > 0
+WHERE (pts.Score > 0 OR pts.ViewCount > 50) 
+ORDER BY pts.Score DESC, pts.ViewCount DESC;

@@ -1,0 +1,46 @@
+
+WITH RECURSIVE SalesTrend AS (
+    SELECT 
+        DATE(d.d_date) AS SalesDate, 
+        SUM(ws.ws_ext_sales_price) AS TotalSales,
+        ROW_NUMBER() OVER (ORDER BY d.d_date) AS RowNum
+    FROM date_dim d
+    JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    WHERE d.d_date >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    GROUP BY d.d_date
+),
+TopSales AS (
+    SELECT 
+        SalesDate, 
+        TotalSales,
+        LEAD(TotalSales) OVER (ORDER BY SalesDate) AS NextSales
+    FROM SalesTrend
+),
+SalesComparison AS (
+    SELECT 
+        SalesDate,
+        TotalSales,
+        NextSales,
+        CASE 
+            WHEN NextSales IS NOT NULL THEN (TotalSales - NextSales) / NextSales * 100 
+            ELSE NULL 
+        END AS SalesChangePercentage
+    FROM TopSales
+)
+SELECT 
+    S.SalesDate,
+    S.TotalSales,
+    S.NextSales,
+    S.SalesChangePercentage,
+    COALESCE(CASE WHEN CD.cd_gender = 'M' THEN 'Male'
+                  WHEN CD.cd_gender = 'F' THEN 'Female'
+                  ELSE 'Unknown' END, 'Unknown') AS CustomerGender,
+    COUNT(DISTINCT C.c_customer_sk) AS UniqueCustomers,
+    AVG(CD.cd_purchase_estimate) AS AvgPurchaseEstimate
+FROM SalesComparison S
+LEFT JOIN web_sales WS ON S.SalesDate = DATE(WS.ws_sold_date_sk)
+LEFT JOIN customer C ON WS.ws_bill_customer_sk = C.c_customer_sk
+LEFT JOIN customer_demographics CD ON C.c_current_cdemo_sk = CD.cd_demo_sk
+GROUP BY S.SalesDate, S.TotalSales, S.NextSales, S.SalesChangePercentage, CD.cd_gender
+ORDER BY S.SalesDate DESC
+LIMIT 100;

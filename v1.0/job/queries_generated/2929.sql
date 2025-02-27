@@ -1,0 +1,53 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        SUM(mci.note IS NOT NULL)::integer AS company_count,
+        STRING_AGG(DISTINCT ka.name, ', ') AS aka_names
+    FROM 
+        aka_title ka
+    JOIN 
+        title t ON t.id = ka.movie_id
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        movie_companies mci ON mci.movie_id = t.id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2020
+    GROUP BY 
+        t.id
+),
+HighlyRatedMovies AS (
+    SELECT 
+        md.title_id,
+        md.title,
+        md.production_year,
+        md.cast_count,
+        md.company_count,
+        md.aka_names,
+        RANK() OVER (PARTITION BY md.production_year ORDER BY md.cast_count DESC) AS rank_based_on_cast
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.cast_count > 5
+)
+SELECT 
+    hr.title,
+    hr.production_year,
+    hr.cast_count,
+    hr.company_count,
+    hr.aka_names,
+    (SELECT COUNT(*)
+     FROM title t
+     WHERE t.production_year = hr.production_year
+     AND t.id != hr.title_id) AS total_other_movies_in_year
+FROM 
+    HighlyRatedMovies hr
+WHERE 
+    hr.rank_based_on_cast <= 3
+ORDER BY 
+    hr.production_year, hr.rank_based_on_cast;

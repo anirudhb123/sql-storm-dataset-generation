@@ -1,0 +1,66 @@
+
+WITH RECURSIVE Income_Band_Stats AS (
+    SELECT 
+        ib_income_band_sk, 
+        ib_lower_bound, 
+        ib_upper_bound,
+        CAST(0 AS DECIMAL(15,2)) AS Total_Sales,
+        COUNT(DISTINCT c_customer_sk) AS Customer_Count
+    FROM 
+        household_demographics hd
+    LEFT JOIN 
+        customer c ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    LEFT JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        ws.ws_sold_date_sk IS NOT NULL
+    GROUP BY 
+        ib_income_band_sk, ib_lower_bound, ib_upper_bound
+    
+    UNION ALL
+    
+    SELECT 
+        ib.ib_income_band_sk, 
+        ib.ib_lower_bound, 
+        ib.ib_upper_bound,
+        COALESCE(ibs.Total_Sales + SUM(ws.ws_sales_price), 0),
+        COUNT(DISTINCT c.c_customer_sk) + ibs.Customer_Count
+    FROM 
+        Income_Band_Stats ibs
+    JOIN 
+        household_demographics hd ON ibs.ib_income_band_sk = hd.hd_income_band_sk
+    JOIN 
+        customer c ON hd.hd_demo_sk = c.c_current_hdemo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        item i ON ws.ws_item_sk = i.i_item_sk
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+    WHERE 
+        ws.ws_sold_date_sk IS NOT NULL
+    GROUP BY 
+        ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound, ibs.Total_Sales, ibs.Customer_Count
+)
+SELECT 
+    ibs.ib_income_band_sk, 
+    ibs.ib_lower_bound, 
+    ibs.ib_upper_bound,
+    ibs.Total_Sales, 
+    ibs.Customer_Count,
+    CASE  
+        WHEN ibs.Customer_Count > 0 THEN (ibs.Total_Sales / ibs.Customer_Count) 
+        ELSE 0 
+    END AS Average_Sales_Per_Customer
+FROM 
+    Income_Band_Stats ibs
+LEFT JOIN 
+    income_band ib ON ibs.ib_income_band_sk = ib.ib_income_band_sk
+WHERE 
+    ib.ib_upper_bound IS NOT NULL
+ORDER BY 
+    ibs.ib_income_band_sk;

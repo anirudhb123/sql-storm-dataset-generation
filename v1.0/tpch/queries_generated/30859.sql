@@ -1,0 +1,45 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    INNER JOIN SupplierHierarchy sh ON s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    WHERE sh.level < 5
+), 
+PartSupplier AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, ps.ps_availqty, 
+           ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost ASC) AS rnk
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+), 
+AggregatedSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM lineitem l
+    WHERE l.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY l.l_partkey
+)
+
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    ps.ps_supplycost, 
+    ps.ps_availqty,
+    COALESCE(s.total_sales, 0) AS total_sales,
+    sh.s_name AS top_supplier
+FROM PartSupplier ps
+JOIN part p ON ps.p_partkey = p.p_partkey
+LEFT JOIN AggregatedSales s ON p.p_partkey = s.l_partkey
+LEFT JOIN SupplierHierarchy sh ON sh.s_suppkey = (SELECT TOP 1 ps.ps_suppkey 
+                                                    FROM partsupp ps 
+                                                    WHERE ps.ps_partkey = p.p_partkey 
+                                                    ORDER BY ps.ps_supplycost ASC)
+WHERE ps.rnk = 1 
+AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+ORDER BY total_sales DESC, p.p_name;
+
+

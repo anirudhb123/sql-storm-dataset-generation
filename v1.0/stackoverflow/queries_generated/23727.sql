@@ -1,0 +1,60 @@
+WITH UserReputation AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        U.CreationDate,
+        CASE 
+            WHEN U.Reputation IS NULL THEN 'No Reputation'
+            WHEN U.Reputation < 1000 THEN 'Newbie'
+            WHEN U.Reputation BETWEEN 1000 AND 10000 THEN 'Contributor'
+            WHEN U.Reputation > 10000 THEN 'Expert'
+        END AS ReputationCategory
+    FROM Users U
+),
+PostAnswers AS (
+    SELECT 
+        P.OwnerUserId,
+        COUNT(*) AS TotalAnswers,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpvoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownvoteCount
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId AND P.PostTypeId = 2 -- considering only answers
+    GROUP BY P.OwnerUserId
+),
+ClosedPosts AS (
+    SELECT 
+        PH.UserId,
+        COUNT(*) AS ClosedPostCount,
+        MAX(PH.CreationDate) AS LastClosedDate
+    FROM PostHistory PH
+    WHERE PH.PostHistoryTypeId IN (10, 11) -- considering closed and reopened posts
+    GROUP BY PH.UserId
+),
+TopUsers AS (
+    SELECT 
+        UR.UserId,
+        UR.Reputation,
+        COALESCE(PA.TotalAnswers, 0) AS TotalAnswers,
+        COALESCE(CP.ClosedPostCount, 0) AS ClosedPostCount,
+        RANK() OVER (PARTITION BY UR.ReputationCategory ORDER BY UR.Reputation DESC) AS UserRank
+    FROM UserReputation UR
+    LEFT JOIN PostAnswers PA ON UR.UserId = PA.OwnerUserId
+    LEFT JOIN ClosedPosts CP ON UR.UserId = CP.UserId
+)
+SELECT 
+    TU.DisplayName,
+    TU.ReputationCategory,
+    TU.TotalAnswers,
+    TU.ClosedPostCount,
+    TU.UserRank,
+    CASE 
+        WHEN TU.ClosedPostCount = 0 THEN 'Has not closed any posts'
+        WHEN TU.ClosedPostCount >= 5 THEN 'Active closer'
+        ELSE 'Occasional closer'
+    END AS CloserStatus,
+    COALESCE(CAST(TO_CHAR(TU.LastClosedDate, 'YYYY-MM-DD HH24:MI:SS') AS varchar), 'Never Closed Posts') AS LastClosedStatus
+FROM TopUsers TU
+INNER JOIN Users U ON TU.UserId = U.Id
+WHERE TU.UserRank <= 10 -- Fetching top 10 users per category
+ORDER BY TU.ReputationCategory, TU.UserRank;
+This complex SQL query leverages CTEs to process user reputations, aggregate answers and closed posts, and calculate rankings, using various filtering and transformation techniques to ensure a rich result set. It includes category classifications, rank calculations, and utilizes a mix of outer joins and conditional logic to handle potential `NULL` values effectively.

@@ -1,0 +1,69 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        mt.production_year,
+        CAST(NULL AS integer) AS parent_movie_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        mh.movie_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    ak.name AS actor_name,
+    mt.movie_title,
+    mt.production_year,
+    COALESCE(NULLIF(kt.keyword, ''), 'N/A') AS keyword,
+    COUNT(CASE WHEN ci.role_id IS NOT NULL THEN 1 END) AS num_roles,
+    ARRAY_AGG(DISTINCT cct.kind) FILTER (WHERE cct.kind IS NOT NULL) AS company_kinds,
+    COUNT(DISTINCT mh.parent_movie_id) AS num_related_movies,
+    MAX(CASE WHEN ci.note IS NOT NULL THEN 'Note Found' ELSE 'No Note' END) AS note_status
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    aka_title mt ON ci.movie_id = mt.id
+LEFT JOIN 
+    movie_keyword mk ON mt.id = mk.movie_id
+LEFT JOIN 
+    keyword kt ON mk.keyword_id = kt.id
+LEFT JOIN 
+    movie_companies mc ON mt.id = mc.movie_id
+LEFT JOIN 
+    company_name cn ON mc.company_id = cn.id
+LEFT JOIN 
+    comp_cast_type cct ON ci.person_role_id = cct.id
+LEFT JOIN 
+    movie_hierarchy mh ON mt.id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND (mt.production_year >= 2000 OR mt.production_year IS NULL)
+    AND (cn.country_code IS NULL OR cn.country_code NOT LIKE 'US')
+GROUP BY 
+    ak.name,
+    mt.movie_title,
+    mt.production_year
+HAVING 
+    COUNT(DISTINCT ci.role_id) > 1
+ORDER BY 
+    num_roles DESC,
+    mt.production_year DESC;

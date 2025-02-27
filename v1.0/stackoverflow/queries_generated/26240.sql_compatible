@@ -1,0 +1,52 @@
+
+WITH RankedUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.Views,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+    WHERE u.Reputation > 0
+),
+
+PopularPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ViewCount,
+        p.CreationDate,
+        COUNT(v.Id) AS VoteCount
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    WHERE p.ViewCount > 100
+    GROUP BY p.Id, p.Title, p.ViewCount, p.CreationDate
+    HAVING COUNT(v.Id) > 10
+),
+
+TagDetails AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS PostCount,
+        STRING_AGG(DISTINCT p.Title, ', ') AS RelatedPosts
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE CONCAT('%<', t.TagName, '>%') OR p.Tags LIKE CONCAT('%<', t.TagName, '>%')
+    GROUP BY t.Id, t.TagName
+    HAVING COUNT(p.Id) > 5
+)
+
+SELECT 
+    ru.DisplayName AS UserName,
+    ru.Reputation,
+    pp.Title AS PopularPostTitle,
+    pp.ViewCount AS PopularPostViews,
+    td.TagName AS PopularTag,
+    td.PostCount AS TagPostCount,
+    td.RelatedPosts 
+FROM RankedUsers ru
+JOIN PopularPosts pp ON pp.PostId IS NOT NULL
+JOIN PostLinks pl ON pl.PostId = pp.PostId OR pl.RelatedPostId = pp.PostId
+JOIN TagDetails td ON pl.RelatedPostId = td.TagId
+WHERE ru.ReputationRank <= 10
+ORDER BY ru.Reputation DESC, pp.ViewCount DESC;

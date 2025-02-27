@@ -1,0 +1,68 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.w_warehouse_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count,
+        AVG(ws.ws_net_paid_inc_tax) AS avg_net_paid,
+        RANK() OVER (PARTITION BY w.w_warehouse_id ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        w.w_warehouse_id
+),
+TopSales AS (
+    SELECT 
+        w.w_warehouse_id AS warehouse_id,
+        total_sales,
+        order_count,
+        avg_net_paid
+    FROM 
+        SalesData
+    WHERE 
+        sales_rank <= 5
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS customer_total,
+        COUNT(ws.ws_order_number) AS customer_orders
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        c.c_customer_id
+),
+CombinedResults AS (
+    SELECT 
+        ts.warehouse_id,
+        ts.total_sales,
+        ts.order_count,
+        ts.avg_net_paid,
+        cs.c_customer_id,
+        cs.customer_total,
+        cs.customer_orders
+    FROM 
+        TopSales ts
+    LEFT JOIN 
+        CustomerSales cs ON cs.customer_orders > 10
+)
+SELECT 
+    cr.warehouse_id,
+    cr.total_sales,
+    cr.order_count,
+    cr.avg_net_paid,
+    COALESCE(cr.c_customer_id, 'No Orders') AS customer_id,
+    COALESCE(cr.customer_total, 0) AS customer_total,
+    COALESCE(cr.customer_orders, 0) AS customer_orders
+FROM 
+    CombinedResults cr
+ORDER BY 
+    cr.total_sales DESC, cr.customer_total DESC;

@@ -1,0 +1,86 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level,
+        CAST(m.id AS VARCHAR) AS hierarchy_path
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000  
+    UNION ALL
+    SELECT 
+        ml.linked_movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1,
+        mh.hierarchy_path || '->' || CAST(ml.linked_movie_id AS VARCHAR)
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id 
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    WHERE 
+        mh.level < 3
+),
+top_companies AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(*) AS total_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+    HAVING 
+        COUNT(*) > 2
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+)
+SELECT 
+    rm.title AS movie_title,
+    rm.production_year,
+    tc.company_name,
+    tc.company_type,
+    COALESCE(tc.total_count, 0) AS company_count,
+    rm.actor_count,
+    CASE 
+        WHEN rm.actor_count IS NULL THEN 'No actors'
+        ELSE 
+            CASE 
+                WHEN rm.actor_count > 5 THEN 'Popular'
+                WHEN rm.actor_count BETWEEN 3 AND 5 THEN 'Moderately popular'
+                ELSE 'Niche'
+            END
+    END AS popularity,
+    (SELECT COUNT(*)
+     FROM aka_title 
+     WHERE title ILIKE CONCAT('%', rm.title, '%')) AS similar_titles_count
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    top_companies tc ON rm.movie_id = tc.movie_id
+WHERE 
+    rm.rank <= 5 OR tc.company_name IS NOT NULL
+ORDER BY 
+    rm.production_year DESC, rm.actor_count DESC;

@@ -1,0 +1,58 @@
+WITH Supplier_Stats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT ps.ps_partkey) AS unique_parts_supplied,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS supplier_rank
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+),
+Top_Suppliers AS (
+    SELECT 
+        s_nationkey,
+        s_suppkey,
+        s_name,
+        total_supply_value,
+        supplier_rank
+    FROM 
+        Supplier_Stats
+    WHERE 
+        supplier_rank <= 3
+),
+Customer_Orders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    ns.n_name,
+    ts.s_name AS top_supplier,
+    co.c_name AS customer_name,
+    co.total_orders,
+    co.avg_order_value,
+    CASE 
+        WHEN co.avg_order_value IS NULL THEN 'No Orders'
+        ELSE CAST(co.avg_order_value AS varchar)
+    END AS order_value_text,
+    COALESCE(ts.total_supply_value, 0) AS total_supply_value
+FROM 
+    nation ns
+LEFT JOIN 
+    Top_Suppliers ts ON ns.n_nationkey = ts.s_nationkey
+LEFT JOIN 
+    Customer_Orders co ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = ns.n_nationkey ORDER BY c.c_acctbal DESC LIMIT 1)
+ORDER BY 
+    ns.n_name, ts.total_supply_value DESC, co.total_orders DESC;

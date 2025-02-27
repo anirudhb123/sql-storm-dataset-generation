@@ -1,0 +1,68 @@
+WITH UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        ROW_NUMBER() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM Users u
+), 
+TopQuestions AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.Score,
+        COUNT(a.Id) AS AnswerCount
+    FROM Posts p
+    LEFT JOIN Posts a ON p.Id = a.ParentId
+    WHERE p.PostTypeId = 1
+    GROUP BY p.Id
+    HAVING COUNT(a.Id) > 5
+), 
+ClosedPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.UserId,
+        ph.Comment,
+        ph.Text,
+        pt.Name AS PostHistoryType
+    FROM PostHistory ph
+    JOIN PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE pt.Name IN ('Post Closed', 'Post Reopened')
+), 
+RankedPosts AS (
+    SELECT 
+        tq.Title,
+        tq.CreationDate,
+        ur.Reputation,
+        rq.ReputationRank,
+        ph.Comment AS ClosureComment
+    FROM TopQuestions tq
+    JOIN UserReputation ur ON tq.OwnerUserId = ur.UserId
+    LEFT JOIN ClosedPostHistory ph ON tq.PostId = ph.PostId
+), 
+FinalResults AS (
+    SELECT 
+        rp.Title,
+        rp.CreationDate,
+        rp.Reputation,
+        rp.ReputationRank,
+        COALESCE(rp.ClosureComment, 'Not Closed') AS ClosureStatus
+    FROM RankedPosts rp
+)
+SELECT 
+    Title,
+    CreationDate,
+    Reputation,
+    ReputationRank,
+    ClosureStatus
+FROM FinalResults
+ORDER BY Reputation DESC 
+FETCH FIRST 10 ROWS ONLY
+UNION ALL 
+SELECT 
+    'Total Users:', COUNT(*)
+FROM Users
+WHERE Reputation > (SELECT AVG(Reputation) FROM Users)
+ORDER BY 1;

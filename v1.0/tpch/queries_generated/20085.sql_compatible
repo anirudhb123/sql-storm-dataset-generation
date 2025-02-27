@@ -1,0 +1,54 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s2.s_acctbal) 
+        FROM supplier s2 
+        WHERE s2.s_nationkey = s.s_nationkey
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 3
+),
+RegionStatistics AS (
+    SELECT r.r_regionkey, r.r_name, 
+           COUNT(DISTINCT n.n_nationkey) AS nation_count,
+           SUM(s.s_acctbal) AS total_acctbal
+    FROM region r
+    LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY r.r_regionkey, r.r_name
+),
+FrequentParts AS (
+    SELECT p.p_partkey, 
+           COUNT(DISTINCT ps.s_suppkey) AS supplier_count,
+           SUM(l.l_quantity) AS total_quantity
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN lineitem l ON ps.ps_suppkey = l.l_suppkey
+    GROUP BY p.p_partkey
+    HAVING COUNT(DISTINCT ps.s_suppkey) > 5
+)
+SELECT r.r_name, 
+       rp.p_partkey, 
+       COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS revenue,
+       ROW_NUMBER() OVER (PARTITION BY r.r_regionkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank,
+       CASE 
+           WHEN SUM(l.l_quantity) IS NULL THEN 'NO SALES'
+           ELSE 'SALES'
+       END AS sales_status,
+       NULLIF(SUM(s.s_acctbal), 0) AS adjusted_acctbal
+FROM RegionStatistics r
+JOIN FrequentParts rp ON rp.total_quantity > 1000
+LEFT JOIN lineitem l ON l.l_orderkey IN (
+    SELECT o.o_orderkey
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+)
+LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey
+GROUP BY r.r_name, rp.p_partkey
+HAVING SUM(l.l_quantity) IS NOT NULL AND SUM(s.s_acctbal) >= 0
+ORDER BY r.r_name, rank;

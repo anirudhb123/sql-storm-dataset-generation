@@ -1,0 +1,54 @@
+WITH movie_aggregates AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        MIN(m.production_year) AS first_release_year,
+        MAX(m.production_year) AS last_release_year
+    FROM 
+        title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        m.id, m.title
+),
+
+cast_role_stats AS (
+    SELECT 
+        c.movie_id,
+        r.role AS role_name,
+        COUNT(c.person_id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, r.role
+)
+
+SELECT 
+    ma.movie_title,
+    ma.cast_count,
+    ma.keywords,
+    ma.company_names,
+    ma.first_release_year,
+    ma.last_release_year,
+    COALESCE(ARRAY_AGG(CAST(rs.role_name AS text)), '{}'::text[]) AS role_distribution
+FROM 
+    movie_aggregates ma
+LEFT JOIN 
+    cast_role_stats rs ON ma.movie_id = rs.movie_id
+GROUP BY 
+    ma.movie_id, ma.movie_title, ma.cast_count, ma.keywords, ma.company_names, ma.first_release_year, ma.last_release_year
+ORDER BY 
+    ma.cast_count DESC, ma.last_release_year DESC;

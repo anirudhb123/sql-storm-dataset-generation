@@ -1,0 +1,80 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 AND 
+        p.Score > 0
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount
+    FROM 
+        Badges b
+    WHERE 
+        b.Class = 1
+    GROUP BY 
+        b.UserId
+),
+CombinedData AS (
+    SELECT 
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        ur.Reputation,
+        ur.TotalBounties,
+        COALESCE(ub.BadgeCount, 0) AS GoldBadges
+    FROM 
+        RankedPosts rp
+    JOIN 
+        UserReputation ur ON rp.OwnerUserId = ur.UserId
+    LEFT JOIN 
+        UserBadges ub ON rp.OwnerUserId = ub.UserId
+)
+SELECT 
+    Title,
+    CreationDate,
+    Score,
+    Reputation,
+    TotalBounties,
+    GoldBadges
+FROM 
+    CombinedData
+WHERE 
+    (Reputation + TotalBounties) > 500
+    AND GoldBadges > 0
+ORDER BY 
+    Score DESC, CreationDate ASC
+LIMIT 10
+UNION ALL
+SELECT 
+    'Average Reputation' AS Title,
+    NULL AS CreationDate,
+    AVG(Reputation) AS Score,
+    NULL AS Reputation,
+    AVG(TotalBounties) AS TotalBounties,
+    AVG(GoldBadges) AS GoldBadges
+FROM 
+    CombinedData
+WHERE 
+    GoldBadges > 0;

@@ -1,0 +1,64 @@
+WITH UserPostStats AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(Posts.Id) AS TotalPosts,
+        SUM(CASE WHEN Posts.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+        SUM(CASE WHEN Posts.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+        AVG(Posts.Score) AS AverageScore
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+RankedPosts AS (
+    SELECT 
+        Posts.Id,
+        Posts.Title,
+        Posts.CreationDate,
+        Posts.Score,
+        Posts.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY Posts.OwnerUserId ORDER BY Posts.Score DESC) AS PostRank
+    FROM 
+        Posts
+    WHERE 
+        Posts.CreationDate >= NOW() - INTERVAL '1 year'
+),
+UserBadges AS (
+    SELECT 
+        Users.Id AS UserId,
+        COUNT(Badges.Id) AS TotalBadges,
+        MAX(Badges.Class) AS HighestBadgeClass
+    FROM 
+        Users
+    LEFT JOIN 
+        Badges ON Users.Id = Badges.UserId
+    GROUP BY 
+        Users.Id
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    COALESCE(UPS.TotalPosts, 0) AS TotalPosts,
+    COALESCE(UPS.TotalQuestions, 0) AS TotalQuestions,
+    COALESCE(UPS.TotalAnswers, 0) AS TotalAnswers,
+    COALESCE(UPS.AverageScore, 0) AS AverageScore,
+    COALESCE(UB.TotalBadges, 0) AS TotalBadges,
+    COALESCE(UB.HighestBadgeClass, 0) AS HighestBadgeClass,
+    COUNT(RP.Id) AS RecentHighScorePosts
+FROM 
+    Users U
+LEFT JOIN 
+    UserPostStats UPS ON U.Id = UPS.UserId
+LEFT JOIN 
+    UserBadges UB ON U.Id = UB.UserId
+LEFT JOIN 
+    RankedPosts RP ON U.Id = RP.OwnerUserId AND RP.PostRank <= 5
+GROUP BY 
+    U.UserId, U.DisplayName, UPS.TotalPosts, UPS.TotalQuestions, UPS.TotalAnswers, UPS.AverageScore, UB.TotalBadges, UB.HighestBadgeClass
+HAVING
+    COUNT(RP.Id) > 0
+ORDER BY 
+    AverageScore DESC, TotalPosts DESC;

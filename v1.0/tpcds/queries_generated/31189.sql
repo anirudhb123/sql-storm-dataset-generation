@@ -1,0 +1,60 @@
+
+WITH RECURSIVE income_levels AS (
+    SELECT ib_income_band_sk, ib_lower_bound, ib_upper_bound
+    FROM income_band
+    WHERE ib_income_band_sk = 1
+    UNION ALL
+    SELECT ib.ib_income_band_sk, ib.ib_lower_bound, ib.ib_upper_bound
+    FROM income_band ib
+    INNER JOIN income_levels il ON ib.ib_income_band_sk = il.ib_income_band_sk + 1
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cd.cd_gender, 'N/A') AS gender,
+        SUM(CASE WHEN ss.ss_item_sk IS NOT NULL THEN ss.ss_quantity ELSE 0 END) AS total_purchases,
+        COUNT(DISTINCT ss.ss_ticket_number) AS purchase_count,
+        COALESCE(hd.hd_buy_potential, 'Low') AS buy_potential
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    GROUP BY c.c_customer_sk, cd.cd_gender, hd.hd_buy_potential
+),
+high_value_customers AS (
+    SELECT cs.c_customer_sk
+    FROM customer_summary cs
+    WHERE cs.total_purchases > 100
+),
+sales_summary AS (
+    SELECT 
+        s.s_store_sk,
+        SUM(ss.ss_net_paid) AS total_sales,
+        RANK() OVER (ORDER BY SUM(ss.ss_net_paid) DESC) AS sales_rank
+    FROM store s
+    JOIN store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY s.s_store_sk
+),
+date_summary AS (
+    SELECT 
+        d.d_year,
+        COUNT(DISTINCT ws.ws_order_number) AS total_web_sales
+    FROM date_dim d
+    LEFT JOIN web_sales ws ON d.d_date_sk = ws.ws_sold_date_sk
+    GROUP BY d.d_year
+)
+SELECT 
+    cs.gender,
+    il.ib_lower_bound,
+    il.ib_upper_bound,
+    COALESCE(d.d_year, 'Total') AS sales_year,
+    SUM(ss.total_sales) AS total_store_sales,
+    SUM(ws.total_web_sales) AS total_web_sales
+FROM customer_summary cs
+JOIN high_value_customers hvc ON cs.c_customer_sk = hvc.c_customer_sk
+JOIN income_levels il ON cs.total_purchases BETWEEN il.ib_lower_bound AND il.ib_upper_bound
+LEFT JOIN sales_summary ss ON cs.c_customer_sk = ss.s_store_sk
+LEFT JOIN date_summary ws ON 1=1
+GROUP BY cs.gender, il.ib_lower_bound, il.ib_upper_bound, d.d_year
+ORDER BY il.ib_lower_bound, sales_year DESC
+FETCH FIRST 100 ROWS ONLY;

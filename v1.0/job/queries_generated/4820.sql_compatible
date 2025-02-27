@@ -1,0 +1,60 @@
+
+WITH movie_details AS (
+    SELECT 
+        a.title AS movie_title,
+        a.production_year,
+        c.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY a.production_year DESC) AS ranking,
+        COALESCE(mk.keyword, 'No Keyword') AS keyword,
+        a.id
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info ci ON a.id = ci.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON a.id = mk.movie_id
+    WHERE 
+        a.production_year >= 2000
+        AND ci.nr_order IS NOT NULL
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        STRING_AGG(DISTINCT cn.name, ', ') AS company_names,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+final_results AS (
+    SELECT 
+        md.movie_title,
+        md.production_year,
+        md.actor_name,
+        cd.company_names,
+        cd.total_companies,
+        md.keyword
+    FROM 
+        movie_details md
+    LEFT JOIN 
+        company_details cd ON md.ranking = 1 AND cd.movie_id = md.id
+)
+
+SELECT 
+    fr.movie_title,
+    fr.production_year,
+    fr.actor_name,
+    fr.company_names,
+    fr.total_companies,
+    fr.keyword
+FROM 
+    final_results fr
+WHERE 
+    fr.production_year IS NOT NULL
+ORDER BY 
+    fr.production_year DESC, fr.movie_title;

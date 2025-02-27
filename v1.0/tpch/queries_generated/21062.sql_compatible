@@ -1,0 +1,79 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn,
+        s.s_nationkey
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal IS NOT NULL AND s.s_acctbal > 0
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name AS region_name,
+        ns.n_name AS nation_name,
+        rs.s_name AS supplier_name,
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        nation ns ON rs.s_nationkey = ns.n_nationkey
+    JOIN 
+        region r ON ns.n_regionkey = r.r_regionkey
+    WHERE 
+        rs.rn <= 3
+),
+CustomerOrderStats AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL OR COUNT(DISTINCT o.o_orderkey) = 0
+),
+LineItemStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_lineitem_value,
+        COUNT(*) AS total_items,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipmode IN ('AIR', 'TRUCK') 
+        AND l.l_returnflag = 'N'
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    co.c_name AS customer_name,
+    co.order_count,
+    co.total_spent,
+    ts.region_name,
+    ls.total_lineitem_value,
+    ls.total_items,
+    CASE 
+        WHEN co.total_spent IS NULL THEN 'NO ORDER'
+        WHEN co.total_spent > 10000 THEN 'VIP CUSTOMER'
+        ELSE 'REGULAR CUSTOMER'
+    END AS customer_status
+FROM 
+    CustomerOrderStats co
+JOIN 
+    TopSuppliers ts ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n JOIN supplier s ON s.s_nationkey = n.n_nationkey WHERE s.s_name = ts.supplier_name LIMIT 1))
+LEFT JOIN 
+    LineItemStats ls ON ls.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = co.c_custkey)
+WHERE 
+    co.order_count > 0 OR co.total_spent IS NULL
+ORDER BY 
+    ts.region_name, customer_status, co.total_spent DESC;

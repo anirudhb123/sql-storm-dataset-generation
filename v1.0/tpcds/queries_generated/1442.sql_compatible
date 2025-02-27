@@ -1,0 +1,70 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_sales_price,
+        ws.ws_quantity,
+        ws.ws_order_number,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_sales_price DESC) AS rn
+    FROM web_sales ws
+    INNER JOIN item i ON ws.ws_item_sk = i.i_item_sk
+    WHERE i.i_current_price > 20.00
+),
+CustomerData AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        hd.hd_income_band_sk,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            ELSE 'Single' 
+        END AS marital_status,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, 
+        c.c_first_name, 
+        c.c_last_name, 
+        cd.cd_gender, 
+        hd.hd_income_band_sk, 
+        cd.cd_marital_status
+),
+TopCustomers AS (
+    SELECT 
+        cd.c_customer_sk,
+        cd.c_first_name,
+        cd.c_last_name,
+        cd.marital_status,
+        cd.order_count,
+        RANK() OVER (ORDER BY cd.order_count DESC) AS customer_rank
+    FROM CustomerData cd
+)
+SELECT 
+    tc.c_customer_sk,
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.marital_status,
+    tc.order_count,
+    rs.web_site_sk,
+    SUM(rs.ws_sales_price * rs.ws_quantity) AS total_sales
+FROM TopCustomers tc
+JOIN RankedSales rs ON tc.c_customer_sk IN (
+    SELECT DISTINCT ws.ws_bill_customer_sk 
+    FROM web_sales ws 
+    WHERE ws.ws_sales_price IS NOT NULL
+)
+WHERE tc.customer_rank <= 10
+GROUP BY 
+    tc.c_customer_sk, 
+    tc.c_first_name, 
+    tc.c_last_name, 
+    tc.marital_status, 
+    tc.order_count, 
+    rs.web_site_sk
+ORDER BY total_sales DESC
+LIMIT 10;

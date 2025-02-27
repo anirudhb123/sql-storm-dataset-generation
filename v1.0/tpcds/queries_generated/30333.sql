@@ -1,0 +1,31 @@
+
+WITH RECURSIVE category_hierarchy AS (
+    SELECT i_item_sk, i_item_desc, i_brand, i_class, i_category, 1 AS level
+    FROM item
+    WHERE i_item_sk IN (SELECT p_item_sk FROM promotion WHERE p_discount_active = 'Y')
+    
+    UNION ALL
+    
+    SELECT i.item_sk, i.i_item_desc, i.i_brand, i.i_class, i.i_category, ch.level + 1
+    FROM item i
+    JOIN category_hierarchy ch ON i.i_item_sk = ch.i_item_sk
+    WHERE i.i_item_sk IN (SELECT p_item_sk FROM promotion WHERE p_discount_active = 'Y')
+)
+SELECT
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT c.c_customer_sk) AS total_customers,
+    SUM(ws.ws_ext_sales_price) AS total_sales,
+    AVG(ws.ws_sales_price) AS avg_sales_price,
+    MAX(ws.ws_net_profit) AS max_net_profit,
+    STRING_AGG(DISTINCT i.i_brand, ', ') AS brands_offered,
+    DENSE_RANK() OVER (PARTITION BY ca.ca_state ORDER BY SUM(ws.ws_ext_sales_price) DESC) AS state_sales_rank
+FROM customer_address ca
+JOIN customer c ON ca.ca_address_sk = c.c_current_addr_sk
+LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+LEFT JOIN category_hierarchy ch ON ws.ws_item_sk = ch.i_item_sk
+WHERE ca.ca_city IS NOT NULL
+GROUP BY ca.ca_city, ca.ca_state
+HAVING SUM(ws.ws_ext_sales_price) IS NOT NULL
+ORDER BY total_sales DESC
+LIMIT 10;

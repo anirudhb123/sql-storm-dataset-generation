@@ -1,0 +1,56 @@
+WITH UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS QuestionCount,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        ARRAY_AGG(DISTINCT T.TagName) AS Tags
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId AND P.PostTypeId = 1  -- Only questions
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        LATERAL (SELECT DISTINCT UNNEST(STRING_TO_ARRAY(P.Tags, '><')) AS TagName FROM Posts P2 WHERE P2.OwnerUserId = U.Id) T ON TRUE
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+), TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        QuestionCount,
+        TotalScore,
+        CommentCount,
+        BadgeCount,
+        Tags
+    FROM 
+        UserActivity
+    ORDER BY 
+        Reputation DESC, TotalScore DESC
+    LIMIT 10
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.QuestionCount,
+    U.TotalScore,
+    U.CommentCount,
+    U.BadgeCount,
+    ARRAY_LENGTH(U.Tags, 1) AS TagCount
+FROM 
+    TopUsers U
+JOIN 
+    Votes V ON U.UserId = V.UserId 
+GROUP BY 
+    U.UserId, U.DisplayName, U.Reputation, U.QuestionCount, U.TotalScore, U.CommentCount, U.BadgeCount
+ORDER BY 
+    SUM(V.VoteTypeId = 2) DESC, -- Upvotes
+    U.TotalScore DESC;

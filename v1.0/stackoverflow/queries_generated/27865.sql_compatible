@@ -1,0 +1,57 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        u.DisplayName AS Author,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (ORDER BY COUNT(a.Id) DESC) AS Rank
+    FROM
+        Posts p
+        LEFT JOIN Users u ON p.OwnerUserId = u.Id
+        LEFT JOIN Posts a ON a.ParentId = p.Id AND p.PostTypeId = 1 
+        LEFT JOIN Comments c ON c.PostId = p.Id
+        LEFT JOIN Votes v ON v.PostId = p.Id
+        LEFT JOIN Tags t ON t.Id = ANY(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')::text[])
+    WHERE
+        p.PostTypeId = 1 
+        AND p.CreationDate > TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY
+        p.Id, p.Title, p.Body, p.CreationDate, u.DisplayName
+),
+TopQuestions AS (
+    SELECT
+        PostId,
+        Title,
+        Body,
+        CreationDate,
+        Author,
+        Tags,
+        AnswerCount,
+        CommentCount,
+        UpVoteCount,
+        DownVoteCount,
+        Rank
+    FROM
+        RankedPosts
+    WHERE
+        Rank <= 10
+)
+
+SELECT
+    *,
+    CASE
+        WHEN AnswerCount > 0 THEN 'Answered'
+        ELSE 'Unanswered'
+    END AS QuestionStatus,
+    (UpVoteCount - DownVoteCount) AS NetVotes
+FROM
+    TopQuestions
+ORDER BY
+    UpVoteCount DESC;

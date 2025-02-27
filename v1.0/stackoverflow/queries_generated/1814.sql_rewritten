@@ -1,0 +1,52 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.ViewCount, 
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.ViewCount, p.CreationDate, p.OwnerUserId
+)
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    rp.Title,
+    rp.ViewCount,
+    rp.CommentCount
+FROM 
+    Users u
+JOIN 
+    RankedPosts rp ON u.Id = rp.OwnerUserId
+WHERE 
+    rp.Rank <= 5
+AND 
+    u.Reputation > 1000
+UNION ALL
+SELECT 
+    u.Id AS UserId,
+    u.DisplayName,
+    u.Reputation,
+    NULL AS Title,
+    NULL AS ViewCount,
+    COUNT(DISTINCT c.Id) AS CommentCount
+FROM 
+    Users u
+LEFT JOIN 
+    Comments c ON u.Id = c.UserId
+WHERE 
+    u.Reputation <= 1000
+GROUP BY 
+    u.Id, u.DisplayName, u.Reputation
+HAVING 
+    COUNT(DISTINCT c.Id) > 10
+ORDER BY 
+    Reputation DESC, UserId;

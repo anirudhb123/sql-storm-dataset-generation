@@ -1,0 +1,71 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.id) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.production_year > 2000
+),
+ActorCount AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        ac.actor_count,
+        COALESCE(MAX(mk.keyword), 'No Keywords') AS keyword_summary
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        ActorCount ac ON m.movie_id = ac.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON m.movie_id = mk.movie_id
+    GROUP BY 
+        m.movie_id, m.title, m.production_year, ac.actor_count
+),
+FinalOutput AS (
+    SELECT 
+        md.title,
+        md.production_year,
+        md.actor_count,
+        CASE 
+            WHEN md.actor_count IS NULL THEN 'No Actors'
+            WHEN md.actor_count > 3 THEN 'Ensemble Cast'
+            ELSE 'Limited Cast'
+        END AS cast_classification,
+        CONCAT('Movie: ', md.title, ' (', md.production_year, ') | Actors: ', COALESCE(md.actor_count::text, '0'), ' | Keywords: ', md.keyword_summary) AS movie_info
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.production_year >= 2000
+        AND (md.actor_count IS NOT NULL OR EXISTS (SELECT 1 FROM movie_info WHERE movie_id = md.movie_id AND info LIKE '%blockbuster%'))
+)
+SELECT 
+    fo.movie_info,
+    char_name.name AS lead_actor_name,
+    COALESCE(pt.info, 'Unknown Info') AS extra_info
+FROM 
+    FinalOutput fo
+LEFT JOIN 
+    cast_info ci ON fo.movie_id = ci.movie_id
+LEFT JOIN 
+    aka_name char_name ON ci.person_id = char_name.person_id
+LEFT JOIN 
+    person_info pt ON char_name.person_id = pt.person_id AND pt.info_type_id = 1
+WHERE 
+    fo.cast_classification = 'Ensemble Cast'
+ORDER BY 
+    fo.production_year DESC, fo.actor_count DESC
+LIMIT 10;

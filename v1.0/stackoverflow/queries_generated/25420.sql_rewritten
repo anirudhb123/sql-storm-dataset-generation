@@ -1,0 +1,71 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        u.DisplayName AS OwnerDisplayName,
+        STRING_AGG(t.TagName, ', ') AS Tags,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS OwnerPostRank
+    FROM 
+        Posts AS p
+    JOIN 
+        Users AS u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><')) AS tag ON TRUE
+    LEFT JOIN 
+        Tags AS t ON t.TagName = tag
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate AS ClosureDate,
+        ph.Comment AS CloseReason,
+        p.Title
+    FROM 
+        PostHistory AS ph
+    JOIN 
+        Posts AS p ON ph.PostId = p.Id
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11)  
+        AND p.PostTypeId = 1  
+),
+PostStatistics AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.OwnerDisplayName,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.AnswerCount,
+        rp.CommentCount,
+        COALESCE(cp.ClosureDate, 'No Closure') AS ClosureDate,
+        COALESCE(cp.CloseReason, 'None') AS CloseReason
+    FROM 
+        RankedPosts AS rp
+    LEFT JOIN 
+        ClosedPosts AS cp ON rp.PostId = cp.PostId
+)
+SELECT 
+    ps.OwnerDisplayName,
+    COUNT(*) AS TotalPosts,
+    SUM(ps.Score) AS TotalScore,
+    SUM(ps.ViewCount) AS TotalViews,
+    AVG(ps.AnswerCount) AS AverageAnswers,
+    MAX(ps.ClosureDate) AS LastClosureDate,
+    STRING_AGG(DISTINCT ps.Title, '; ') AS Titles
+FROM 
+    PostStatistics AS ps
+GROUP BY 
+    ps.OwnerDisplayName
+ORDER BY 
+    TotalPosts DESC, TotalScore DESC;

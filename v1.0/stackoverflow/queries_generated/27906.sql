@@ -1,0 +1,63 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        STRING_AGG(T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(P.Tags, 2, length(P.Tags) - 2), '><')) AS T(TagName) 
+    GROUP BY 
+        P.Id
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes V
+    GROUP BY 
+        PostId
+),
+PostStats AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.CreationDate,
+        RP.Score,
+        RP.ViewCount,
+        RP.CommentCount,
+        PV.UpVotes,
+        PV.DownVotes,
+        RP.Tags,
+        LEAD(RP.CreationDate) OVER (ORDER BY RP.CreationDate DESC) AS NextPostDate
+    FROM 
+        RankedPosts RP
+    JOIN 
+        PostVotes PV ON RP.PostId = PV.PostId
+)
+SELECT 
+    PS.PostId,
+    PS.Title,
+    PS.CreationDate,
+    PS.Score,
+    PS.ViewCount,
+    PS.CommentCount,
+    PS.UpVotes,
+    PS.DownVotes,
+    PS.Tags,
+    EXTRACT(EPOCH FROM (PS.NextPostDate - PS.CreationDate)) AS TimeUntilNextPost
+FROM 
+    PostStats PS
+WHERE 
+    PS.Score > 10 
+ORDER BY 
+    PS.Score DESC, PS.CreationDate ASC
+LIMIT 10;

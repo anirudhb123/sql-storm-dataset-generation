@@ -1,0 +1,75 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+        
+    UNION ALL
+    
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        h.level + 1
+    FROM 
+        movie_hierarchy h
+    JOIN 
+        movie_link ml ON ml.movie_id = h.movie_id 
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        h.level < 5  -- Limit the depth of recursion for performance
+)
+
+SELECT 
+    a.name AS actor_name,
+    STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords,
+    COUNT(DISTINCT mc.movie_id) AS total_movies,
+    AVG(m.production_year) AS avg_production_year,
+    SUM(mh.level) AS total_hierarchy_level,
+    CASE 
+        WHEN COUNT(DISTINCT mc.movie_id) > 10 THEN 'Prolific Actor'
+        ELSE 'Emerging Talent'
+    END AS actor_status,
+    COALESCE(STRING_AGG(DISTINCT c.kind, ', '), 'N/A') AS company_types
+FROM 
+    aka_name a
+JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+JOIN 
+    movie_companies mc ON mc.movie_id = ci.movie_id
+JOIN 
+    company_type c ON mc.company_type_id = c.id
+JOIN 
+    movie_keyword mk ON mk.movie_id = ci.movie_id
+LEFT JOIN 
+    movie_hierarchy mh ON mh.movie_id = ci.movie_id
+WHERE 
+    a.name IS NOT NULL
+    AND (ci.note IS NULL OR ci.note NOT LIKE '%cameo%')
+    AND EXISTS (
+        SELECT 1
+        FROM movie_info mi
+        WHERE mi.movie_id = ci.movie_id 
+        AND mi.info_type_id = (
+            SELECT id 
+            FROM info_type 
+            WHERE info = 'Synopsis'
+        )
+        AND mi.info IS NOT NULL
+    )
+GROUP BY 
+    a.id
+HAVING 
+    COUNT(DISTINCT mc.movie_id) > 1
+ORDER BY 
+    total_movies DESC,
+    avg_production_year ASC
+LIMIT 100;
+
+This SQL query performs comprehensive performance benchmarking on actors, considering their involvement in movies, associated companies, keywords linked to the movies, and average production years. It utilizes a recursive CTE to build a hierarchy of linked movies, includes outer joins for data completeness, implements aggregate functions like `STRING_AGG` for keyword concatenation, filters data using complicated predicates, and demonstrates advanced SQL constructs such as correlated subqueries and conditional aggregation logic.

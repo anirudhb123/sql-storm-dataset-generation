@@ -1,0 +1,67 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = 1  -- Assuming 1 represents movies
+
+    UNION ALL
+
+    SELECT 
+        m.id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || m.title AS VARCHAR(255))
+    FROM 
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    ak.name AS actor_name,
+    mk.keyword AS movie_keyword,
+    mh.title AS movie_title,
+    mh.production_year,
+    COUNT(DISTINCT rc.id) AS related_movie_count,
+    ROW_NUMBER() OVER (PARTITION BY ak.name ORDER BY mh.production_year DESC) AS recent_release_rank
+FROM 
+    aka_name ak
+JOIN 
+    cast_info ci ON ak.person_id = ci.person_id
+JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+JOIN 
+    movie_keyword mk ON mk.movie_id = ci.movie_id
+LEFT JOIN 
+    complete_cast cc ON ci.movie_id = cc.movie_id
+JOIN 
+    movie_hierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    role_type rt ON ci.role_id = rt.id
+LEFT JOIN 
+    title t ON t.id = ci.movie_id
+LEFT JOIN (
+    SELECT 
+        ml.movie_id,
+        COUNT(*) AS id
+    FROM 
+        movie_link ml
+    GROUP BY 
+        ml.movie_id
+) rc ON rc.movie_id = mh.movie_id
+WHERE 
+    ak.name IS NOT NULL
+    AND mk.keyword IS NOT NULL
+    AND mh.production_year >= 2000
+GROUP BY 
+    ak.name, mk.keyword, mh.title, mh.production_year
+ORDER BY 
+    recent_release_rank, actor_name, movie_title;

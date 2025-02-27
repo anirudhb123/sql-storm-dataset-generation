@@ -1,0 +1,63 @@
+-- Performance benchmarking query to analyze various metrics across posts and users
+
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.PostTypeId,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        p.CreationDate,
+        u.Reputation AS OwnerReputation,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS TotalComments,
+        AVG(v.BountyAmount) AS AverageBounty
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, u.Reputation, u.DisplayName
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(p.Score) AS TotalPostScore,
+        SUM(b.Class) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+
+SELECT 
+    pm.OwnerDisplayName,
+    pm.OwnerReputation,
+    COUNT(pm.PostId) AS TotalPosts,
+    SUM(pm.Score) AS TotalScore,
+    SUM(pm.ViewCount) AS TotalViews,
+    SUM(pm.AnswerCount) AS TotalAnswers,
+    SUM(pm.CommentCount) AS TotalComments,
+    SUM(pm.FavoriteCount) AS TotalFavorites,
+    AVG(pm.AverageBounty) AS AvgBounty,
+    um.TotalBadges
+FROM 
+    PostMetrics pm
+JOIN 
+    UserMetrics um ON pm.OwnerDisplayName = um.UserId 
+GROUP BY 
+    pm.OwnerDisplayName, pm.OwnerReputation, um.TotalBadges
+ORDER BY 
+    TotalScore DESC;

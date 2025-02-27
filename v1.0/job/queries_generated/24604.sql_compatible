@@ -1,0 +1,68 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.id) AS rn,
+        COUNT(*) OVER (PARTITION BY t.production_year) AS total_movies,
+        AVG(COALESCE(CAST(mi.info AS INTEGER), 0)) OVER (PARTITION BY t.production_year) AS avg_info_val
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopRankedMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        rn,
+        total_movies,
+        avg_info_val
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 5
+)
+SELECT 
+    m.movie_id,
+    m.title,
+    m.production_year,
+    COALESCE(k.keywords, 'No Keywords') AS keywords,
+    COALESCE(c.casts, 'No Casts') AS casts,
+    (SELECT COUNT(*) FROM movie_info mi WHERE mi.movie_id = m.movie_id) AS info_count,
+    CASE 
+        WHEN m.total_movies > 0 THEN (CAST(m.rn AS FLOAT) / m.total_movies) * 100
+        ELSE NULL
+    END AS rank_percentage
+FROM 
+    TopRankedMovies m
+LEFT JOIN (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+) k ON k.movie_id = m.movie_id
+LEFT JOIN (
+    SELECT 
+        ci.movie_id,
+        STRING_AGG(CONCAT(a.name, ' as ', r.role), ', ') AS casts
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id
+) c ON c.movie_id = m.movie_id
+ORDER BY 
+    m.production_year, m.movie_id;

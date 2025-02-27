@@ -1,0 +1,60 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk, 
+        ws_item_sk, 
+        SUM(ws_net_profit) AS total_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM web_sales
+    WHERE ws_sold_date_sk > (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30
+    GROUP BY ws_sold_date_sk, ws_item_sk
+),
+High_Value_Customers AS (
+    SELECT 
+        c_customer_sk,
+        SUM(ss_net_paid) AS total_spent
+    FROM store_sales
+    GROUP BY c_customer_sk
+    HAVING SUM(ss_net_paid) > 1000
+),
+Item_Details AS (
+    SELECT 
+        i_item_sk,
+        i_product_name,
+        i_current_price,
+        i_wholesale_cost,
+        (i_current_price - i_wholesale_cost) AS profit_margin
+    FROM item
+),
+Return_Summary AS (
+    SELECT 
+        sr_item_sk, 
+        COUNT(DISTINCT sr_ticket_number) AS total_returns,
+        SUM(sr_return_amt) AS total_return_amt
+    FROM store_returns
+    GROUP BY sr_item_sk
+),
+Comprehensive_Sales AS (
+    SELECT 
+        i.item_name,
+        COALESCE(s.total_spent, 0) AS total_spent_by_high_value_customers,
+        COALESCE(r.total_returns, 0) AS total_returns,
+        COALESCE(r.total_return_amt, 0) AS total_return_amount,
+        COALESCE(sales.total_net_profit, 0) AS last_month_net_profit,
+        i.profit_margin
+    FROM Item_Details i
+    LEFT JOIN Return_Summary r ON i.i_item_sk = r.sr_item_sk
+    LEFT JOIN High_Value_Customers s ON i.i_item_sk = s.c_customer_sk
+    LEFT JOIN Sales_CTE sales ON i.i_item_sk = sales.ws_item_sk
+)
+SELECT 
+    item_name,
+    total_spent_by_high_value_customers,
+    total_returns,
+    total_return_amount,
+    last_month_net_profit,
+    profit_margin
+FROM Comprehensive_Sales
+WHERE profit_margin > 0
+ORDER BY last_month_net_profit DESC, total_spent_by_high_value_customers DESC
+LIMIT 10;

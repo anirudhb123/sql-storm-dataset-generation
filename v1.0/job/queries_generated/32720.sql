@@ -1,0 +1,53 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        ak.title,
+        ak.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title ak ON ml.linked_movie_id = ak.id
+    JOIN
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT
+    m.title AS linked_movie_title,
+    m.production_year,
+    STRING_AGG(DISTINCT a.name, ', ') AS cast,
+    RANK() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT c.role_id) DESC) AS rank_by_cast_count
+FROM
+    movie_hierarchy m
+JOIN
+    cast_info c ON m.movie_id = c.movie_id
+JOIN
+    aka_name a ON c.person_id = a.person_id
+WHERE
+    m.production_year IS NOT NULL
+GROUP BY
+    m.movie_id, m.title, m.production_year
+HAVING
+    COUNT(DISTINCT c.role_id) > 0
+ORDER BY
+    m.production_year DESC, rank_by_cast_count
+LIMIT 10;
+
+This SQL query employs a recursive common table expression (CTE) to explore a hierarchy of linked movies: 
+
+1. The `movie_hierarchy` CTE starts with all movies (where `kind_id` corresponds to 'movie') and recursively finds linked movies.
+2. It then aggregates all distinct cast names associated with these movies.
+3. It uses the window function `RANK()` to rank the movies by the count of distinct roles in each producing year.
+4. The main select query groups the results by movie ID and includes conditions to filter out movies without cast.
+5. Finally, it limits the result to the top 10 movies based on the latest years and the number of distinct cast members.

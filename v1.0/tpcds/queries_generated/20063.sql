@@ -1,0 +1,70 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ss_store_sk, 
+        ss_item_sk, 
+        SUM(ss_quantity) AS total_quantity,
+        SUM(ss_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ss_store_sk ORDER BY SUM(ss_net_profit) DESC) AS profit_rank
+    FROM store_sales
+    WHERE ss_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 90 
+      AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY ss_store_sk, ss_item_sk
+), 
+top_stores AS (
+    SELECT 
+        ss_store_sk,
+        SUM(total_quantity) AS store_total_quantity,
+        SUM(total_profit) AS store_total_profit
+    FROM sales_summary 
+    WHERE profit_rank <= 10
+    GROUP BY ss_store_sk
+),
+item_level AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(NULLIF((SELECT COUNT(ws.ws_order_number) 
+                         FROM web_sales ws 
+                         WHERE ws.ws_item_sk = ss.ss_item_sk 
+                         AND s_store_sk = ws.ws_ship_addr_sk), 0), 1) AS web_sales_count,
+        COALESCE(NULLIF((SELECT COUNT(cs.cs_order_number) 
+                         FROM catalog_sales cs 
+                         WHERE cs.cs_item_sk = ss.ss_item_sk 
+                         AND s_store_sk = cs.cs_ship_addr_sk), 0), 1) AS catalog_sales_count 
+    FROM item i 
+    JOIN store_sales ss ON i.i_item_sk = ss.ss_item_sk 
+    WHERE ss.ss_sold_date_sk BETWEEN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_moy = 7 LIMIT 1) 
+      AND (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_moy = 7 ORDER BY d_date LIMIT 1) 
+    HAVING (web_sales_count > 5 OR catalog_sales_count > 3)
+),
+joined_data AS (
+    SELECT 
+        ts.ss_store_sk,
+        il.i_item_id,
+        il.i_item_desc,
+        ts.store_total_quantity,
+        ts.store_total_profit,
+        COALESCE(il.web_sales_count, 0) AS web_sales_count,
+        COALESCE(il.catalog_sales_count, 0) AS catalog_sales_count
+    FROM top_stores ts
+    FULL OUTER JOIN item_level il ON ts.ss_store_sk = il.ss_store_sk
+)
+SELECT 
+    jd.ss_store_sk,
+    jd.i_item_id,
+    jd.i_item_desc,
+    jd.store_total_quantity,
+    jd.store_total_profit,
+    CASE 
+        WHEN jd.store_total_profit > (SELECT AVG(store_total_profit) FROM top_stores) 
+        THEN 'Above Average Profit' 
+        ELSE 'Below Average Profit' 
+    END AS profit_comparison,
+    CASE 
+        WHEN jd.web_sales_count IS NULL THEN 'No Web Sales'
+        ELSE CONCAT(jd.web_sales_count, ' Web Sales')
+    END AS web_sales_status
+FROM joined_data jd
+WHERE jd.store_total_quantity > 10 
+ORDER BY jd.store_total_profit DESC, jd.store_total_quantity ASC;

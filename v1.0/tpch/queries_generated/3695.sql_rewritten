@@ -1,0 +1,63 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        r.r_name AS region_name,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_totalprice DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        supplier s ON c.c_nationkey = s.s_nationkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND o.o_totalprice > (SELECT AVG(o2.o_totalprice) FROM orders o2 WHERE o2.o_orderstatus = 'O')
+),
+PartSupplierInfo AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS unique_suppliers
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+OrderLineStats AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        COUNT(*) AS item_count,
+        MAX(l.l_shipdate) AS last_shipdate
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    o.o_orderkey,
+    o.o_orderdate,
+    o.c_name,
+    o.region_name,
+    ol.total_value AS order_value,
+    p.total_supply_cost AS part_supply_cost,
+    PERCENT_RANK() OVER (ORDER BY ol.total_value DESC) AS value_rank
+FROM 
+    RankedOrders o
+JOIN 
+    OrderLineStats ol ON o.o_orderkey = ol.l_orderkey
+LEFT JOIN 
+    PartSupplierInfo p ON o.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_orderkey = o.o_orderkey LIMIT 1)
+WHERE 
+    o.rank = 1
+    AND (ol.last_shipdate IS NULL OR ol.last_shipdate > cast('1998-10-01' as date) - INTERVAL '30 day')
+ORDER BY 
+    o.o_orderdate DESC, value_rank
+LIMIT 100;

@@ -1,0 +1,95 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  -- Only questions
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title AS PostTitle,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+),
+
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(u.Reputation) AS TotalReputation
+    FROM 
+        Users u
+    WHERE 
+        u.Reputation > 0
+    GROUP BY 
+        u.Id
+),
+
+PostVoteStats AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        p.Id
+),
+
+PostHistorySummary AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN pht.Name IN ('Edit Title', 'Edit Body', 'Edit Tags') THEN 1 END) AS EditCount,
+        COUNT(CASE WHEN pht.Name = 'Post Closed' THEN 1 END) AS CloseCount,
+        COUNT(CASE WHEN pht.Name = 'Post Reopened' THEN 1 END) AS ReopenCount
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+)
+
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    p.ViewCount,
+    COALESCE(up.TotalReputation, 0) AS UserReputation,
+    COALESCE(pvs.VoteCount, 0) AS TotalVotes,
+    COALESCE(pvs.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(pvs.DownVotes, 0) AS TotalDownVotes,
+    COALESCE(phs.EditCount, 0) AS EditActions,
+    COALESCE(phs.CloseCount, 0) AS CloseActions,
+    COALESCE(phs.ReopenCount, 0) AS ReopenActions,
+    rph.Level AS Depth
+FROM 
+    Posts p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    UserReputation up ON u.Id = up.UserId
+LEFT JOIN 
+    PostVoteStats pvs ON p.Id = pvs.PostId
+LEFT JOIN 
+    PostHistorySummary phs ON p.Id = phs.PostId
+LEFT JOIN 
+    RecursivePostHierarchy rph ON p.Id = rph.PostId
+WHERE 
+    p.CreationDate > NOW() - INTERVAL '1 year'  -- Limit to posts created in the last year
+ORDER BY 
+    p.ViewCount DESC, u.Reputation DESC;
+

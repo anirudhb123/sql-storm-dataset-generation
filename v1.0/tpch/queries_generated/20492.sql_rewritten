@@ -1,0 +1,78 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        s.s_acctbal IS NOT NULL
+),
+TopSuppliers AS (
+    SELECT 
+        rs.s_suppkey,
+        rs.s_name,
+        rs.s_acctbal
+    FROM 
+        RankedSuppliers rs
+    WHERE 
+        rs.rank <= 3
+),
+PartOrders AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_orderstatus IN ('F', 'O')
+    GROUP BY 
+        l.l_orderkey
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    JOIN
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey, p.p_brand, p.p_type, p.p_size
+)
+SELECT 
+    so.r_name,
+    SUM(po.total_revenue) AS total_revenue,
+    AVG(sp.avg_supplycost) AS avg_supplycost,
+    STRING_AGG(DISTINCT sp.p_brand || ' ' || sp.p_type || ' ' || CAST(sp.p_size AS VARCHAR), ', ') AS part_details
+FROM 
+    TopSuppliers ts
+JOIN 
+    SupplierParts sp ON ts.s_suppkey = sp.ps_suppkey
+JOIN 
+    lineitem l ON sp.ps_partkey = l.l_partkey
+LEFT OUTER JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    nation n ON ts.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region so ON n.n_regionkey = so.r_regionkey
+WHERE 
+    (n.n_name IS NOT NULL OR ts.s_name IS NULL)
+    AND o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+GROUP BY 
+    so.r_name
+HAVING 
+    SUM(po.total_revenue) > 1000000 OR AVG(sp.avg_supplycost) BETWEEN 500 AND 1500
+ORDER BY 
+    total_revenue DESC, avg_supplycost ASC;

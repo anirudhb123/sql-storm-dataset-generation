@@ -1,0 +1,56 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_nationkey,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1997-12-31'
+),
+TopOrders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        n.n_name,
+        n.n_regionkey
+    FROM 
+        RankedOrders ro
+    JOIN 
+        nation n ON ro.c_nationkey = n.n_nationkey
+    WHERE 
+        ro.order_rank <= 10
+),
+SupplierStats AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost) AS total_supply_cost,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.o_totalprice,
+    ss.total_supply_cost,
+    ss.supplier_count,
+    r.r_name AS region_name
+FROM 
+    TopOrders to
+JOIN 
+    supplier s ON s.s_nationkey IN (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = to.o_custkey)
+JOIN 
+    SupplierStats ss ON ss.ps_partkey IN (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = to.o_orderkey)
+JOIN 
+    region r ON r.r_regionkey = to.n_regionkey
+ORDER BY 
+    to.o_totalprice DESC, to.o_orderdate ASC;

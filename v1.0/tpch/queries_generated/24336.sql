@@ -1,0 +1,72 @@
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ps.ps_supplycost, 
+        RANK() OVER (PARTITION BY p.p_type ORDER BY ps.ps_supplycost DESC) AS rank_cost
+    FROM 
+        part p 
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        SUM(o.o_totalprice) AS total_spent, 
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.custkey
+), 
+SupplierRegion AS (
+    SELECT 
+        s.s_suppkey, 
+        n.n_name AS nation_name, 
+        r.r_name AS region_name
+    FROM 
+        supplier s 
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+), 
+SubqueryMaxOrders AS (
+    SELECT 
+        c.c_custkey, 
+        MAX(o.o_totalprice) AS max_order_amount
+    FROM 
+        customer c 
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    c.c_name,
+    COALESCE(total_spent, 0) AS total_spent,
+    COALESCE(max_order_amount, 0) AS max_order_amount,
+    r.p_name AS expensive_part_name,
+    CASE 
+        WHEN total_spent IS NULL THEN 'No Orders'
+        WHEN total_spent > max_order_amount THEN 'Consistent Buyer'
+        ELSE 'Occasional Buyer'
+    END AS buyer_type
+FROM 
+    customer c 
+LEFT JOIN 
+    CustomerOrders co ON c.c_custkey = co.c_custkey
+LEFT JOIN 
+    SubqueryMaxOrders smo ON c.c_custkey = smo.c_custkey
+LEFT JOIN 
+    RankedParts r ON r.rank_cost = 1
+LEFT JOIN 
+    SupplierRegion sr ON sr.nation_name = (SELECT n_name FROM nation WHERE n_nationkey = c.c_nationkey)
+WHERE 
+    COALESCE(total_spent, 0) > (SELECT AVG(total_spent) FROM CustomerOrders) 
+    AND (sr.region_name IS NOT NULL OR sr.region_name IS NULL)
+ORDER BY 
+    total_spent DESC, r.p_name  
+LIMIT 10 OFFSET 5;

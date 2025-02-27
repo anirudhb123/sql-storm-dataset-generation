@@ -1,0 +1,64 @@
+
+WITH SupplierStats AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM
+        supplier s
+    JOIN
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY
+        s.s_suppkey, s.s_name
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM
+        orders o
+    JOIN
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE
+        l.l_shipdate >= DATE '1997-01-01'
+    GROUP BY
+        o.o_orderkey, o.o_orderdate
+),
+TopSuppliers AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        ss.total_availqty,
+        ss.avg_supplycost,
+        ROW_NUMBER() OVER (ORDER BY ss.total_availqty DESC) AS rank
+    FROM
+        SupplierStats ss
+    WHERE
+        ss.avg_supplycost > 50
+)
+SELECT
+    os.o_orderkey,
+    os.o_orderdate,
+    COUNT(DISTINCT ls.l_suppkey) AS supplier_count,
+    SUM(od.total_sales) AS total_order_sales,
+    CONCAT('Order date: ', TO_CHAR(os.o_orderdate, 'YYYY-MM-DD'), 
+           ', Total sales: $', TO_CHAR(SUM(od.total_sales), 'FM999999999.00')) AS sales_info
+FROM
+    orders os
+LEFT JOIN
+    lineitem ls ON os.o_orderkey = ls.l_orderkey
+JOIN
+    OrderDetails od ON os.o_orderkey = od.o_orderkey
+LEFT JOIN
+    TopSuppliers ts ON ls.l_suppkey = ts.s_suppkey
+WHERE
+    os.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    AND od.total_sales IS NOT NULL
+GROUP BY
+    os.o_orderkey, os.o_orderdate
+HAVING
+    COUNT(ts.s_suppkey) > 0
+ORDER BY
+    total_order_sales DESC;

@@ -1,0 +1,82 @@
+WITH TagStatistics AS (
+    SELECT 
+        TagName,
+        COUNT(*) AS TagUsageCount,
+        SUM((SELECT COUNT(*) FROM Posts p WHERE p.Tags LIKE '%' || t.TagName || '%')) AS PostCount,
+        SUM((SELECT COUNT(*) FROM Comments c WHERE c.Text LIKE '%' || t.TagName || '%')) AS CommentCount
+    FROM 
+        Tags t
+    GROUP BY 
+        TagName
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(b.Id) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        DATEDIFF(day, p.CreationDate, COALESCE(p.LastActivityDate, cast('2024-10-01 12:34:56' as timestamp))) AS DaysActive,
+        COUNT(com.Id) AS CommentCount,
+        COALESCE(MAX(v.CreationDate), '1900-01-01') AS LastVoteDate,
+        CASE 
+            WHEN COUNT(v.Id) > 0 THEN 
+                SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) - 
+                SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END)
+            ELSE 0
+        END AS Score
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments com ON p.Id = com.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+),
+AggregateResults AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        SUM(ps.Score) AS TotalPostScore,
+        SUM(ts.TagUsageCount) AS TotalTagUses,
+        SUM(ps.CommentCount) AS TotalCommentsReceived
+    FROM 
+        UserReputation us
+    LEFT JOIN 
+        PostMetrics ps ON us.TotalPosts = ps.PostId
+    LEFT JOIN 
+        TagStatistics ts ON ts.TagUsageCount > 0
+    GROUP BY 
+        us.UserId, us.DisplayName
+)
+SELECT 
+    ar.UserId,
+    ar.DisplayName,
+    ar.TotalPostScore,
+    ar.TotalTagUses,
+    ar.TotalCommentsReceived,
+    RANK() OVER (ORDER BY ar.TotalPostScore DESC) AS PostScoreRank
+FROM 
+    AggregateResults ar
+ORDER BY 
+    ar.TotalPostScore DESC, ar.TotalCommentsReceived DESC;

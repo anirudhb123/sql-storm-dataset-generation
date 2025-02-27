@@ -1,0 +1,83 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.title) AS title_rank,
+        COUNT(DISTINCT ci.person_id) OVER (PARTITION BY mt.id) AS cast_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE 
+        mt.production_year IS NOT NULL
+        AND mt.title IS NOT NULL
+),
+Directors AS (
+    SELECT 
+        ci.movie_id,
+        STRING_AGG(CONCAT(an.name, ' (', ci.note, ')'), ', ') AS directors_list
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    WHERE 
+        ci.note LIKE '%director%'
+    GROUP BY 
+        ci.movie_id
+),
+UniqueKeywords AS (
+    SELECT 
+        mv.movie_id, 
+        COUNT(DISTINCT mk.keyword_id) AS unique_keywords_count
+    FROM 
+        movie_keyword mk 
+    JOIN 
+        aka_title mv ON mk.movie_id = mv.id
+    WHERE 
+        mk.keyword_id IS NOT NULL
+    GROUP BY 
+        mv.movie_id
+),
+MoviesWithDetails AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.title_rank,
+        rm.cast_count,
+        COALESCE(d.directors_list, 'No Directors') AS directors,
+        COALESCE(uk.unique_keywords_count, 0) AS unique_keywords
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        Directors d ON rm.movie_id = d.movie_id
+    LEFT JOIN 
+        UniqueKeywords uk ON rm.movie_id = uk.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    title_rank,
+    cast_count,
+    directors,
+    unique_keywords,
+    CASE 
+        WHEN cast_count > 10 THEN 'Large Cast'
+        WHEN cast_count BETWEEN 5 AND 10 THEN 'Medium Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category,
+    CASE 
+        WHEN unique_keywords > 5 THEN 'Rich in Keywords'
+        WHEN unique_keywords <= 5 AND unique_keywords > 0 THEN 'Few Keywords'
+        ELSE 'No Keywords Found'
+    END AS keywords_category
+FROM 
+    MoviesWithDetails
+WHERE 
+    (title_rank <= 3 OR (cast_count < 5 AND unique_keywords = 0))
+ORDER BY 
+    production_year DESC, title_rank ASC;

@@ -1,0 +1,76 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) -- Only BountyStart and BountyClose
+    WHERE p.CreationDate >= '2020-01-01'
+    GROUP BY p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate
+),
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        p.AcceptedAnswerId,
+        CASE 
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Accepted'
+            ELSE 'Not Accepted'
+        END AS AnswerStatus
+    FROM RankedPosts rp
+    LEFT JOIN Posts p ON rp.PostId = p.Id
+    WHERE RankScore <= 10 -- Top 10 per PostTypeId
+),
+PostDetails AS (
+    SELECT 
+        fp.PostId,
+        fp.Title,
+        fp.Score,
+        fp.ViewCount,
+        fp.CommentCount,
+        fp.TotalBounty,
+        fp.CreationDate,
+        fp.AnswerStatus,
+        CASE 
+            WHEN fp.CommentCount > 5 THEN 'Buzzing'
+            WHEN fp.TotalBounty > 0 THEN 'Bountiful'
+            ELSE 'Quiet'
+        END AS PostMood,
+        COALESCE(MAX(b.Name), 'No Badge') AS TopBadge
+    FROM FilteredPosts fp
+    LEFT JOIN Badges b ON fp.PostId = b.UserId
+    GROUP BY 
+        fp.PostId, fp.Title, fp.Score, 
+        fp.ViewCount, fp.CommentCount, 
+        fp.TotalBounty, fp.CreationDate, 
+        fp.AnswerStatus
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.Score,
+    pd.ViewCount,
+    pd.CommentCount,
+    pd.TotalBounty,
+    pd.CreationDate,
+    pd.AnswerStatus,
+    pd.PostMood,
+    pd.TopBadge
+FROM PostDetails pd
+WHERE 
+    pd.PostMood IN ('Buzzing', 'Bountiful')
+ORDER BY 
+    pd.Score DESC, pd.CreationDate ASC;
+
+-- Corner Cases Highlighted:
+-- 1. Uses outer joins to ensure even posts without comments or votes are selected.
+-- 2. Pay close attention to NULL logic; COALESCE is used to manage potential NULLs for badge retrieval.
+-- 3. String expressions define the mood of the post, creating a richer semantic context.
+-- 4. The filter on PostMood captures posts with differing levels of activity and engagement.
+-- 5. The inclusion of bounties in the ranking adds an additional rewarding dimension.
+-- 6. Complicated predicates are utilized in filtering to ascertain the top-ranked posts based on multiple criteria.

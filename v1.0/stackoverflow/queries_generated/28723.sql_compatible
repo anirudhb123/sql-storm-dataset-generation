@@ -1,0 +1,76 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.ViewCount,
+        COALESCE(p.AcceptedAnswerId, 0) AS AcceptedAnswerId,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.Id) AS PostHistoryCount
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><') AS tag_split ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tag_split
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, u.DisplayName, p.Body, p.CreationDate, p.ViewCount, p.AcceptedAnswerId
+),
+RankedUserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS QuestionsAsked,
+        SUM(u.UpVotes) AS TotalUpVotes,
+        SUM(u.DownVotes) AS TotalDownVotes
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.ViewCount,
+        rp.CommentCount,
+        rp.PostHistoryCount,
+        rp.OwnerDisplayName,
+        RANK() OVER (ORDER BY rp.ViewCount DESC) AS ViewRank
+    FROM 
+        RankedPosts rp
+    JOIN 
+        RankedUserActivity ru ON rp.OwnerDisplayName = ru.DisplayName
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.ViewCount,
+    tp.CommentCount,
+    tp.PostHistoryCount,
+    tp.OwnerDisplayName,
+    CASE 
+        WHEN tp.ViewRank <= 10 THEN 'Top 10 Most Viewed Posts'
+        ELSE 'Other Posts'
+    END AS ViewCategory
+FROM 
+    TopPosts tp
+WHERE 
+    tp.CommentCount > 5 
+ORDER BY 
+    tp.ViewCount DESC, 
+    tp.CommentCount DESC;

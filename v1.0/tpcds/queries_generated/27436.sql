@@ -1,0 +1,68 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_id,
+        TRIM(CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type)) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_id,
+        CONCAT(TRIM(c_first_name), ' ', TRIM(c_last_name)) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate,
+        cd_credit_rating
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk
+),
+SalesData AS (
+    SELECT 
+        ws.bill_customer_sk,
+        SUM(ws.ws_net_paid) AS total_spent,
+        COUNT(ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.bill_customer_sk
+    HAVING 
+        SUM(ws.ws_net_paid) > 1000
+),
+CombinedData AS (
+    SELECT 
+        ci.c_customer_id,
+        ci.full_name,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        ai.full_address,
+        ai.ca_city,
+        ai.ca_state,
+        ai.ca_zip,
+        sd.total_spent,
+        sd.total_orders
+    FROM 
+        CustomerInfo ci
+    JOIN 
+        AddressInfo ai ON ci.c_customer_id = ai.ca_address_id
+    LEFT JOIN 
+        SalesData sd ON ci.c_customer_id = sd.bill_customer_sk
+)
+SELECT 
+    *,
+    (CASE 
+        WHEN cd_marital_status = 'M' THEN 'Married'
+        WHEN cd_marital_status = 'S' THEN 'Single'
+        ELSE 'Other' 
+     END) AS marital_description
+FROM 
+    CombinedData
+ORDER BY 
+    total_spent DESC
+LIMIT 100;

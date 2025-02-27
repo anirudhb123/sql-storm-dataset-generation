@@ -1,0 +1,61 @@
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+        AND o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+),
+supply_summary AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty) AS total_available_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+region_summary AS (
+    SELECT 
+        r.r_regionkey,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT so.o_orderkey) AS total_orders,
+    SUM(so.o_totalprice) AS total_revenue,
+    STRING_AGG(DISTINCT c.c_name, ', ') AS customer_names,
+    ss.total_available_qty,
+    ss.avg_supply_cost
+FROM 
+    ranked_orders so
+LEFT JOIN 
+    region_summary rs ON rs.nation_count > 1
+LEFT JOIN 
+    supplier s ON s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = rs.r_regionkey)
+LEFT JOIN 
+    supply_summary ss ON ss.ps_partkey IN (SELECT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_orderkey = so.o_orderkey)
+JOIN 
+    region r ON r.r_regionkey = rs.r_regionkey
+WHERE 
+    ss.total_available_qty IS NOT NULL
+GROUP BY 
+    r.r_regionkey, r.r_name
+HAVING 
+    COUNT(DISTINCT so.o_orderkey) > 5
+ORDER BY 
+    total_revenue DESC;

@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COUNT(c.Id) DESC) AS RankByComments
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id, p.Title, p.OwnerUserId, p.PostTypeId, p.CreationDate
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostHistoryDetails AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        MAX(ph.CreationDate) AS LastHistoryDate
+    FROM 
+        PostHistory ph
+    INNER JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+UsersWithActivity AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COALESCE(REPUTATION, 0) AS Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+    HAVING 
+        SUM(CASE WHEN v.VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) > 10
+),
+FinalMetrics AS (
+    SELECT 
+        up.UserId,
+        up.DisplayName,
+        up.Reputation,
+        history.HistoryTypes,
+        ph.LastHistoryDate,
+        rp.CommentCount AS TopPostCommentCount
+    FROM 
+        UsersWithActivity up
+    LEFT JOIN 
+        PostHistoryDetails history ON up.UserId = history.PostId
+    LEFT JOIN 
+        RankedPosts rp ON up.UserId = rp.OwnerUserId
+    WHERE 
+        rp.RankByComments = 1
+)
+
+SELECT 
+    f.UserId,
+    f.DisplayName,
+    f.Reputation,
+    COALESCE(f.HistoryTypes, 'No history') AS HistoryTypes,
+    COALESCE(f.LastHistoryDate, 'Never') AS LastHistoryDate,
+    COALESCE(f.TopPostCommentCount, 0) AS TopPostCommentCount
+FROM 
+    FinalMetrics f
+WHERE 
+    f.Reputation IS NOT NULL AND f.Reputation > 100
+ORDER BY 
+    f.Reputation DESC, f.TopPostCommentCount DESC;

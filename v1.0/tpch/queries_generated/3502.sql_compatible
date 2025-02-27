@@ -1,0 +1,70 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= '1997-01-01'
+),
+SupplierParts AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        SUM(ps.ps_availqty) AS total_availqty,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey, ps.ps_suppkey
+),
+CustomerRegions AS (
+    SELECT 
+        c.c_custkey,
+        n.n_name AS nation_name,
+        r.r_name AS region_name,
+        SUM(c.c_acctbal) AS total_acctbal
+    FROM 
+        customer c
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        c.c_custkey, n.n_name, r.r_name
+)
+SELECT 
+    DISTINCT r.region_name,
+    cr.nation_name,
+    COUNT(DISTINCT ro.o_orderkey) AS total_orders,
+    SUM(sp.total_availqty) AS total_available_parts,
+    CASE 
+        WHEN MAX(sp.avg_supplycost) IS NULL THEN 'No cost data'
+        ELSE CAST(MAX(sp.avg_supplycost) AS VARCHAR(255))
+    END AS max_supply_cost,
+    STRING_AGG(DISTINCT p.p_name, ', ') AS part_names
+FROM 
+    RankedOrders ro
+FULL OUTER JOIN 
+    CustomerRegions cr ON cr.c_custkey = ro.o_orderkey
+LEFT JOIN 
+    partsupp sp ON sp.ps_partkey IN (
+        SELECT ps.ps_partkey
+        FROM SupplierParts ps
+        WHERE ps.total_availqty > 100
+    )
+LEFT JOIN 
+    part p ON sp.ps_partkey = p.p_partkey
+LEFT JOIN 
+    nation n ON cr.custkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    ro.order_rank <= 5
+GROUP BY 
+    r.region_name, cr.nation_name
+ORDER BY 
+    r.region_name, cr.nation_name;

@@ -1,0 +1,82 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level
+    FROM
+        aka_title mt
+    WHERE
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        level + 1
+    FROM
+        movie_link ml
+    JOIN
+        aka_title at ON ml.movie_id = at.id
+    JOIN
+        RecursiveMovieHierarchy rmh ON ml.linked_movie_id = rmh.movie_id
+)
+
+, AggregatedCast AS (
+    SELECT
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS unique_cast_count,
+        COUNT(*) AS total_cast_count,
+        STRING_AGG(DISTINCT an.name, ', ') AS all_cast_names
+    FROM
+        cast_info ci
+    JOIN
+        aka_name an ON ci.person_id = an.person_id
+    GROUP BY
+        ci.movie_id
+)
+
+, MovieInfoWithKeywords AS (
+    SELECT
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        COALESCE(mk.id, -1) AS keyword_id,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword
+    FROM
+        aka_title at
+    LEFT JOIN
+        movie_keyword mk ON mk.movie_id = at.id
+)
+
+SELECT
+    r.movie_id,
+    r.title,
+    r.production_year,
+    ac.unique_cast_count,
+    ac.total_cast_count,
+    ac.all_cast_names,
+    mwk.keyword,
+    CASE
+        WHEN ac.total_cast_count > ac.unique_cast_count THEN 'Duplicates Present'
+        ELSE 'Unique Cast Only'
+    END AS cast_analysis,
+    RANK() OVER (PARTITION BY r.production_year ORDER BY ac.unique_cast_count DESC) AS cast_rank,
+    STRING_AGG(DISTINCT CASE WHEN mwk.keyword IS NOT NULL THEN mwk.keyword END, ', ') AS all_keywords,
+    COUNT(DISTINCT mwk.keyword) AS keyword_count
+FROM
+    RecursiveMovieHierarchy r
+JOIN
+    AggregatedCast ac ON r.movie_id = ac.movie_id
+LEFT JOIN
+    MovieInfoWithKeywords mwk ON r.movie_id = mwk.movie_id
+GROUP BY
+    r.movie_id, r.title, r.production_year, ac.unique_cast_count, ac.total_cast_count, ac.all_cast_names
+HAVING
+    keyword_count > 0
+ORDER BY
+    r.production_year DESC, ac.unique_cast_count DESC;
+
+This query explores the relationships between movies, their titles, cast information, and associated keywords. It employs recursive Common Table Expressions (CTEs) to traverse movies linked to one another, aggregates cast statistics, merges keyword data while handling edge cases of nullability with the `COALESCE` function, and provides a complex output containing ranked statistics on casts along with other aggregated features. Various string functions and set operations analyze all cast names and keywords, respectively, while also employing unique predicates to characterize the presence of duplicate cast members. The output is sorted to provide clear benchmarking metrics on performance across movie productions by year.

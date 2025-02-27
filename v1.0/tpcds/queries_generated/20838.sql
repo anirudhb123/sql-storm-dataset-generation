@@ -1,0 +1,63 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        CASE 
+            WHEN wr_return_quantity IS NULL THEN 0 
+            ELSE wr_return_quantity 
+        END AS return_quantity,
+        COALESCE(SUM(ws_ext_sales_price), 0) AS total_sales,
+        d_week_seq,
+        w_warehouse_id,
+        c_customer_id
+    FROM 
+        web_returns wr
+    LEFT JOIN 
+        web_sales ws ON wr.wr_item_sk = ws.ws_item_sk AND wr.wr_order_number = ws.ws_order_number
+    LEFT JOIN 
+        warehouse w ON ws.ws_warehouse_sk = w.w_warehouse_sk
+    LEFT JOIN 
+        customer c ON wr.wr_returning_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        date_dim d ON wr.wr_returned_date_sk = d.d_date_sk
+    GROUP BY 
+        w.warehouse_id, c.c_customer_id, d.d_week_seq
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_gender,
+        COUNT(cd_demo_sk) AS demographic_count
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_marital_status IN ('M', 'S') 
+    GROUP BY 
+        cd_gender
+),
+ReturnStats AS (
+    SELECT 
+        cdr.c_customer_id,
+        MAX(cdr.total_sales) AS max_sales,
+        SUM(cdr.return_quantity) AS total_returns,
+        cd.demographic_count,
+        ROW_NUMBER() OVER (PARTITION BY cdr.c_customer_id ORDER BY SUM(cdr.return_quantity) DESC) AS rank
+    FROM 
+        CustomerReturns cdr
+    LEFT JOIN 
+        CustomerDemographics cd ON cdr.c_customer_id = cd.cd_gender
+    GROUP BY 
+        cdr.c_customer_id, cd.demographic_count
+)
+SELECT 
+    r.c_customer_id,
+    r.max_sales,
+    r.total_returns,
+    CASE 
+        WHEN r.rank = 1 THEN 'Top Returner'
+        ELSE 'Regular Returner' 
+    END AS return_status
+FROM 
+    ReturnStats r
+WHERE 
+    r.total_returns > (SELECT AVG(total_returns) FROM ReturnStats)
+ORDER BY 
+    r.max_sales DESC, r.total_returns ASC;

@@ -1,0 +1,91 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        p.p_retailprice,
+        (p.p_retailprice - ps.ps_supplycost) AS profit_margin
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE 
+        ps.ps_availqty > 1000
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_order_value,
+        COUNT(l.l_orderkey) AS total_line_items
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey
+),
+FinalReport AS (
+    SELECT 
+        hc.c_custkey,
+        hc.c_name,
+        p.p_name,
+        p.profit_margin,
+        od.total_order_value,
+        rs.s_name AS top_supplier,
+        rs.rank
+    FROM 
+        HighValueParts p
+    JOIN 
+        OrderDetails od ON od.total_order_value > 5000
+    JOIN 
+        TopCustomers hc ON hc.total_spent > 10000
+    LEFT JOIN 
+        RankedSuppliers rs ON rs.rank <= 3 AND rs.s_suppkey IN (
+            SELECT 
+                ps.ps_suppkey 
+            FROM 
+                partsupp ps 
+            WHERE 
+                ps.ps_partkey = p.p_partkey
+        )
+)
+SELECT 
+    f.c_custkey,
+    f.c_name,
+    f.p_name,
+    f.profit_margin,
+    f.total_order_value,
+    f.top_supplier
+FROM 
+    FinalReport f
+WHERE 
+    f.profit_margin IS NOT NULL
+ORDER BY 
+    f.total_order_value DESC, f.profit_margin DESC;

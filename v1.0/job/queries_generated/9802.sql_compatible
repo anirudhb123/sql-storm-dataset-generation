@@ -1,0 +1,26 @@
+
+SELECT 
+    k.keyword,
+    COUNT(DISTINCT mk.movie_id) AS movie_count,
+    AVG(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Box Office') THEN NULLIF(mi.info, '')::NUMERIC ELSE NULL END) AS avg_box_office,
+    ARRAY_AGG(DISTINCT CONCAT(a.name, ' as ', r.role)) AS cast_details
+FROM 
+    keyword k
+JOIN 
+    movie_keyword mk ON k.id = mk.keyword_id
+JOIN 
+    aka_title a ON mk.movie_id = a.id
+JOIN 
+    complete_cast cc ON a.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+JOIN 
+    role_type r ON ci.role_id = r.id
+LEFT JOIN 
+    movie_info mi ON a.id = mi.movie_id 
+GROUP BY 
+    k.keyword
+HAVING 
+    COUNT(DISTINCT mk.movie_id) > 10
+ORDER BY 
+    movie_count DESC, avg_box_office DESC;

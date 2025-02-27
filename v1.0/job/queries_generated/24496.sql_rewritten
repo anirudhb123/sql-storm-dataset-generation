@@ -1,0 +1,68 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year = (SELECT MAX(production_year) FROM aka_title) 
+    UNION ALL
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        mh.level + 1
+    FROM 
+        aka_title m
+    INNER JOIN 
+        MovieHierarchy mh ON m.episode_of_id = mh.movie_id 
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        ROW_NUMBER() OVER (PARTITION BY level ORDER BY production_year DESC) AS rn 
+    FROM 
+        MovieHierarchy mh
+    INNER JOIN 
+        aka_title a ON mh.movie_id = a.id
+),
+MovieInsights AS (
+    SELECT 
+        m.id as movie_id,
+        COALESCE(a.name, 'Unknown Actor') AS main_actor,
+        COUNT(c.person_id) AS total_cast,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+        AVG(mi.info IS NOT NULL::int) AS info_availability 
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword kw ON m.id = kw.movie_id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    WHERE 
+        m.production_year IS NOT NULL
+    GROUP BY 
+        m.id, a.name
+)
+SELECT 
+    ti.title AS Movie_Title,
+    ti.main_actor AS Main_Actor,
+    ti.total_cast AS Total_Cast,
+    ti.keywords AS Associated_Keywords,
+    (SELECT COUNT(*) FROM movie_info WHERE movie_id = ti.movie_id) AS info_count, 
+    CASE 
+        WHEN ti.total_cast > 10 THEN 'Large Ensemble' 
+        ELSE 'Smaller Cast'
+    END AS cast_category
+FROM 
+    MovieInsights ti
+WHERE 
+    ti.movie_id IN (SELECT movie_id FROM TopMovies WHERE rn <= 5) 
+ORDER BY 
+    ti.total_cast DESC,
+    ti.keywords ASC;

@@ -1,0 +1,60 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        s_store_sk, 
+        SUM(ss_net_paid) AS total_sales,
+        SUM(ss_quantity) AS total_quantity,
+        DENSE_RANK() OVER (ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM store_sales
+    GROUP BY s_store_sk
+), customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        ca.ca_city,
+        COALESCE(SUM(ws_net_paid), 0) AS web_sales_total,
+        COALESCE(SUM(cs_net_paid), 0) AS catalog_sales_total,
+        COALESCE(SUM(ss_net_paid), 0) AS store_sales_total
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    LEFT JOIN web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    LEFT JOIN store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY c.c_customer_sk, c.c_first_name, c.c_last_name, cd.cd_gender, ca.ca_city
+), aggregated_sales AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name || ' ' || ci.c_last_name AS full_name,
+        ci.ca_city,
+        SUM(ci.web_sales_total + ci.catalog_sales_total + ci.store_sales_total) AS grand_total,
+        COUNT(DISTINCT ci.c_customer_sk) OVER (PARTITION BY ci.ca_city) AS city_customer_count
+    FROM customer_info ci
+    GROUP BY ci.c_customer_sk, ci.c_first_name, ci.c_last_name, ci.ca_city
+), top_customers AS (
+    SELECT 
+        ag.full_name,
+        ag.grand_total,
+        ag.city_customer_count,
+        ROW_NUMBER() OVER (ORDER BY ag.grand_total DESC) AS customer_rank
+    FROM aggregated_sales ag
+    WHERE ag.grand_total > (
+        SELECT AVG(grand_total) FROM aggregated_sales
+    )
+)
+SELECT 
+    tc.full_name,
+    tc.grand_total,
+    tc.city_customer_count,
+    ss.total_sales,
+    ss.total_quantity,
+    CASE 
+        WHEN tc.city_customer_count > 5 THEN 'Many Customers'
+        ELSE 'Few Customers'
+    END AS customer_category
+FROM top_customers tc
+LEFT JOIN sales_summary ss ON tc.city_customer_count = ss.sales_rank
+WHERE ss.total_sales IS NOT NULL
+ORDER BY tc.customer_rank;

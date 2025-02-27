@@ -1,0 +1,73 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        CASE 
+            WHEN SUM(o.o_totalprice) IS NULL THEN 'No Orders'
+            ELSE 'Orders Present'
+        END AS order_status
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_regionkey AS r_name,
+    COALESCE(sp.s_name, 'Unknown Supplier') AS supplier_name,
+    hp.p_name,
+    hp.total_value,
+    co.total_orders,
+    co.total_spent,
+    co.order_status
+FROM 
+    RankedSuppliers sp
+FULL OUTER JOIN 
+    HighValueParts hp ON sp.rank = 1 
+LEFT JOIN 
+    nation r ON sp.s_suppkey = (
+        SELECT 
+            s.s_suppkey
+        FROM 
+            supplier s
+        WHERE 
+            s.s_nationkey = r.r_nationkey
+        LIMIT 1
+    )
+LEFT JOIN 
+    CustomerOrders co ON sp.s_suppkey = co.c_custkey
+WHERE 
+    hp.total_value IS NOT NULL 
+    AND (sp.s_acctbal IS NULL OR sp.s_acctbal > 5000)
+ORDER BY 
+    r.r_regionkey, 
+    hp.total_value DESC
+LIMIT 100;

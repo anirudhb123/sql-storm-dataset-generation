@@ -1,0 +1,67 @@
+
+WITH PartSupplierDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        p.p_type,
+        s.s_supkey,
+        s.s_name,
+        s.s_nationkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        ps.ps_comment
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+),
+NationDetails AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.r_regionkey
+    FROM 
+        nation n
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+)
+SELECT 
+    ps.p_partkey,
+    ps.p_name,
+    ps.p_brand,
+    ps.p_type,
+    COUNT(DISTINCT s.s_name) AS supplier_count,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+    SUM(CASE 
+        WHEN co.o_orderkey IS NOT NULL THEN o.o_totalprice 
+        ELSE 0 
+    END) AS total_order_value
+FROM 
+    PartSupplierDetails ps
+LEFT JOIN 
+    CustomerOrders co ON ps.s_nationkey = co.c_custkey
+LEFT JOIN 
+    NationDetails n ON ps.s_nationkey = n.n_nationkey
+GROUP BY 
+    ps.p_partkey, ps.p_name, ps.p_brand, ps.p_type, ps.s_nationkey
+HAVING 
+    SUM(ps.ps_availqty) > 0
+ORDER BY 
+    total_order_value DESC;

@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal IS NOT NULL AND s.s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_suppkey
+    WHERE sh.level < 4
+),
+ProductDetails AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, ps.ps_supplycost, 
+           (p.p_retailprice - ps.ps_supplycost) AS profit_margin,
+           ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY (p.p_retailprice - ps.ps_supplycost) DESC) AS rnk
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE p.p_size BETWEEN 1 AND 10 AND ps.ps_availqty IS NOT NULL
+),
+HighProfitProducts AS (
+    SELECT pd.p_partkey, pd.p_name, pd.profit_margin
+    FROM ProductDetails pd
+    WHERE pd.rnk <= 5 AND pd.profit_margin > 0
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_order_value
+    FROM orders o
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+    GROUP BY o.o_orderkey
+    HAVING COUNT(li.l_orderkey) > 2
+)
+SELECT 
+    r.r_name, 
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    COALESCE(SUM(pdp.profit_margin), 0) AS total_profit_margin,
+    AVG(os.total_order_value) AS average_order_value,
+    CASE 
+        WHEN AVG(os.total_order_value) > 1000 THEN 'High Value Orders' 
+        WHEN AVG(os.total_order_value) BETWEEN 500 AND 1000 THEN 'Medium Value Orders' 
+        ELSE 'Low Value Orders' 
+    END AS order_value_category
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier sh ON n.n_nationkey = sh.s_nationkey
+LEFT JOIN HighProfitProducts pdp ON sh.s_suppkey = pdp.p_partkey
+LEFT JOIN OrderSummary os ON os.o_orderkey IN (
+    SELECT o.o_orderkey 
+    FROM orders o 
+    JOIN lineitem li ON o.o_orderkey = li.l_orderkey 
+    WHERE sh.s_suppkey = li.l_suppkey
+)
+GROUP BY r.r_name
+ORDER BY total_profit_margin DESC NULLS LAST;

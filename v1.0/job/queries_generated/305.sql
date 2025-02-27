@@ -1,0 +1,76 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY t.id) AS cast_count,
+        ROW_NUMBER() OVER (ORDER BY t.production_year DESC, t.title) AS rn
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+actor_info AS (
+    SELECT 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    GROUP BY 
+        ak.name
+),
+director_info AS (
+    SELECT 
+        cn.name AS company_name,
+        COUNT(DISTINCT mc.movie_id) AS directed_movies
+    FROM 
+        company_name cn
+    JOIN 
+        movie_companies mc ON cn.id = mc.company_id
+    WHERE 
+        mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Director')
+    GROUP BY 
+        cn.name
+)
+SELECT 
+    rm.movie_id,
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    ai.actor_name,
+    ai.movie_count AS actor_movie_count,
+    di.company_name,
+    di.directed_movies
+FROM 
+    ranked_movies rm
+LEFT JOIN 
+    actor_info ai ON rm.movie_id IN (
+        SELECT 
+            ci.movie_id 
+        FROM 
+            cast_info ci 
+        JOIN 
+            aka_name ak ON ci.person_id = ak.person_id 
+        WHERE 
+            ak.name IS NOT NULL
+    )
+LEFT JOIN 
+    director_info di ON rm.movie_id IN (
+        SELECT 
+            mc.movie_id 
+        FROM 
+            movie_companies mc 
+        WHERE 
+            mc.company_type_id = (SELECT id FROM company_type WHERE kind = 'Director')
+    )
+WHERE 
+    rm.rn <= 10
+ORDER BY 
+    rm.production_year DESC, 
+    rm.title
+OFFSET 5 ROWS
+FETCH NEXT 5 ROWS ONLY;

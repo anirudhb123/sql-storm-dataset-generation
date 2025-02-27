@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+    GROUP BY 
+        t.id
+), 
+PopularMovies AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        rc.cast_count
+    FROM 
+        RankedMovies rc
+    WHERE 
+        rc.rank = 1
+), 
+FullMovieDetails AS (
+    SELECT 
+        pm.title,
+        pm.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword,
+        ARRAY_AGG(DISTINCT cn.name) AS companies
+    FROM 
+        PopularMovies pm
+    LEFT JOIN 
+        movie_keyword mk ON pm.title = mk.movie_id
+    LEFT JOIN 
+        movie_companies mc ON pm.title = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        pm.title, pm.production_year
+)
+SELECT 
+    fmd.title,
+    fmd.production_year,
+    fmd.keyword,
+    fmd.companies,
+    COALESCE(ROUND(AVG(mv.info::numeric), 2), 0) AS avg_rating
+FROM 
+    FullMovieDetails fmd
+LEFT JOIN 
+    movie_info mv ON fmd.title = mv.movie_id AND mv.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+WHERE 
+    fmd.production_year >= 1990
+ORDER BY 
+    fmd.production_year DESC, 
+    fmd.title;

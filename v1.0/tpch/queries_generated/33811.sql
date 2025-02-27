@@ -1,0 +1,33 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, ps.ps_availqty, ps.ps_supplycost,
+           ROW_NUMBER() OVER (PARTITION BY ps.ps_partkey ORDER BY ps.ps_supplycost ASC) as rank
+    FROM supplier AS s
+    JOIN partsupp AS ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE ps.ps_availqty > 0
+), 
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent
+    FROM customer AS c
+    JOIN orders AS o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+), 
+NationRegions AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name, n.n_regionkey
+    FROM nation AS n
+    JOIN region AS r ON n.n_regionkey = r.r_regionkey
+)
+SELECT nc.n_name, nr.r_name, COUNT(DISTINCT c.c_custkey) AS customer_count,
+       SUM(CASE WHEN sc.rank = 1 THEN sc.ps_supplycost * sc.ps_availqty ELSE 0 END) AS cheapest_supply_cost,
+       AVG(co.total_spent) AS average_spent,
+       COUNT(DISTINCT CASE WHEN l.l_returnflag = 'R' THEN l.l_orderkey END) AS returned_orders,
+       CASE 
+           WHEN SUM(sc.ps_supplycost * sc.ps_availqty) > 1000000 THEN 'High Supply' 
+           ELSE 'Low Supply' 
+       END AS supply_status
+FROM SupplyChain AS sc
+JOIN CustomerOrders AS co ON sc.ps_partkey = co.c_custkey -- assuming ps_partkey is misused here for demonstration
+JOIN NationRegions AS nr ON sc.s_suppkey = nr.n_nationkey -- assuming s_suppkey relates to nation for demonstration
+LEFT JOIN lineitem AS l ON l.l_suppkey = sc.s_suppkey
+GROUP BY nc.n_name, nr.r_name
+HAVING COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY average_spent DESC, customer_count ASC;

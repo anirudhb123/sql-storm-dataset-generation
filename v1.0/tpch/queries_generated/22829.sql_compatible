@@ -1,0 +1,77 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY p.p_retailprice DESC) AS rn
+    FROM 
+        part p
+    WHERE 
+        p.p_size > 10
+),
+FilteredSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(s.s_acctbal, 0) AS account_balance
+    FROM 
+        supplier s
+    WHERE 
+        s.s_comment NOT LIKE '%fragile%'
+),
+AggregatedSales AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        lineitem l
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderdate BETWEEN DATE '1996-01-01' AND DATE '1996-12-31'
+    GROUP BY 
+        l.l_partkey
+),
+FinalOutput AS (
+    SELECT 
+        rp.p_partkey,
+        rp.p_name,
+        COALESCE(as.total_sales, 0) AS total_sales,
+        fs.account_balance
+    FROM 
+        RankedParts rp
+    LEFT JOIN 
+        AggregatedSales as ON rp.p_partkey = as.l_partkey
+    CROSS JOIN 
+        (SELECT AVG(account_balance) AS avg_balance FROM FilteredSuppliers) avg_bal
+    RIGHT JOIN 
+        FilteredSuppliers fs ON fs.s_suppkey = (SELECT MIN(s.s_suppkey) FROM FilteredSuppliers s)
+    WHERE 
+        rp.rn = 1
+    ORDER BY 
+        total_sales DESC, fs.account_balance ASC
+)
+SELECT 
+    f.p_partkey,
+    f.p_name,
+    CASE 
+        WHEN f.total_sales > 10000 THEN 'High Revenue' 
+        WHEN f.total_sales = 0 THEN 'No Sales' 
+        ELSE 'Low Revenue' 
+    END AS revenue_category,
+    f.account_balance
+FROM 
+    FinalOutput f
+WHERE 
+    f.account_balance IS NOT NULL
+UNION ALL
+SELECT 
+    NULL, 
+    'Total', 
+    SUM(COALESCE(f.total_sales, 0)), 
+    NULL 
+FROM 
+    FinalOutput f
+HAVING 
+    SUM(COALESCE(f.total_sales, 0)) > 50000;

@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Tags,
+        u.DisplayName AS OwnerName,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+),
+TagStatistics AS (
+    SELECT 
+        unnest(string_to_array(Tags, '<>')) AS Tag,
+        COUNT(*) AS PostCount,
+        AVG(Score) AS AverageScore
+    FROM 
+        Posts
+    WHERE 
+        Tags IS NOT NULL
+    GROUP BY 
+        Tag
+),
+RecentEdits AS (
+    SELECT 
+        ph.PostId,
+        ph.UserDisplayName,
+        ph.CreationDate AS EditDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6, 10) 
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Tags,
+    rp.OwnerName,
+    rp.CreationDate,
+    rp.Score,
+    ts.PostCount AS TagPostCount,
+    ts.AverageScore,
+    re.UserDisplayName AS LastEditedBy,
+    re.EditDate AS LastEditDate,
+    re.Comment AS LastEditComment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    TagStatistics ts ON ts.Tag = ANY(string_to_array(rp.Tags, '<>'))
+LEFT JOIN 
+    RecentEdits re ON rp.PostId = re.PostId AND re.EditRank = 1
+WHERE 
+    rp.PostRank <= 5 
+ORDER BY 
+    rp.CreationDate DESC;

@@ -1,0 +1,68 @@
+
+WITH AddressInfo AS (
+    SELECT 
+        ca_address_sk,
+        TRIM(UPPER(CONCAT_WS(' ', ca_street_number, ca_street_name, ca_street_type))) AS full_address,
+        CONVERT(ca_city USING utf8mb4) AS city_utf8,
+        CONCAT(ca_zip, '-', ca_state) AS zip_state,
+        COUNT(*) OVER (PARTITION BY ca_city) AS city_count
+    FROM 
+        customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c_customer_sk,
+        CONCAT(TRIM(c_first_name), ' ', TRIM(c_last_name)) AS full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate,
+        ib_income_band_sk,
+        hd_buy_potential
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        household_demographics hd ON hd.hd_demo_sk = c.c_current_hdemo_sk
+),
+SalesInfo AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(ws_order_number) AS order_count,
+        MAX(ws_sold_date_sk) AS last_purchase_date
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    ci.full_name,
+    ci.cd_gender,
+    ci.cd_marital_status,
+    ai.full_address,
+    ai.city_utf8,
+    ai.zip_state,
+    si.total_sales,
+    si.order_count,
+    si.last_purchase_date,
+    ai.city_count
+FROM 
+    CustomerInfo ci
+JOIN 
+    AddressInfo ai ON ai.ca_address_sk = (
+        SELECT 
+            c.c_current_addr_sk 
+        FROM 
+            customer c 
+        WHERE 
+            c.c_customer_sk = ci.c_customer_sk
+    )
+LEFT JOIN 
+    SalesInfo si ON si.ws_bill_customer_sk = ci.c_customer_sk
+WHERE 
+    ci.cd_purchase_estimate > 1000
+ORDER BY 
+    si.total_sales DESC, 
+    ci.full_name ASC
+LIMIT 100;

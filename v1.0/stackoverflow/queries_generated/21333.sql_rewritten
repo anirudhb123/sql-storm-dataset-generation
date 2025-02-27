@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS Rank,
+        COALESCE(UPPER(p.Tags), 'NO TAGS') AS TagDescription
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.Score > 10 THEN 1 ELSE 0 END) AS HighScorePosts,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+CloseReasonAnalytics AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.Comment END) AS CloseReason,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11) 
+    GROUP BY 
+        ph.PostId
+),
+ActiveUserPosts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS ActivePosts,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (8, 9) 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        u.Reputation > 100 
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    ur.DisplayName,
+    ur.PostCount,
+    ur.HighScorePosts,
+    ur.TotalViews,
+    ar.ActivePosts,
+    ar.TotalBounties,
+    ar.CommentCount,
+    cp.CloseReason,
+    cp.CloseCount,
+    rp.Title,
+    rp.Rank,
+    rp.TagDescription
+FROM 
+    UserActivity ur
+LEFT JOIN 
+    ActiveUserPosts ar ON ur.UserId = ar.UserId
+LEFT JOIN 
+    CloseReasonAnalytics cp ON cp.PostId = ar.UserId
+LEFT JOIN 
+    RankedPosts rp ON ur.PostCount > 5 AND rp.Rank < 4 
+WHERE 
+    ur.TotalViews > 1000
+    AND ar.ActivePosts IS NOT NULL
+ORDER BY 
+    ur.TotalViews DESC, ur.DisplayName;

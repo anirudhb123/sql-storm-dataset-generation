@@ -1,0 +1,50 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.item_sk,
+        ws.net_profit,
+        RANK() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws.net_profit DESC) AS profit_rank,
+        COALESCE(ws.net_profit, 0) AS adjusted_profit
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_moy BETWEEN 5 AND 8)
+),
+CustomerProfits AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(rs.adjusted_profit) AS total_profit,
+        COUNT(DISTINCT rs.item_sk) AS distinct_items,
+        CASE 
+            WHEN COUNT(DISTINCT rs.item_sk) = 0 THEN NULL
+            ELSE SUM(rs.adjusted_profit) / COUNT(DISTINCT rs.item_sk)
+        END AS avg_profit_per_item
+    FROM 
+        customer c 
+    JOIN 
+        RankedSales rs ON c.c_customer_sk = rs.bill_customer_sk
+    GROUP BY 
+        c.c_customer_id
+)
+SELECT 
+    cp.c_customer_id,
+    cp.total_profit,
+    cp.distinct_items,
+    cp.avg_profit_per_item,
+    CASE 
+        WHEN cp.avg_profit_per_item IS NULL THEN 'No transactions'
+        WHEN cp.avg_profit_per_item <= 0 THEN 'Negative or zero profit'
+        ELSE 'Positive profit'
+    END AS profit_status
+FROM 
+    CustomerProfits cp
+LEFT JOIN 
+    customer_demographics cd ON cd.cd_demo_sk = (SELECT c_current_cdemo_sk FROM customer WHERE c_customer_id = cp.c_customer_id)
+WHERE 
+    cp.total_profit > (
+        SELECT AVG(total_profit) FROM CustomerProfits
+    )
+ORDER BY 
+    cp.total_profit DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,54 @@
+
+WITH RecursiveCustomerReturns AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        COALESCE(SUM(sr_return_quantity), 0) AS total_store_returns,
+        COALESCE(SUM(wr_return_quantity), 0) AS total_web_returns,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY c.c_customer_id) AS rn
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    LEFT JOIN 
+        web_returns wr ON c.c_customer_sk = wr.wr_returning_customer_sk
+    GROUP BY 
+        c.c_customer_sk, c.c_customer_id
+),
+Analytics AS (
+    SELECT 
+        c.c_customer_id,
+        CASE 
+            WHEN total_store_returns + total_web_returns > 100 THEN 'Top Returner'
+            WHEN total_store_returns + total_web_returns BETWEEN 10 AND 100 THEN 'Moderate Returner'
+            ELSE 'Rare Returner' 
+        END AS return_category,
+        ROW_NUMBER() OVER (ORDER BY total_store_returns + total_web_returns DESC) AS return_rank
+    FROM 
+        RecursiveCustomerReturns c
+    WHERE 
+        total_store_returns + total_web_returns IS NOT NULL
+),
+FilteredAnalytics AS (
+    SELECT 
+        a.c_customer_id,
+        a.return_category
+    FROM 
+        Analytics a
+    WHERE 
+        a.return_rank <= 50
+)
+SELECT 
+    f.c_customer_id,
+    f.return_category,
+    STRING_AGG(CAST(r.r_reason_desc AS VARCHAR), ', ') AS return_reasons
+FROM 
+    FilteredAnalytics f
+LEFT JOIN 
+    store_returns sr ON f.c_customer_id = sr.sr_customer_sk
+LEFT JOIN 
+    reason r ON sr.sr_reason_sk = r.r_reason_sk
+GROUP BY 
+    f.c_customer_id, f.return_category
+ORDER BY 
+    f.return_category, f.c_customer_id;

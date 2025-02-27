@@ -1,0 +1,64 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.id AS movie_id,
+        at.title,
+        at.production_year,
+        COALESCE(SUM(CASE WHEN cc.kind = 'Actor' THEN 1 ELSE 0 END), 0) AS actor_count,
+        COALESCE(SUM(CASE WHEN cc.kind = 'Director' THEN 1 ELSE 0 END), 0) AS director_count,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC, COUNT(DISTINCT cmp.id) DESC) AS rank_by_production_year
+    FROM aka_title at
+    LEFT JOIN movie_companies cmp ON at.movie_id = cmp.movie_id
+    LEFT JOIN comp_cast_type cc ON cc.id = cmp.company_type_id
+    GROUP BY at.id
+),
+FilteredMovies AS (
+    SELECT *
+    FROM RankedMovies
+    WHERE rank_by_production_year <= 10
+),
+MovieInfo AS (
+    SELECT 
+        fm.movie_id,
+        fm.title,
+        fm.production_year,
+        COALESCE(mi.info, 'No additional info') AS movie_info,
+        COUNT(DISTINCT mk.keyword) AS keyword_count
+    FROM FilteredMovies fm
+    LEFT JOIN movie_info mi ON fm.movie_id = mi.movie_id
+    LEFT JOIN movie_keyword mk ON fm.movie_id = mk.movie_id
+    GROUP BY fm.movie_id, fm.title, fm.production_year, mi.info
+)
+SELECT 
+    mf.movie_id,
+    mf.title,
+    mf.production_year,
+    mf.movie_info,
+    mf.keyword_count,
+    CASE 
+        WHEN mf.keyword_count >= 5 THEN 'High Keyword Variety'
+        WHEN mf.keyword_count BETWEEN 1 AND 4 THEN 'Moderate Keyword Variety'
+        ELSE 'No Keywords'
+    END AS keyword_variety,
+    CASE 
+        WHEN mf.production_year IS NULL THEN 'Undated'
+        WHEN mf.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS movie_era
+FROM MovieInfo mf
+WHERE mf.production_year IS NOT NULL
+UNION ALL
+SELECT 
+    at.movie_id,
+    at.title,
+    at.production_year,
+    'No additional info' AS movie_info,
+    0 AS keyword_count,
+    'No Keywords' AS keyword_variety,
+    CASE 
+        WHEN at.production_year IS NULL THEN 'Undated'
+        WHEN at.production_year < 2000 THEN 'Classic'
+        ELSE 'Modern'
+    END AS movie_era
+FROM aka_title at
+WHERE at.production_year IS NULL
+ORDER BY production_year DESC, title ASC;

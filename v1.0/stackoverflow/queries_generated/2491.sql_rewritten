@@ -1,0 +1,70 @@
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        RANK() OVER (PARTITION BY P.PostTypeId ORDER BY P.Score DESC) AS PostRank,
+        P.CreationDate,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 2) AS UpvoteCount,
+        (SELECT COUNT(*) FROM Votes V WHERE V.PostId = P.Id AND V.VoteTypeId = 3) AS DownvoteCount,
+        CASE 
+            WHEN P.AcceptedAnswerId IS NOT NULL THEN 'Has Accepted Answer'
+            ELSE 'No Accepted Answer'
+        END AS AnswerStatus
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+ClosedPosts AS (
+    SELECT 
+        PH.PostId,
+        MIN(PH.CreationDate) AS FirstClosedDate
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId = 10
+    GROUP BY 
+        PH.PostId
+),
+FinalPostData AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.Score,
+        RP.ViewCount,
+        RP.OwnerDisplayName,
+        RP.PostRank,
+        RP.CreationDate,
+        RP.UpvoteCount,
+        RP.DownvoteCount,
+        RP.AnswerStatus,
+        COALESCE(CP.FirstClosedDate, 'No Closure') AS ClosureDate
+    FROM 
+        RankedPosts RP
+    LEFT JOIN 
+        ClosedPosts CP ON RP.PostId = CP.PostId
+)
+SELECT 
+    FPD.PostId,
+    FPD.Title,
+    FPD.Score,
+    FPD.ViewCount,
+    FPD.OwnerDisplayName,
+    FPD.PostRank,
+    FPD.CreationDate,
+    FPD.UpvoteCount,
+    FPD.DownvoteCount,
+    FPD.AnswerStatus,
+    FPD.ClosureDate,
+    ROW_NUMBER() OVER (ORDER BY FPD.Score DESC) AS OverallRank
+FROM 
+    FinalPostData FPD
+WHERE 
+    FPD.PostRank <= 5
+ORDER BY 
+    FPD.Score DESC, FPD.CreationDate DESC;

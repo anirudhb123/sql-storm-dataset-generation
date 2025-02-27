@@ -1,0 +1,88 @@
+WITH UserPostMetrics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COUNT(P.Id) AS TotalPosts,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS Questions,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS Answers,
+        SUM(CASE WHEN P.PostTypeId = 1 AND P.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedQuestions,
+        COALESCE(AVG(P.Score), 0) AS AvgScore,
+        RANK() OVER (ORDER BY COUNT(P.Id) DESC) AS UserRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id
+),
+OpenPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COUNT(C.Id) AS CommentCount
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    WHERE 
+        P.ClosedDate IS NULL
+    GROUP BY 
+        P.Id
+),
+PopularTags AS (
+    SELECT 
+        T.TagName,
+        COUNT(PT.PostId) AS TagUsage
+    FROM 
+        Tags T
+    JOIN 
+        Posts PT ON T.Id = PT.Id
+    GROUP BY 
+        T.TagName
+),
+TopPosts AS (
+    SELECT 
+        OP.PostId,
+        OP.Title,
+        OP.ViewCount,
+        OP.Score,
+        UP.UserId,
+        UP.DisplayName,
+        ROW_NUMBER() OVER (ORDER BY OP.Score DESC, OP.ViewCount DESC) AS PostRank
+    FROM 
+        OpenPosts OP
+    JOIN 
+        UserPostMetrics UP ON UP.UserId = OP.OwnerUserId
+)
+
+SELECT 
+    TP.Title,
+    TP.ViewCount,
+    TP.Score,
+    TP.UserId,
+    TP.DisplayName,
+    STRING_AGG(DISTINCT T.TagName, ', ') AS Tags,
+    UP.TotalPosts AS UserTotalPosts,
+    UP.Questions AS UserTotalQuestions,
+    UP.Answers AS UserTotalAnswers,
+    UP.AcceptedQuestions AS UserAcceptedQuestions,
+    UP.AvgScore AS UserAvgScore
+FROM 
+    TopPosts TP
+LEFT JOIN 
+    (SELECT
+        P.Id,
+        UNNEST(string_to_array(P.Tags, '>')) AS TagName
+     FROM 
+        Posts P) AS TagList ON TP.PostId = TagList.Id
+JOIN 
+    UserPostMetrics UP ON TP.UserId = UP.UserId
+WHERE 
+    TP.PostRank <= 10
+GROUP BY 
+    TP.Title, TP.ViewCount, TP.Score, TP.UserId, TP.DisplayName, UP.TotalPosts, UP.Questions, UP.Answers, UP.AcceptedQuestions, UP.AvgScore
+ORDER BY 
+    TP.Score DESC, TP.ViewCount DESC;

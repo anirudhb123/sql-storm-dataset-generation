@@ -1,0 +1,68 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) as rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderstatus IN ('F', 'O') 
+        AND o.o_totalprice > (SELECT AVG(o_totalprice) FROM orders)
+),
+SupplierAgg AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    r.r_name,
+    c.c_name,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_profit,
+    AVG(sa.total_supply_cost) AS avg_supply_cost,
+    COUNT(DISTINCT ro.o_orderkey) as completed_orders
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+JOIN 
+    lineitem li ON li.l_partkey = p.p_partkey
+JOIN 
+    RankedOrders ro ON li.l_orderkey = ro.o_orderkey
+JOIN 
+    CustomerSummary cs ON s.s_suppkey = cs.order_count
+LEFT JOIN 
+    SupplierAgg sa ON s.s_suppkey = sa.ps_suppkey
+WHERE 
+    r.r_name IS NOT NULL
+    AND (li.l_returnflag = 'N' OR li.l_tax IS NULL)
+GROUP BY 
+    r.r_name, c.c_name
+HAVING 
+    SUM(li.l_extendedprice * (1 - li.l_discount)) > 10000
+ORDER BY 
+    total_profit DESC 
+LIMIT 10;

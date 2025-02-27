@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ss_item_sk, 
+        SUM(ss_net_profit) AS total_net_profit, 
+        COUNT(*) AS sales_count,
+        RANK() OVER (PARTITION BY ss_item_sk ORDER BY SUM(ss_net_profit) DESC) AS profit_rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2022) - 30
+    GROUP BY 
+        ss_item_sk
+),
+TopItems AS (
+    SELECT 
+        i_item_sk, 
+        i_item_desc, 
+        COALESCE(SUM(ss_net_profit), 0) AS daily_net_profit, 
+        COUNT(DISTINCT ss_ticket_number) AS total_sales_transactions
+    FROM 
+        item
+    LEFT JOIN 
+        store_sales ON item.i_item_sk = store_sales.ss_item_sk
+    GROUP BY 
+        i_item_sk, i_item_desc
+),
+Quantiles AS (
+    SELECT 
+        total_net_profit,
+        NTILE(4) OVER (ORDER BY total_net_profit DESC) AS income_quartile
+    FROM 
+        SalesCTE
+)
+SELECT 
+    a.ca_country,
+    SUM(b.total_sales_transactions * CASE WHEN c.income_quartile = 1 THEN 1.2 ELSE 1 END) AS Adjusted_Sales,
+    AVG(b.daily_net_profit) AS Average_Profit,
+    COUNT(DISTINCT b.sales_count) AS Unique_Products_Sold
+FROM 
+    customer_address a
+JOIN 
+    TopItems b ON a.ca_address_sk = b.i_item_sk
+JOIN 
+    Quantiles c ON b.daily_net_profit = c.total_net_profit
+LEFT JOIN 
+    customer cst ON a.ca_address_sk = cst.c_current_addr_sk
+WHERE 
+    a.ca_country IS NOT NULL
+    AND b.total_sales_transactions > 10
+    AND b.daily_net_profit IS NOT NULL
+GROUP BY 
+    a.ca_country
+ORDER BY 
+    Adjusted_Sales DESC
+LIMIT 10;

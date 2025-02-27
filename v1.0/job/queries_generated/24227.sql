@@ -1,0 +1,69 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.id) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind LIKE 'movie%')
+),
+ActorMovieCount AS (
+    SELECT 
+        ci.person_id,
+        COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM 
+        cast_info ci
+    GROUP BY 
+        ci.person_id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        string_agg(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    rt.title AS movie_title,
+    rt.production_year,
+    COALESCE(mk.keywords, 'No keywords') AS movie_keywords,
+    ac.movie_count AS actor_movie_count,
+    CASE 
+        WHEN ac.movie_count IS NULL THEN 'No Movies'
+        WHEN ac.movie_count > 10 THEN 'Prolific Actor'
+        ELSE 'Regular Actor'
+    END AS actor_status
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    RankedTitles rt ON ci.movie_id = rt.title_id
+LEFT JOIN 
+    ActorMovieCount ac ON a.person_id = ac.person_id
+LEFT JOIN 
+    MovieKeywords mk ON rt.title_id = mk.movie_id
+WHERE 
+    (rt.title IS NOT NULL OR ac.movie_count IS NOT NULL) 
+    AND (a.name IS NOT NULL AND LENGTH(a.name) > 2) 
+    AND (a.md5sum IS NOT NULL OR rt.production_year IS NULL)
+ORDER BY 
+    rt.production_year DESC NULLS LAST,
+    actor_name ASC;
+
+This query showcases several advanced SQL constructs:
+- Common Table Expressions (CTEs) for structuring the query.
+- Window functions to rank titles by year.
+- Aggregate functions to concatenate movie keywords.
+- A mix of outer joins to include missing data from various relations.
+- Complicated predicates with NULL handling and logical checks on expressions.
+- A conditional CASE statement for categorizing actors based on their movie count. 
+- Special handling for string expressions and NULL logic to deal with potential edge cases in the dataset.

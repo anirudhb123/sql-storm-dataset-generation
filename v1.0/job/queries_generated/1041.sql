@@ -1,0 +1,52 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.title,
+        a.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.person_id) DESC) AS rn
+    FROM
+        aka_title a
+    LEFT JOIN
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.id
+),
+PopularMovies AS (
+    SELECT 
+        production_year,
+        title,
+        cast_count
+    FROM 
+        RankedMovies
+    WHERE 
+        rn <= 5
+),
+MovieDetails AS (
+    SELECT 
+        p.person_id,
+        p.info,
+        m.title,
+        m.production_year,
+        m.cast_count
+    FROM 
+        PopularMovies m
+    JOIN
+        complete_cast cc ON m.title = cc.title
+    LEFT JOIN 
+        person_info p ON cc.subject_id = p.person_id 
+    WHERE 
+        p.info_type_id IN (SELECT id FROM info_type WHERE info = 'bio')
+)
+SELECT 
+    COALESCE(m.title, 'Unknown Title') AS movie_title,
+    COALESCE(m.production_year, 0) AS production_year,
+    COALESCE(m.cast_count, 0) AS cast_count,
+    STRING_AGG(DISTINCT p.info, '; ') AS person_bios
+FROM 
+    PopularMovies m
+LEFT JOIN 
+    MovieDetails p ON m.title = p.title AND m.production_year = p.production_year
+GROUP BY 
+    m.title, m.production_year, m.cast_count
+ORDER BY 
+    m.production_year DESC, m.cast_count DESC;

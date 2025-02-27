@@ -1,0 +1,69 @@
+
+WITH RECURSIVE UserActivity AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        SUM(COALESCE(P.Score, 0)) AS TotalScore,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY COALESCE(SUM(P.ViewCount), 0) DESC) AS ActivityRank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON U.Id = C.UserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        TotalScore,
+        TotalPosts,
+        TotalComments,
+        ActivityRank
+    FROM 
+        UserActivity
+    WHERE 
+        ActivityRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        U.DisplayName AS OwnerDisplayName,
+        COALESCE(PH.Comment, 'No comments') AS RecentChangeComment,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS PostRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId
+    WHERE 
+        P.CreationDate >= DATEADD(MONTH, -1, CURRENT_DATE)
+)
+SELECT 
+    TU.DisplayName AS TopUser,
+    TU.Reputation AS UserReputation,
+    PD.Title AS PostTitle,
+    PD.CreationDate AS PostCreationDate,
+    PD.ViewCount AS PostViewCount,
+    PD.Score AS PostScore,
+    PD.RecentChangeComment
+FROM 
+    TopUsers TU
+LEFT JOIN 
+    PostDetails PD ON TU.UserId = PD.OwnerUserId
+WHERE 
+    PD.PostRank = 1 OR PD.OwnerDisplayName IS NULL
+ORDER BY 
+    TU.Reputation DESC, PD.PostCreationDate DESC;

@@ -1,0 +1,93 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS movie_id,
+        a.title,
+        a.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY a.production_year DESC) AS rank_per_year
+    FROM 
+        aka_title a
+    WHERE 
+        a.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+        AND a.production_year IS NOT NULL
+),
+GenreRanked AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT k.keyword) AS genre_count,
+        RANK() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT k.keyword) DESC) AS genre_rank
+    FROM 
+        RankedMovies t
+    LEFT JOIN 
+        movie_keyword mk ON t.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        t.title, t.production_year
+),
+CompanyDetails AS (
+    SELECT 
+        m.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COALESCE(m.note, 'No additional info') AS note
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.note IS NOT NULL
+    GROUP BY 
+        ci.movie_id
+),
+FinalSelection AS (
+    SELECT 
+        gm.title,
+        gm.production_year,
+        gm.genre_count,
+        COALESCE(cd.company_name, 'Unknown') AS company_name,
+        COALESCE(cd.company_type, 'Unknown') AS company_type,
+        COALESCE(cd.note, 'No notes available') AS company_note,
+        CAST(COALESCE(cd.company_note, 'no_note') AS VARCHAR) AS cast_detail,
+        CAST(cd.company_type AS VARCHAR) AS company_type_string,
+        CASE 
+            WHEN cd.company_name IS NULL THEN 'No Company Name'
+            ELSE 'Has Company Name'
+        END AS company_presence
+    FROM 
+        GenreRanked gm
+    FULL OUTER JOIN 
+        CompanyDetails cd ON gm.title = cd.title AND gm.production_year = cd.production_year
+    LEFT JOIN 
+        CastDetails ca ON gm.movie_id = ca.movie_id
+    WHERE 
+        gm.genre_rank <= 5
+        OR gm.production_year IN (SELECT DISTINCT production_year FROM RankedMovies)
+    ORDER BY 
+        gm.production_year DESC, gm.genre_count DESC
+)
+SELECT 
+    title,
+    production_year,
+    genre_count,
+    company_name,
+    company_type,
+    company_note,
+    cast_detail,
+    company_type_string,
+    company_presence
+FROM 
+    FinalSelection
+WHERE 
+    title IS NOT NULL
+    AND production_year IS NOT NULL
+    AND genre_count > 0;

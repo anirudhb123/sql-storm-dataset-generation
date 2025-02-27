@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS actor_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS movie_rank
+    FROM 
+        aka_name AS a
+    JOIN 
+        cast_info AS c ON a.person_id = c.person_id
+    JOIN 
+        aka_title AS t ON c.movie_id = t.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+),
+TopActors AS (
+    SELECT 
+        actor_name,
+        COUNT(*) AS movie_count
+    FROM 
+        RankedMovies
+    WHERE 
+        movie_rank <= 5
+    GROUP BY 
+        actor_name
+    HAVING 
+        COUNT(*) > 3
+),
+ActorDetails AS (
+    SELECT 
+        a.actor_name,
+        p.info AS personal_info,
+        COALESCE(c.name, 'Unknown Company') AS company_name
+    FROM 
+        TopActors AS a
+    LEFT JOIN 
+        person_info AS p ON a.actor_name = (SELECT name FROM aka_name WHERE person_id = (SELECT person_id FROM cast_info WHERE note IS NULL LIMIT 1))
+    LEFT JOIN 
+        movie_companies AS mc ON mc.movie_id IN (SELECT movie_id FROM cast_info WHERE person_role_id IS NOT NULL)
+    LEFT JOIN 
+        company_name AS c ON mc.company_id = c.id
+)
+SELECT 
+    a.actor_name,
+    a.personal_info,
+    a.company_name,
+    COALESCE(k.keyword, 'No Keywords') AS keyword,
+    COUNT(DISTINCT m.id) AS total_movies,
+    ARRAY_AGG(DISTINCT m.title) AS movies_list,
+    ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT m.id) DESC) AS actor_rank
+FROM 
+    ActorDetails AS a
+LEFT JOIN 
+    movie_keyword AS mk ON a.actor_name IN (SELECT name FROM aka_name WHERE person_id = (SELECT person_id FROM cast_info WHERE note IS NULL LIMIT 1))
+LEFT JOIN 
+    keyword AS k ON mk.keyword_id = k.id
+LEFT JOIN 
+    aka_title AS m ON m.id = (SELECT movie_id FROM cast_info WHERE person_id = (SELECT person_id FROM aka_name WHERE name = a.actor_name)::int LIMIT 1)
+WHERE 
+    a.personal_info IS NOT NULL OR a.company_name IS NOT NULL
+GROUP BY 
+    a.actor_name, a.personal_info, a.company_name, k.keyword
+HAVING 
+    COUNT(DISTINCT m.id) > 1
+ORDER BY 
+    actor_rank;

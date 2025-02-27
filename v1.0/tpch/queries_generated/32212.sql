@@ -1,0 +1,56 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+        WHERE s_acctbal IS NOT NULL
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+        WHERE s_acctbal IS NOT NULL
+    )
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F')
+),
+PartPricing AS (
+    SELECT p.p_partkey, p.p_name, 
+           AVG(ps.ps_supplycost) AS avg_supplycost, 
+           COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+),
+FilteredLineItems AS (
+    SELECT DISTINCT l.l_partkey, l.l_orderkey, l.l_quantity, l.l_discount
+    FROM lineitem l
+    WHERE l.l_shipdate >= CURRENT_DATE - INTERVAL '90 days'
+    AND l.l_returnflag = 'N'
+)
+SELECT 
+    r.r_name AS region_name,
+    SUM(coalesce(l.l_quantity, 0)) AS total_quantity,
+    SUM(coalesce(l.l_discount * l.l_extendedprice, 0)) AS total_discounted_price,
+    COUNT(DISTINCT o.o_orderkey) AS num_orders,
+    AVG(p.avg_supplycost) AS avg_supply_cost
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN orders o ON sh.s_suppkey = o.o_custkey
+LEFT JOIN FilteredLineItems l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN PartPricing p ON l.l_partkey = p.p_partkey
+WHERE (n.n_name IS NOT NULL) AND (sh.level IS NOT NULL)
+GROUP BY r.r_name
+HAVING SUM(coalesce(l.l_quantity, 0)) > 1000
+ORDER BY total_discounted_price DESC
+LIMIT 10;

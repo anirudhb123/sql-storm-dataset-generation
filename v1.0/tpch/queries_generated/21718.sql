@@ -1,0 +1,85 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY s.s_acctbal DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), 
+HighValueParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        p.p_size,
+        p.p_brand,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        part p
+    JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_retailprice, p.p_size, p.p_brand
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps_supplycost * ps_availqty) FROM partsupp ps)
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        COUNT(o.o_orderkey) > 0
+), 
+OrderLineStatus AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_returnflag,
+        COUNT(*) AS item_count
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_returnflag
+)
+SELECT 
+    n.n_name,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count,
+    SUM(hp.total_supply_cost) AS total_part_supply_cost,
+    COUNT(DISTINCT osl.l_orderkey) AS total_orders,
+    STRING_AGG(DISTINCT hp.p_name, ', ') AS part_names,
+    MAX(hs.s_name) AS highest_bal_supplier
+FROM 
+    nation n
+LEFT JOIN 
+    CustomerOrders cs ON n.n_nationkey = cs.c_custkey
+LEFT JOIN 
+    HighValueParts hp ON hp.p_partkey IN (
+        SELECT p_partkey 
+        FROM partsupp ps WHERE ps.ps_availqty IS NOT NULL
+    )
+LEFT JOIN 
+    RankedSuppliers hs ON hs.s_suppkey IN (
+        SELECT ps_suppkey 
+        FROM partsupp WHERE ps_partkey = hp.p_partkey
+    )
+LEFT JOIN 
+    OrderLineStatus osl ON osl.l_orderkey = cs.c_custkey
+WHERE 
+    n.n_regionkey IS NOT NULL
+GROUP BY 
+    n.n_name
+HAVING 
+    SUM(hp.total_supply_cost) > (
+        SELECT AVG(total_supply_cost) FROM HighValueParts
+    )
+ORDER BY 
+    n.n_name;

@@ -1,0 +1,88 @@
+
+WITH RecursivePostCTE AS (
+    
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ViewCount,
+        P.Score,
+        P.AnswerCount,
+        P.OwnerUserId,
+        1 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 1  
+    UNION ALL
+    SELECT 
+        A.Id AS PostId,
+        A.Title,
+        A.ViewCount,
+        A.Score,
+        A.AnswerCount,
+        A.OwnerUserId,
+        R.Level + 1  
+    FROM Posts A
+    INNER JOIN RecursivePostCTE R ON A.ParentId = R.PostId  
+    WHERE A.PostTypeId = 2  
+),
+
+UserReputationCTE AS (
+    
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(B.Id) AS BadgeCount
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id, U.DisplayName, U.Reputation
+),
+
+PostVoteSummary AS (
+    
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    GROUP BY P.Id
+),
+
+FinalResults AS (
+    
+    SELECT 
+        R.PostId,
+        R.Title,
+        R.ViewCount,
+        R.Score,
+        R.AnswerCount,
+        U.DisplayName AS OwnerName,
+        U.Reputation AS OwnerReputation,
+        U.BadgeCount,
+        PVS.UpVotes,
+        PVS.DownVotes
+    FROM RecursivePostCTE R
+    JOIN UserReputationCTE U ON R.OwnerUserId = U.UserId
+    LEFT JOIN PostVoteSummary PVS ON R.PostId = PVS.PostId
+)
+
+
+SELECT 
+    PostId,
+    Title,
+    ViewCount,
+    Score,
+    AnswerCount,
+    OwnerName,
+    OwnerReputation,
+    BadgeCount,
+    UpVotes,
+    DownVotes,
+    CASE 
+        WHEN Score > 100 THEN 'Hot'
+        WHEN UpVotes >= DownVotes THEN 'Trending'
+        ELSE 'New'
+    END AS PostNature
+FROM FinalResults
+ORDER BY Score DESC, ViewCount DESC
+LIMIT 10;

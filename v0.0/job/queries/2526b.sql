@@ -1,0 +1,4 @@
+SELECT min(mi.info) AS movie_budget, min(mi_idx.info) AS movie_votes, min(t.title) AS movie_title
+FROM cast_info AS ci, info_type AS it1, info_type AS it2, movie_info AS mi, movie_info_idx AS mi_idx, name AS n, title AS t
+WHERE t.id = mi.movie_id AND t.id = mi_idx.movie_id AND t.id = ci.movie_id AND ci.movie_id = mi.movie_id AND ci.movie_id = mi_idx.movie_id AND mi.movie_id = mi_idx.movie_id AND n.id = ci.person_id AND it1.id = mi.info_type_id AND it2.id = mi_idx.info_type_id
+AND t.md5sum IN ('0bbd002c6dad46343d273509c99849a8', '233d48d9cacda8109436d482898094d6', '87d8fcb6142aed9d761596d2187b7cf8', '98d2514ee5f8b309b4eaf38970574779') AND t.production_year > 1901 AND mi.note > 'S. White <nickolausj@moss-barnett.com>';

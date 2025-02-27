@@ -1,0 +1,49 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS hierarchy_level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.hierarchy_level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.hierarchy_level < 5
+),
+OrderStatistics AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           COUNT(DISTINCT o.o_custkey) AS customer_count, 
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rnk
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey, o.o_orderstatus
+),
+FilteredOrders AS (
+    SELECT os.o_orderkey, os.total_revenue, os.customer_count
+    FROM OrderStatistics os
+    WHERE os.rnk <= 10
+),
+SupplierPartStatistics AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+)
+SELECT
+    p.p_name,
+    p.p_mfgr,
+    r.r_name AS region,
+    COUNT(DISTINCT c.c_custkey) AS num_customers,
+    COALESCE(SUM(fp.total_revenue), 0) AS total_revenue,
+    COALESCE(SUM(sp.total_supplycost), 0) AS total_supplycost,
+    MAX(sh.hierarchy_level) AS max_supplier_hierarchy
+FROM part p
+LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN customer c ON o.o_custkey = c.c_custkey
+LEFT JOIN region r ON c.c_nationkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = c.c_nationkey)
+LEFT JOIN FilteredOrders fp ON o.o_orderkey = fp.o_orderkey
+LEFT JOIN SupplierPartStatistics sp ON p.p_partkey = sp.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON c.c_nationkey = sh.s_nationkey
+GROUP BY p.p_partkey, r.r_name, p.p_name, p.p_mfgr
+HAVING COUNT(DISTINCT c.c_custkey) > 1
+ORDER BY total_revenue DESC, max_supplier_hierarchy DESC;

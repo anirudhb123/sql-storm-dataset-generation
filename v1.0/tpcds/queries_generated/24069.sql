@@ -1,0 +1,79 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        RANK() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS purchase_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_purchase_estimate IS NOT NULL 
+        AND cd.cd_purchase_estimate > 0
+), RecentReturns AS (
+    SELECT 
+        sr_returning_customer_sk,
+        SUM(sr_return_quantity) AS total_returned,
+        SUM(sr_return_amt) AS total_return_amount,
+        COUNT(*) AS return_count
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_moy BETWEEN 1 AND 6)
+    GROUP BY 
+        sr_returning_customer_sk
+), HighReturnCustomers AS (
+    SELECT 
+        rc.c_customer_sk,
+        rc.c_first_name,
+        rc.c_last_name,
+        rr.total_returned,
+        rr.total_return_amount,
+        rr.return_count
+    FROM 
+        RankedCustomers rc
+    JOIN 
+        RecentReturns rr ON rc.c_customer_sk = rr.sr_returning_customer_sk
+    WHERE 
+        rr.total_returned > (SELECT AVG(total_returned) FROM RecentReturns)
+), DistributedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS total_orders,
+        AVG(ws_net_profit) AS avg_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023 AND d_moy = 1)
+    GROUP BY 
+        ws_bill_customer_sk
+)
+SELECT 
+    hrc.c_first_name,
+    hrc.c_last_name,
+    hrc.total_returned,
+    hrc.total_return_amount,
+    ds.total_sales,
+    ds.total_orders,
+    CASE 
+        WHEN ds.avg_net_profit > 0 THEN 'Profitable' 
+        ELSE 'Not Profitable' 
+    END AS profit_status,
+    CASE 
+        WHEN hrc.total_return_amount / NULLIF(ds.total_sales, 0) > 0.2 THEN 'High Return Ratio' 
+        ELSE 'Normal Return Ratio' 
+    END AS return_ratio_status
+FROM 
+    HighReturnCustomers hrc
+JOIN 
+    DistributedSales ds ON hrc.c_customer_sk = ds.ws_bill_customer_sk
+WHERE 
+    hrc.total_returned IS NOT NULL
+ORDER BY 
+    hrc.total_returned DESC, ds.total_sales DESC
+LIMIT 100;

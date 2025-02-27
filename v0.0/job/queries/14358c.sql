@@ -1,0 +1,4 @@
+SELECT min(t.title) AS movie_title
+FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t
+WHERE t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id
+AND mi.info IN ('Canada:26 March 1997', 'INR 63,847,000 (India) (30 July 2004)', 'Manzanar, California, USA', 'USA:13 June 1918', 'Vera lives in Argentina in 1978 during a dictatorial government. She is being persecuted. Ariel lives in the same apartment as Vera, but in 1996. Their telephone lines connect in between times and a very special story develops between them.', 'Wally Hough: I taught Jack Regan everything he knows... remember that!', 'West Germany:10 October 1987') AND t.phonetic_code > 'L6342';

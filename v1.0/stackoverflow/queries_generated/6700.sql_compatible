@@ -1,0 +1,75 @@
+
+WITH UserBadgeStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStats AS (
+    SELECT 
+        p.OwnerUserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore,
+        SUM(p.ViewCount) AS TotalViews
+    FROM 
+        Posts p
+    GROUP BY 
+        p.OwnerUserId
+),
+CombinedStats AS (
+    SELECT 
+        u.UserId,
+        u.DisplayName,
+        COALESCE(bs.BadgeCount, 0) AS BadgeCount,
+        COALESCE(bs.GoldBadges, 0) AS GoldBadgeCount,
+        COALESCE(bs.SilverBadges, 0) AS SilverBadgeCount,
+        COALESCE(bs.BronzeBadges, 0) AS BronzeBadgeCount,
+        COALESCE(ps.PostCount, 0) AS PostCount,
+        COALESCE(ps.QuestionCount, 0) AS QuestionCount,
+        COALESCE(ps.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ps.TotalScore, 0) AS TotalScore,
+        COALESCE(ps.TotalViews, 0) AS TotalViews
+    FROM 
+        UserBadgeStats bs
+    FULL OUTER JOIN 
+        PostStats ps ON bs.UserId = ps.OwnerUserId
+),
+FinalStats AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY TotalScore DESC, BadgeCount DESC) AS RankByScore,
+        RANK() OVER (ORDER BY TotalViews DESC) AS RankByViews
+    FROM 
+        CombinedStats
+)
+SELECT 
+    UserId,
+    DisplayName,
+    BadgeCount,
+    GoldBadgeCount,
+    SilverBadgeCount,
+    BronzeBadgeCount,
+    PostCount,
+    QuestionCount,
+    AnswerCount,
+    TotalScore,
+    TotalViews,
+    RankByScore,
+    RankByViews
+FROM 
+    FinalStats
+WHERE 
+    PostCount > 0
+ORDER BY 
+    RankByScore, RankByViews;

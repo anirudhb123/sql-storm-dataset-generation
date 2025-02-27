@@ -1,0 +1,75 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        RANK() OVER (PARTITION BY p.p_brand ORDER BY SUM(ps.ps_supplycost) DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_acctbal, p.p_brand
+),
+MaxRegion AS (
+    SELECT 
+        n.n_regionkey,
+        MAX(s.s_acctbal) AS max_acctbal
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    WHERE 
+        s.s_acctbal > (SELECT AVG(s2.s_acctbal) FROM supplier s2)
+    GROUP BY 
+        n.n_regionkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    DISTINCT p.p_name,
+    (CASE 
+        WHEN COALESCE(MAX(s.s_acctbal), 0) > 50000 THEN 'High' 
+        WHEN COALESCE(MAX(s.s_acctbal), 0) BETWEEN 10000 AND 50000 THEN 'Medium' 
+        ELSE 'Low' 
+    END) AS supplier_rating,
+    SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_sales,
+    ROW_NUMBER() OVER (PARTITION BY p.p_type ORDER BY total_sales DESC) AS sale_rank
+FROM 
+    part p
+JOIN 
+    lineitem li ON p.p_partkey = li.l_partkey
+JOIN 
+    RankedSuppliers s ON s.s_suppkey = li.l_suppkey
+JOIN 
+    MaxRegion mr ON s.s_acctbal >= mr.max_acctbal
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_acctbal IS DISTINCT FROM NULL
+        ORDER BY co.order_count DESC 
+        LIMIT 1
+    )
+GROUP BY 
+    p.p_name
+HAVING 
+    SUM(li.l_quantity) > (SELECT AVG(l_quantity) FROM lineitem) 
+    OR 
+    COUNT(DISTINCT s.s_suppkey) > 1
+ORDER BY 
+    total_sales DESC;

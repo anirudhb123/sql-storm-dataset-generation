@@ -1,0 +1,73 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS level,
+        mt.production_year,
+        COALESCE(ml.linked_movie_id, 0) AS linked_movie_id
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.level + 1,
+        CASE 
+            WHEN mh.linked_movie_id = 0 THEN mh.production_year 
+            ELSE (SELECT DISTINCT production_year FROM aka_title WHERE id = mh.linked_movie_id)
+        END AS production_year,
+        NULL AS linked_movie_id
+    FROM 
+        MovieHierarchy mh
+    WHERE 
+        mh.linked_movie_id IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY mh.level DESC) AS movie_rank
+    FROM 
+        MovieHierarchy mh
+    WHERE 
+        mh.production_year > 2000 AND mh.production_year < 2023
+)
+SELECT 
+    fm.movie_id,
+    fm.movie_title,
+    fm.production_year,
+    COALESCE(a.name, 'Unknown') AS actor_name,
+    kc.keyword AS movie_keyword,
+    STRING_AGG(DISTINCT cct.kind, ', ') AS company_kinds,
+    COUNT(DISTINCT ca.role_id) AS role_count
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    cast_info ca ON fm.movie_id = ca.movie_id
+LEFT JOIN 
+    aka_name a ON ca.person_id = a.person_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = fm.movie_id
+LEFT JOIN 
+    keyword kc ON mk.keyword_id = kc.id
+LEFT JOIN 
+    movie_companies mc ON fm.movie_id = mc.movie_id
+LEFT JOIN 
+    company_type cct ON mc.company_type_id = cct.id
+WHERE 
+    fm.movie_rank <= 5 
+    AND (a.name IS NOT NULL OR fm.movie_id IS NULL)
+GROUP BY 
+    fm.movie_id, fm.movie_title, fm.production_year, a.name, kc.keyword
+HAVING 
+    COUNT(DISTINCT ca.role_id) > 1
+ORDER BY 
+    fm.production_year DESC, 
+    fm.movie_rank ASC;

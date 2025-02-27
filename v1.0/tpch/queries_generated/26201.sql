@@ -1,0 +1,29 @@
+SELECT
+    CONCAT(c.c_name, ' - ', s.s_name) AS supplier_customer,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    AVG(l.l_quantity) AS avg_quantity,
+    MAX(l.l_shipdate) AS last_ship_date,
+    MIN(l.l_shipdate) AS first_ship_date,
+    GROUP_CONCAT(DISTINCT p.p_name ORDER BY p.p_name SEPARATOR ', ') AS part_names
+FROM
+    customer c
+JOIN
+    orders o ON c.c_custkey = o.o_custkey
+JOIN
+    lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN
+    partsupp ps ON l.l_partkey = ps.ps_partkey
+JOIN
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN
+    part p ON l.l_partkey = p.p_partkey
+WHERE
+    c.c_acctbal > 1000.00
+    AND l.l_shipdate BETWEEN '2022-01-01' AND '2022-12-31'
+GROUP BY
+    supplier_customer
+HAVING
+    revenue > 5000.00
+ORDER BY
+    revenue DESC;

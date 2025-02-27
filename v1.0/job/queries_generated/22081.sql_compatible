@@ -1,0 +1,73 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY COUNT(cast_info.id) DESC) AS movie_rank
+    FROM 
+        aka_title 
+    JOIN 
+        movie_info ON aka_title.movie_id = movie_info.movie_id
+    LEFT JOIN 
+        cast_info ON movie_info.movie_id = cast_info.movie_id
+    GROUP BY 
+        movie_id, title, production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year
+    FROM 
+        RankedMovies
+    WHERE 
+        movie_rank <= 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.title AS movie_title,
+        tm.production_year,
+        STRING_AGG(DISTINCT an.name, ', ') AS actor_names,
+        c.name AS company_name,
+        CASE 
+            WHEN COUNT(DISTINCT an.id) > 5 THEN 'Ensemble Cast'
+            ELSE 'Small Cast'
+        END AS cast_size_description
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        complete_cast cc ON tm.movie_id = cc.movie_id
+    LEFT JOIN 
+        aka_name an ON cc.subject_id = an.person_id
+    LEFT JOIN 
+        movie_companies mc ON tm.movie_id = mc.movie_id
+    LEFT JOIN 
+        company_name c ON mc.company_id = c.id
+    GROUP BY 
+        tm.movie_id, tm.title, tm.production_year, c.name
+),
+FilteredMovies AS (
+    SELECT 
+        *, 
+        CASE 
+            WHEN production_year IS NULL THEN 'Unknown Year'
+            ELSE CAST(production_year AS VARCHAR) 
+        END AS year_display
+    FROM 
+        MovieDetails
+    WHERE 
+        company_name IS NOT NULL
+)
+SELECT 
+    movie_title,
+    year_display,
+    actor_names,
+    cast_size_description,
+    COALESCE(company_name, 'Independent') AS production_company
+FROM 
+    FilteredMovies
+WHERE 
+    actor_names IS NOT NULL
+ORDER BY 
+    production_year DESC, movie_title ASC;

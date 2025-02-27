@@ -1,0 +1,29 @@
+SELECT 
+    t.title AS movie_title,
+    ak.name AS actor_name,
+    c.kind AS cast_type,
+    CI.info AS movie_info,
+    GROUP_CONCAT(DISTINCT kw.keyword) AS keywords
+FROM 
+    title t
+JOIN 
+    complete_cast cc ON t.id = cc.movie_id
+JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+JOIN 
+    aka_name ak ON ci.person_id = ak.person_id
+JOIN 
+    comp_cast_type c ON ci.person_role_id = c.id
+LEFT JOIN 
+    movie_info mi ON t.id = mi.movie_id
+LEFT JOIN 
+    keyword kw ON t.id = kw.movie_id
+WHERE 
+    t.production_year BETWEEN 2000 AND 2023
+    AND ak.name IS NOT NULL
+    AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Synopsis')
+    AND c.kind = 'Main Cast'
+GROUP BY 
+    t.title, ak.name, c.kind, CI.info
+ORDER BY 
+    t.production_year DESC, ak.name;

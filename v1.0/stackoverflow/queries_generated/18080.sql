@@ -1,0 +1,15 @@
+SELECT 
+    Posts.Title, 
+    Users.DisplayName AS Author, 
+    Posts.CreationDate, 
+    Posts.Score, 
+    Posts.ViewCount 
+FROM 
+    Posts 
+JOIN 
+    Users ON Posts.OwnerUserId = Users.Id 
+WHERE 
+    Posts.PostTypeId = 1  -- Only select questions
+ORDER BY 
+    Posts.CreationDate DESC 
+LIMIT 10;  -- Get the latest 10 questions

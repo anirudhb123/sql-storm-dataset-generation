@@ -1,0 +1,80 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rnk
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+),
+HighProfitSales AS (
+    SELECT
+        r.web_site_sk,
+        r.ws_order_number,
+        r.ws_quantity,
+        r.ws_net_profit
+    FROM
+        RankedSales r
+    WHERE
+        r.rnk <= 10
+),
+CustomerWebSales AS (
+    SELECT
+        c.c_customer_id,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM
+        customer c
+    JOIN
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY
+        c.c_customer_id
+),
+TopCustomers AS (
+    SELECT
+        c.c_customer_id,
+        cw.total_profit
+    FROM
+        CustomerWebSales cw
+    JOIN
+        customer c ON cw.c_customer_id = c.c_customer_id
+    WHERE
+        cw.total_profit > 1000
+),
+ReturnStats AS (
+    SELECT
+        wr.wr_item_sk,
+        COUNT(*) AS return_count,
+        SUM(wr.wr_return_amt) AS total_return_amt
+    FROM
+        web_returns wr
+    GROUP BY
+        wr.wr_item_sk
+)
+SELECT 
+    ws.web_site_id,
+    SUM(ws.ws_quantity) AS total_ordered,
+    SUM(COALESCE(rp.return_count, 0)) AS total_returns,
+    SUM(COALESCE(rp.total_return_amt, 0)) AS total_return_amount,
+    SUM(ws.ws_net_profit) AS total_profit,
+    COUNT(DISTINCT tc.c_customer_id) AS top_customers_count
+FROM 
+    web_sales ws
+LEFT JOIN 
+    ReturnStats rp ON ws.ws_item_sk = rp.wr_item_sk
+JOIN 
+    web_site w ON ws.ws_web_site_sk = w.web_site_sk
+LEFT JOIN 
+    TopCustomers tc ON ws.ws_bill_customer_sk = tc.c_customer_id
+WHERE 
+    ws.ws_sold_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023) - 30 AND 
+    (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+GROUP BY 
+    ws.web_site_id
+ORDER BY 
+    total_profit DESC;

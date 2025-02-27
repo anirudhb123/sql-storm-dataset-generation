@@ -1,0 +1,65 @@
+
+WITH CustomerDetails AS (
+    SELECT 
+        C.c_customer_id,
+        C.c_first_name,
+        C.c_last_name,
+        CA.ca_city,
+        CA.ca_state,
+        CD.cd_gender,
+        HD.hd_income_band_sk,
+        HD.hd_buy_potential,
+        CONCAT(C.c_first_name, ' ', C.c_last_name) AS full_name 
+    FROM 
+        customer C
+    JOIN 
+        customer_address CA ON C.c_current_addr_sk = CA.ca_address_sk
+    JOIN 
+        customer_demographics CD ON C.c_current_cdemo_sk = CD.cd_demo_sk
+    JOIN 
+        household_demographics HD ON C.c_current_hdemo_sk = HD.hd_demo_sk
+),
+SalesSummary AS (
+    SELECT 
+        WS.ws_bill_customer_sk,
+        SUM(WS.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT WS.ws_order_number) AS order_count
+    FROM 
+        web_sales WS
+    GROUP BY 
+        WS.ws_bill_customer_sk
+),
+FinalReport AS (
+    SELECT 
+        CD.full_name,
+        CD.ca_city,
+        CD.ca_state,
+        CD.cd_gender,
+        CD.hd_income_band_sk,
+        CD.hd_buy_potential,
+        COALESCE(SS.total_profit, 0) AS total_profit,
+        COALESCE(SS.order_count, 0) AS order_count
+    FROM 
+        CustomerDetails CD
+    LEFT JOIN 
+        SalesSummary SS ON CD.c_customer_id = SS.ws_bill_customer_sk
+)
+SELECT 
+    full_name,
+    ca_city,
+    ca_state,
+    cd_gender,
+    hd_income_band_sk,
+    hd_buy_potential,
+    total_profit,
+    order_count,
+    CASE 
+        WHEN total_profit > 1000 THEN 'High Value Customer'
+        WHEN total_profit BETWEEN 500 AND 1000 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_value_category
+FROM 
+    FinalReport
+ORDER BY 
+    total_profit DESC
+LIMIT 50;

@@ -1,0 +1,65 @@
+
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        1 AS depth
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_purchase_estimate IS NOT NULL
+    UNION ALL
+    SELECT 
+        ch.c_customer_sk,
+        ch.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        cd.cd_dep_count,
+        depth + 1
+    FROM CustomerHierarchy ch
+    JOIN customer c ON ch.c_customer_sk = c.c_current_hdemo_sk
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+), 
+SalesSummary AS (
+    SELECT 
+        ws.web_site_sk,
+        SUM(ws.ws_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_sales_price) DESC) AS sales_rank
+    FROM web_sales ws
+    GROUP BY ws.web_site_sk
+),
+ReturnsSummary AS (
+    SELECT 
+        wr.web_site_sk,
+        COUNT(wr.wr_order_number) AS total_returns,
+        SUM(wr.wr_net_loss) AS total_loss
+    FROM web_returns wr
+    GROUP BY wr.web_site_sk
+)
+SELECT 
+    ch.c_customer_id,
+    ch.cd_gender,
+    ch.cd_marital_status,
+    ss.total_sales,
+    ss.total_orders,
+    rs.total_returns,
+    rs.total_loss,
+    NULLIF(ss.total_sales, 0) AS sales_check,
+    CASE 
+        WHEN ss.total_sales > 10000 THEN 'High Value'
+        WHEN ss.total_sales BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value_category
+FROM CustomerHierarchy ch
+JOIN SalesSummary ss ON ch.c_customer_sk = ss.web_site_sk
+LEFT JOIN ReturnsSummary rs ON ss.web_site_sk = rs.web_site_sk
+WHERE ss.sales_rank <= 10 
+AND (ch.cd_marital_status = 'M' OR ch.cd_gender = 'F') 
+ORDER BY ss.total_sales DESC;

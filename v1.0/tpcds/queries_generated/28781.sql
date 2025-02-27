@@ -1,0 +1,50 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS customer_full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+TopCustomers AS (
+    SELECT 
+        customer_full_name,
+        cd_gender,
+        cd_marital_status,
+        cd_purchase_estimate
+    FROM 
+        RankedCustomers
+    WHERE 
+        gender_rank <= 5
+),
+CustomerAddressDetails AS (
+    SELECT 
+        cc.customer_full_name,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country 
+    FROM 
+        TopCustomers cc
+    JOIN 
+        customer_address ca ON ca.ca_address_sk = c.c_current_addr_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    ca.ca_country,
+    COUNT(*) AS customer_count,
+    AVG(cd_purchase_estimate) AS average_purchase_estimate
+FROM 
+    CustomerAddressDetails cad
+JOIN 
+    TopCustomers ct ON cad.customer_full_name = ct.customer_full_name
+GROUP BY 
+    ca.ca_city, ca.ca_state, ca.ca_country
+ORDER BY 
+    customer_count DESC, average_purchase_estimate DESC;

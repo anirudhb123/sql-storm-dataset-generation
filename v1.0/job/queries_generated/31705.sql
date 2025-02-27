@@ -1,0 +1,62 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title mt ON ml.linked_movie_id = mt.id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    a.name AS actor_name,
+    a.id AS actor_id,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords,
+    COUNT(DISTINCT mv.movie_id) AS total_movies,
+    AVG(CASE 
+            WHEN mt.production_year IS NOT NULL THEN mt.production_year 
+            ELSE NULL 
+        END) AS avg_production_year,
+    COUNT(DISTINCT bh.movie_id) AS benchmarked_movies,
+    ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY COUNT(DISTINCT mv.movie_id) DESC) AS actor_rank
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    movie_companies mc ON ci.movie_id = mc.movie_id
+LEFT JOIN 
+    movie_info mi ON mc.movie_id = mi.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = ci.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    title mv ON ci.movie_id = mv.id
+LEFT JOIN 
+    movie_hierarchy bh ON bh.movie_id = mv.id
+WHERE 
+    a.md5sum IS NOT NULL 
+    AND (mi.info_type_id IN (SELECT id FROM info_type WHERE info = 'budget') OR mi.info IS NULL)
+GROUP BY 
+    a.id, a.name
+HAVING 
+    COUNT(DISTINCT mv.id) > 10
+ORDER BY 
+    avg_production_year DESC, total_movies DESC;

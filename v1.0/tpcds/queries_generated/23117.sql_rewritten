@@ -1,0 +1,75 @@
+WITH RankedWebSales AS (
+    SELECT 
+        ws_bill_customer_sk, 
+        SUM(ws_net_paid_inc_tax) AS total_spent, 
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS rank,
+        COUNT(ws_order_number) AS order_count
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_bill_customer_sk
+    HAVING 
+        SUM(ws_net_paid_inc_tax) > (SELECT AVG(ws_net_paid_inc_tax) FROM web_sales) 
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_gender, 
+        cd_marital_status, 
+        cd_education_status, 
+        cd_dep_count,
+        cd_credit_rating,
+        cd_demo_sk
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_marital_status = 'M' OR cd_gender = 'F'
+),
+FilteredAddresses AS (
+    SELECT 
+        ca_address_sk, 
+        NULLIF(ca_city, 'Unknown') AS city, 
+        ca_state, 
+        ca_country
+    FROM 
+        customer_address
+    WHERE 
+        ca_country IS NOT NULL AND 
+        (ca_city IS NOT NULL OR ca_state = 'NY') 
+),
+CustomerWithAddress AS (
+    SELECT 
+        c.c_customer_id, 
+        c.c_first_name, 
+        c.c_last_name, 
+        a.city, 
+        a.ca_state,
+        a.ca_country, 
+        d.cd_gender, 
+        d.cd_marital_status
+    FROM 
+        customer c 
+    LEFT JOIN 
+        FilteredAddresses a ON c.c_current_addr_sk = a.ca_address_sk
+    LEFT JOIN 
+        CustomerDemographics d ON c.c_current_cdemo_sk = d.cd_demo_sk
+)
+SELECT 
+    c.c_customer_id, 
+    c.c_first_name, 
+    c.c_last_name, 
+    a.city, 
+    a.ca_state, 
+    CASE 
+        WHEN c.c_birth_year IS NULL OR c.c_birth_month IS NULL THEN 'Unknown Birthdate' 
+        ELSE CONCAT(c.c_birth_month, '-', c.c_birth_day, '-', c.c_birth_year) 
+    END AS birth_date,
+    RANK() OVER (ORDER BY cs.total_spent DESC) AS rank_by_spent
+FROM 
+    CustomerWithAddress c
+JOIN 
+    RankedWebSales cs ON c.c_customer_id = cs.ws_bill_customer_sk
+WHERE 
+    (c.c_birth_country = 'USA' OR c.c_birth_country IS NULL) 
+    AND (cs.order_count > 1 OR c.c_preferred_cust_flag = 'Y')
+ORDER BY 
+    rank_by_spent;

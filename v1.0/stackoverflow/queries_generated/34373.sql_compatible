@@ -1,0 +1,100 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id, 
+        ParentId, 
+        Title,
+        CreationDate,
+        Score,
+        0 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id, 
+        p.ParentId, 
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews,
+        AVG(p.Score) AS AvgPostScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id
+),
+CombinedStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        p.PostCount,
+        p.TotalViews,
+        p.AvgPostScore,
+        b.BadgeCount,
+        b.GoldBadges,
+        b.SilverBadges,
+        b.BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        UserPostStats p ON u.Id = p.UserId
+    LEFT JOIN 
+        UserBadgeCounts b ON u.Id = b.UserId
+)
+SELECT 
+    cs.DisplayName,
+    cs.PostCount,
+    COALESCE(cs.TotalViews, 0) AS TotalViews,
+    COALESCE(cs.AvgPostScore, 0) AS AvgPostScore,
+    cs.BadgeCount,
+    cs.GoldBadges,
+    cs.SilverBadges,
+    cs.BronzeBadges,
+    COALESCE(h.RootTitle, 'No Posts') AS RootPostTitle,
+    COALESCE(h.TotalReplies, 0) AS TotalReplies
+FROM 
+    CombinedStats cs
+LEFT JOIN (
+    SELECT 
+        r.ParentId AS UserId,
+        p.Title AS RootTitle,
+        COUNT(r.Id) AS TotalReplies
+    FROM 
+        RecursivePostHierarchy r
+    LEFT JOIN 
+        Posts p ON r.ParentId IS NULL
+    GROUP BY 
+        r.ParentId, p.Title
+) h ON cs.UserId = h.UserId
+ORDER BY 
+    cs.PostCount DESC, cs.BadgeCount DESC;

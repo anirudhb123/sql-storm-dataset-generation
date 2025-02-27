@@ -1,0 +1,81 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    WHERE 
+        U.Reputation > 100
+        AND p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+),
+AggregatedVotes AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostHistoryData AS (
+    SELECT 
+        ph.PostId,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes,
+        COUNT(*) AS TotalEdits,
+        MAX(CASE WHEN ph.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days' THEN 1 ELSE 0 END) AS IsLegacyPost
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    GROUP BY 
+        ph.PostId
+),
+CombinedData AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rv.UpVotes,
+        rv.DownVotes,
+        phd.HistoryTypes,
+        phd.TotalEdits,
+        phd.IsLegacyPost
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        AggregatedVotes rv ON rp.PostId = rv.PostId
+    LEFT JOIN 
+        PostHistoryData phd ON rp.PostId = phd.PostId
+),
+FinalMetrics AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN UpVotes IS NULL AND DownVotes IS NULL THEN 'No Votes'
+            WHEN UpVotes > DownVotes THEN 'More UpVotes'
+            WHEN DownVotes > UpVotes THEN 'More DownVotes'
+            ELSE 'Equal Votes'
+        END AS VoteStatus
+    FROM 
+        CombinedData
+)
+SELECT 
+    *,
+    CASE 
+        WHEN IsLegacyPost = 1 THEN 'Legacy Post'
+        ELSE 'Active Post'
+    END AS PostStatus
+FROM 
+    FinalMetrics
+WHERE 
+    Rank <= 5
+ORDER BY 
+    CreationDate DESC;

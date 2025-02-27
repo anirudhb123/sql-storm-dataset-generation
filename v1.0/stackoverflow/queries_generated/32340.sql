@@ -1,0 +1,77 @@
+WITH RECURSIVE UserVotes AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        v.PostId,
+        v.VoteTypeId,
+        ROW_NUMBER() OVER (PARTITION BY u.Id ORDER BY v.CreationDate DESC) AS VoteRank
+    FROM 
+        Users u
+    JOIN 
+        Votes v ON u.Id = v.UserId
+),
+PostStatistics AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(c.Id) AS CommentCount,
+        MAX(b.Date) AS MostRecentBadgeDate
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        p.Id
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        ph.CreationDate AS ClosedDate,
+        STRING_AGG(pt.Name, ', ') AS CloseReasonDetails
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    JOIN 
+        PostHistoryTypes pt ON ph.PostHistoryTypeId = pt.Id
+    WHERE 
+        pt.Name = 'Post Closed'
+    GROUP BY 
+        p.Id, ph.CreationDate
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.CommentCount,
+    CASE 
+        WHEN cp.ClosedDate IS NOT NULL THEN 'Closed on ' || TO_CHAR(cp.ClosedDate, 'YYYY-MM-DD')
+        ELSE 'Open'
+    END AS PostStatus,
+    COALESCE(cp.CloseReasonDetails, 'N/A') AS CloseReason,
+    u.DisplayName AS LastVoterName,
+    u.DisplayName AS UserVotedForHotPost
+FROM 
+    PostStatistics ps
+LEFT JOIN 
+    ClosedPosts cp ON ps.PostId = cp.PostId
+LEFT JOIN 
+    UserVotes u ON ps.PostId = u.PostId AND u.VoteRank = 1
+WHERE 
+    ps.Score > 5 OR ps.ViewCount > 1000 
+ORDER BY 
+    ps.Score DESC, ps.ViewCount DESC
+LIMIT 100;

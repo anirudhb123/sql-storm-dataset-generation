@@ -1,0 +1,79 @@
+
+WITH RECURSIVE PostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        CAST(p.Title AS VARCHAR(300)) AS FullTitle,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        CONCAT(ph.FullTitle, ' -> ', p.Title) AS FullTitle,
+        ph.Level + 1
+    FROM 
+        Posts p
+    JOIN 
+        PostHierarchy ph ON p.ParentId = ph.Id
+),
+PostDetails AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS Upvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Downvotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) -
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS Score,
+        ARRAY_AGG(DISTINCT t.TagName) AS Tags,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT p2.Id) AS RelatedPostsCount,
+        ph.Level
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        PostLinks pl ON p.Id = pl.PostId
+    LEFT JOIN 
+        Posts p2 ON pl.RelatedPostId = p2.Id
+    LEFT JOIN 
+        PostHierarchy ph ON p.Id = ph.Id OR p.ParentId = ph.Id
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, ph.Level
+),
+RankedPosts AS (
+    SELECT 
+        pd.*,
+        ROW_NUMBER() OVER (PARTITION BY pd.Level ORDER BY pd.Score DESC, pd.CreationDate DESC) AS Rank
+    FROM 
+        PostDetails pd
+)
+SELECT 
+    r.Id,
+    r.Title,
+    r.CreationDate,
+    r.Score,
+    r.Tags,
+    r.CommentCount,
+    r.RelatedPostsCount,
+    r.Level,
+    r.Rank
+FROM 
+    RankedPosts r
+WHERE 
+    r.Rank <= 5 
+ORDER BY 
+    r.Level, r.Score DESC;

@@ -1,0 +1,50 @@
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        u.CreationDate,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COALESCE(COUNT(DISTINCT p.Id), 0) AS PostCount
+    FROM Users u
+    LEFT JOIN Votes v ON u.Id = v.UserId
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    GROUP BY u.Id
+),
+TagUsage AS (
+    SELECT
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(p.Id) AS UsageCount
+    FROM Tags t
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.Id
+    HAVING COUNT(p.Id) > 10
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate >= NOW() - INTERVAL '1 month'
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    us.UpVotes,
+    us.DownVotes,
+    t.TagName,
+    rp.Title,
+    rp.CreationDate,
+    rp.Score
+FROM UserStats us
+JOIN Users u ON us.UserId = u.Id
+JOIN TagUsage t ON t.UsageCount > 5
+LEFT JOIN RecentPosts rp ON u.Id = rp.OwnerUserId AND rp.rn = 1
+WHERE u.Reputation > 1000
+ORDER BY u.Reputation DESC, rp.Score DESC
+LIMIT 10;

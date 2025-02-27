@@ -1,0 +1,54 @@
+WITH RECURSIVE supplier_metrics AS (
+    SELECT s_suppkey,
+           s_name,
+           s_acctbal,
+           (SELECT COUNT(*) 
+            FROM partsupp ps 
+            WHERE ps.ps_suppkey = s.s_suppkey) AS supply_count,
+           ROW_NUMBER() OVER (PARTITION BY s.n_nationkey ORDER BY s_acctbal DESC) AS rank_within_nation
+    FROM supplier s
+), parts_with_comments AS (
+    SELECT p.p_partkey,
+           p.p_name,
+           p.p_retailprice,
+           COALESCE(NULLIF(p.p_comment, ''), 'No comment') AS p_comment_clean,
+           CASE WHEN p.p_size IS NOT NULL THEN p.p_size ELSE 0 END AS p_size_checked
+    FROM part p
+), order_line_details AS (
+    SELECT l.l_orderkey,
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+           MAX(l.l_shipdate) AS latest_shipdate
+    FROM lineitem l
+    WHERE l.l_returnflag = 'N'
+    GROUP BY l.l_orderkey
+), national_supply_stats AS (
+    SELECT n.n_nationkey,
+           n.n_name,
+           SUM(pm.supply_count) as total_supplies,
+           AVG(pm.s_acctbal) AS avg_acctbal,
+           MAX(pm.supply_count) AS max_supply_per_supplier
+    FROM nation n
+    LEFT JOIN supplier_metrics pm ON n.n_nationkey = pm.s_suppkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT n.n_name,
+       p.p_name,
+       ol.total_price,
+       ns.total_supplies,
+       ns.avg_acctbal,
+       (SELECT COUNT(DISTINCT l.l_orderkey) 
+        FROM lineitem l 
+        WHERE l.l_suppkey IN (SELECT ps.ps_suppkey FROM partsupp ps WHERE ps.ps_partkey = p.p_partkey)) AS associated_orders,
+       ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY ol.total_price DESC) AS order_rank
+FROM parts_with_comments p
+JOIN order_line_details ol ON EXISTS (
+    SELECT 1
+    FROM lineitem l
+    WHERE l.l_partkey = p.p_partkey AND l.l_orderkey = ol.l_orderkey
+)
+JOIN national_supply_stats ns ON ns.total_supplies > 0
+JOIN nation n ON n.n_nationkey = ANY(ARRAY(SELECT DISTINCT s_nationkey FROM supplier s WHERE s.s_suppkey = ns.total_supplies))
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+  AND (n.n_name LIKE 'A%' OR n.n_name LIKE 'B%')
+  AND OL.latest_shipdate IS NOT NULL
+ORDER BY n.n_name, ol.total_price DESC;

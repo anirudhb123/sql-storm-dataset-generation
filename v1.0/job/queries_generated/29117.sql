@@ -1,0 +1,55 @@
+WITH Movie_Aggregates AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT c.person_id) AS total_cast, 
+        STRING_AGG(DISTINCT a.name, ', ') AS actors_list, 
+        SUM(mi.info IS NOT NULL) AS has_info, 
+        SUM(mk.keyword IS NOT NULL) AS has_keywords
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year >= 2000 
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+Ranked_Movies AS (
+    SELECT 
+        ma.movie_id, 
+        ma.title, 
+        ma.production_year, 
+        ma.total_cast, 
+        ma.actors_list, 
+        ma.has_info, 
+        ma.has_keywords,
+        RANK() OVER (ORDER BY ma.total_cast DESC) AS rank_by_cast,
+        RANK() OVER (ORDER BY ma.has_info DESC) AS rank_by_info,
+        RANK() OVER (ORDER BY ma.has_keywords DESC) AS rank_by_keywords
+    FROM 
+        Movie_Aggregates ma
+)
+SELECT 
+    rm.rank_by_cast, 
+    rm.rank_by_info, 
+    rm.rank_by_keywords, 
+    rm.title, 
+    rm.production_year, 
+    rm.total_cast, 
+    rm.actors_list
+FROM 
+    Ranked_Movies rm
+WHERE 
+    rm.total_cast > 0
+ORDER BY 
+    rm.rank_by_cast, rm.rank_by_info, rm.rank_by_keywords;
+
+This SQL query aggregates data on movies produced since 2000, calculating the total number of cast members, listing actors, and counting associated keywords and information. It then ranks the movies based on those metrics to provide an insightful output for benchmarking string processing.

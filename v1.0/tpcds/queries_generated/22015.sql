@@ -1,0 +1,66 @@
+
+WITH Ranked_Sales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_order_number,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_ext_sales_price DESC) AS Sales_Rank,
+        DENSE_RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws_ext_sales_price DESC) AS Dense_Sales_Rank
+    FROM 
+        web_sales ws
+    WHERE 
+        ws_ext_sales_price IS NOT NULL 
+        AND ws.web_site_sk IN (SELECT web_site_sk FROM web_site WHERE web_class IS NOT NULL)
+),
+Sales_By_Income AS (
+    SELECT 
+        h.hd_income_band_sk,
+        AVG(rs.ws_ext_sales_price) AS Avg_Sales,
+        COUNT(DISTINCT rs.ws_order_number) AS Order_Count
+    FROM 
+        Ranked_Sales rs
+    LEFT JOIN 
+        customer c ON rs.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        household_demographics h ON c.c_current_hdemo_sk = h.hd_demo_sk
+    WHERE 
+        h.hd_income_band_sk IS NOT NULL
+    GROUP BY 
+        h.hd_income_band_sk
+),
+Income_Bands AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        ib.ib_lower_bound,
+        ib.ib_upper_bound,
+        COALESCE(Sales_By_Income.Avg_Sales, 0) AS Avg_Sales,
+        COALESCE(Sales_By_Income.Order_Count, 0) AS Order_Count
+    FROM 
+        income_band ib
+    LEFT JOIN 
+        Sales_By_Income ON ib.ib_income_band_sk = Sales_By_Income.hd_income_band_sk
+)
+SELECT 
+    ib.ib_income_band_sk,
+    ib.ib_lower_bound,
+    ib.ib_upper_bound,
+    ib.Avg_Sales,
+    ib.Order_Count,
+    CASE 
+        WHEN ib.Order_Count > 0 THEN ib.Avg_Sales / NULLIF(ib.Order_Count, 0)
+        ELSE NULL 
+    END AS Avg_Sale_Per_Order,
+    (SELECT COUNT(DISTINCT c.c_customer_sk) 
+     FROM customer c 
+     WHERE c.c_current_hdemo_sk IS NULL) AS Null_Demo_Count,
+    (SELECT COUNT(*) 
+     FROM promotions p 
+     WHERE p.p_discount_active = 'Y' 
+       AND (p.p_start_date_sk < (SELECT MIN(d.d_date_sk) FROM date_dim d WHERE d.d_holiday = 'Y') 
+       OR p.p_end_date_sk > (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_weekend = 'Y'))) AS Promo_Corner_Case
+FROM 
+    Income_Bands ib
+WHERE 
+    ib.ib_lower_bound BETWEEN 0 AND 100000
+ORDER BY 
+    ib.ib_income_band_sk;

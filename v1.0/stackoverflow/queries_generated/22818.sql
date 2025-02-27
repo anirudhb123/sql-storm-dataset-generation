@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        DENSE_RANK() OVER (ORDER BY COUNT(c.Id) DESC) AS RankComments,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVoteCount,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVoteCount,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = p.Id) AS CommentCountSub
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.Score, p.ViewCount
+),
+PostDetails AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.RankScore,
+        rp.ViewCount,
+        rp.UpVoteCount,
+        rp.DownVoteCount,
+        rp.RankComments,
+        CASE 
+            WHEN rp.Score = 0 THEN 'Neutral'
+            WHEN rp.Score > 0 THEN 'Positive'
+            ELSE 'Negative'
+        END AS ScoreCategory
+    FROM 
+        RankedPosts rp
+)
+SELECT 
+    pd.PostId,
+    pd.Title,
+    pd.RankScore,
+    pd.ViewCount,
+    pd.UpVoteCount,
+    pd.DownVoteCount,
+    pd.RankComments,
+    pd.ScoreCategory,
+    (SELECT STRING_AGG(t.TagName, ', ') 
+     FROM Tags t 
+     JOIN STRING_TO_ARRAY(substring(p.Tags, 2, length(p.Tags)-2), '><') AS tag_name ON t.TagName = tag_name) AS Tags
+FROM 
+    PostDetails pd
+LEFT JOIN 
+    Posts p ON pd.PostId = p.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+WHERE 
+    (EXISTS (SELECT 1 FROM Badges b WHERE b.UserId = u.Id AND b.Class = 1) 
+     OR u.Reputation > 1000)
+    AND pd.RankComments > 0
+ORDER BY 
+    pd.RankScore DESC, pd.ViewCount DESC
+LIMIT 100;
+This query selects popular posts from the last year, incorporating various SQL features including Common Table Expressions (CTEs), window functions, conditional aggregation, string aggregation, and subqueries, while also utilizing NULL logic with outer joins and filtering logic based on user reputation and badge ownership. Additionally, it examines the relationship between post scores and vote counts while categorizing posts based on their scores, culminating in a rich dataset useful for performance benchmarking.

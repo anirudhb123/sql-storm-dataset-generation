@@ -1,0 +1,93 @@
+WITH RECURSIVE actor_hierarchy AS (
+    SELECT
+        c.person_id AS actor_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT c.movie_id) AS total_movies
+    FROM
+        cast_info c
+    JOIN
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY
+        c.person_id, a.name
+),
+popular_titles AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS title_rank
+    FROM
+        aka_title t
+    JOIN
+        cast_info c ON t.id = c.movie_id
+    GROUP BY
+        t.id, t.title, t.production_year
+),
+most_renowned_actors AS (
+    SELECT
+        ah.actor_id,
+        ah.actor_name,
+        ah.total_movies,
+        ROW_NUMBER() OVER (ORDER BY ah.total_movies DESC) AS actor_rank
+    FROM
+        actor_hierarchy ah
+    WHERE
+        ah.total_movies >= 5
+),
+company_movie_info AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        c.name AS company_name,
+        ct.kind AS company_type
+    FROM
+        aka_title m
+    JOIN
+        movie_companies mc ON mc.movie_id = m.id
+    JOIN
+        company_name c ON mc.company_id = c.id
+    JOIN
+        company_type ct ON mc.company_type_id = ct.id
+),
+keyword_associations AS (
+    SELECT
+        m.id AS movie_id,
+        k.keyword,
+        COALESCE(mi.info, 'No information available') AS movie_details
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN
+        movie_info mi ON m.id = mi.movie_id AND mi.info_type_id = (
+            SELECT id FROM info_type WHERE info = 'summary' LIMIT 1
+        )
+)
+SELECT
+    DISTINCT p.actor_name,
+    p.total_movies,
+    t.title,
+    t.production_year,
+    COALESCE(cmi.company_name, 'Independent') AS production_company,
+    COUNT(DISTINCT ka.keyword) AS keyword_count
+FROM
+    most_renowned_actors p
+LEFT JOIN
+    popular_titles t ON p.actor_id = (
+        SELECT c.person_id FROM cast_info c
+        JOIN aka_title m ON m.id = c.movie_id
+        WHERE m.production_year = t.production_year
+        LIMIT 1
+    )
+LEFT JOIN
+    company_movie_info cmi ON t.movie_id = cmi.movie_id
+LEFT JOIN
+    keyword_associations ka ON t.movie_id = ka.movie_id
+WHERE
+    p.actor_rank <= 10 AND t.cast_count > 5
+GROUP BY
+    p.actor_name, p.total_movies, t.title, t.production_year, cmi.company_name
+ORDER BY
+    p.total_movies DESC, t.production_year ASC;

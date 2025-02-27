@@ -1,0 +1,84 @@
+WITH RankedTitles AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+
+ActorTitles AS (
+    SELECT 
+        ak.name AS actor_name,
+        tt.title AS title,
+        tt.production_year,
+        c.nr_order,
+        RANK() OVER (PARTITION BY ak.name ORDER BY c.nr_order) AS title_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    JOIN 
+        aka_title tt ON c.movie_id = tt.movie_id
+    WHERE 
+        ak.name IS NOT NULL
+),
+
+CompanyMovies AS (
+    SELECT 
+        cn.name AS company_name,
+        tt.title AS movie_title,
+        tt.production_year,
+        COUNT(mc.id) AS total_movie_count
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        aka_title tt ON mc.movie_id = tt.movie_id
+    GROUP BY 
+        cn.name, tt.title, tt.production_year
+),
+
+FinalReport AS (
+    SELECT 
+        at.actor_name,
+        at.title,
+        at.production_year,
+        COALESCE(cm.company_name, 'Unknown') AS company_name,
+        COALESCE(CAST(R.DOUBLE_COUNT AS INTEGER), 0) AS movie_count
+    FROM 
+        ActorTitles at
+    LEFT JOIN 
+        CompanyMovies cm ON at.title = cm.movie_title AND at.production_year = cm.production_year
+    LEFT JOIN (
+        SELECT 
+            tt.title, 
+            COUNT(*) AS DOUBLE_COUNT
+        FROM 
+            aka_title tt
+        INNER JOIN 
+            movie_keyword mk ON tt.id = mk.movie_id
+        GROUP BY 
+            tt.title
+    ) R ON at.title = R.title
+)
+
+SELECT 
+    fr.actor_name,
+    fr.title,
+    fr.production_year,
+    fr.company_name,
+    fr.movie_count
+FROM 
+    FinalReport fr
+WHERE 
+    fr.movie_count > 1
+ORDER BY 
+    fr.production_year DESC, 
+    fr.actor_name, 
+    fr.title;
+
+This SQL query achieves a complex task by using Common Table Expressions (CTEs) for organizing data regarding movies, actors, and production companies. It ranks titles by production year, collects data on actors and their movie titles, aggregates company movie counts, and generates a final report filtering for movies where the count exceeds one. Additionally, it incorporates various SQL elements such as LEFT JOINs, COALESCE for NULL handling, and window functions for ranking - all while demonstrating thoughtful handling of potential edge cases and queries across multiple tables.

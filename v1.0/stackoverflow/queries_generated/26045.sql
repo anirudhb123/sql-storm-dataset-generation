@@ -1,0 +1,67 @@
+WITH TagCount AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(Posts.Id) AS PostCount
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(substring(Posts.Tags, 2, length(Posts.Tags)-2), '><')::int[])
+    GROUP BY 
+        Tags.TagName
+),
+HighestVote AS (
+    SELECT 
+        Posts.Id AS PostId,
+        COUNT(Votes.Id) AS VoteCount
+    FROM 
+        Posts
+    JOIN 
+        Votes ON Votes.PostId = Posts.Id
+    GROUP BY 
+        Posts.Id
+),
+UserPosts AS (
+    SELECT 
+        Users.Id AS UserId,
+        Users.DisplayName,
+        COUNT(Posts.Id) AS PostCount,
+        SUM(COALESCE(Votes.VoteTypeId = 2, 0)::int) AS Upvotes,
+        SUM(COALESCE(Votes.VoteTypeId = 3, 0)::int) AS Downvotes
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Votes ON Votes.PostId = Posts.Id
+    GROUP BY 
+        Users.Id, Users.DisplayName
+),
+TopTags AS (
+    SELECT 
+        TagCount.TagName,
+        TagCount.PostCount,
+        ROW_NUMBER() OVER (ORDER BY TagCount.PostCount DESC) AS Rank
+    FROM 
+        TagCount
+    WHERE 
+        TagCount.PostCount > 0
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.PostCount,
+    U.Upvotes,
+    U.Downvotes,
+    HT.TagName AS TopTag,
+    HT.PostCount AS TopTagPostCount,
+    COALESCE(HV.VoteCount, 0) AS TotalVotes
+FROM 
+    UserPosts U
+LEFT JOIN 
+    TopTags HT ON HT.Rank = 1
+LEFT JOIN 
+    HighestVote HV ON HV.PostId IN (SELECT Id FROM Posts WHERE OwnerUserId = U.UserId)
+WHERE 
+    U.PostCount > 0
+ORDER BY 
+    U.Upvotes DESC, U.PostCount DESC;

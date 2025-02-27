@@ -1,0 +1,66 @@
+WITH RECURSIVE SupplyChain AS (
+    SELECT 
+        ps.ps_partkey,
+        ps.ps_suppkey,
+        ps.ps_availqty,
+        ps.ps_supplycost,
+        CAST('Initial' AS varchar(20)) AS source
+    FROM partsupp ps
+    WHERE ps.ps_availqty IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.ps_partkey,
+        p.ps_suppkey,
+        p.ps_availqty,
+        p.ps_supplycost * 1.1 AS ps_supplycost, 
+        CAST('Second' AS varchar(20)) AS source
+    FROM partsupp p
+    JOIN SupplyChain sc ON p.ps_partkey = sc.ps_partkey
+    WHERE sc.ps_supplycost IS NOT NULL
+),
+CustomerPurchases AS (
+    SELECT 
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_purchases,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS purchase_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_acctbal > 0
+    GROUP BY c.c_custkey
+),
+ProductDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        COALESCE(AVG(ps.ps_supplycost), 0) AS avg_supply_cost,
+        SUM(CASE WHEN l.l_discount > 0 THEN l.l_extendedprice * l.l_discount ELSE 0 END) AS total_discounted_price,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM part p
+    LEFT JOIN lineitem l ON p.p_partkey = l.l_partkey
+    LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name
+)
+SELECT 
+    c.c_name,
+    pd.p_name,
+    pd.avg_supply_cost,
+    sc.ps_availqty,
+    CASE 
+        WHEN cu.order_count > 10 THEN 'High Value Customer' 
+        WHEN cu.order_count BETWEEN 5 AND 10 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer' 
+    END AS customer_value,
+    pd.total_discounted_price,
+    ROW_NUMBER() OVER (PARTITION BY sc.source ORDER BY pd.avg_supply_cost DESC) AS cost_rank,
+    NULLIF(SUM(pd.total_discounted_price) OVER(PARTITION BY pd.p_partkey), 0) AS total_price_sold
+FROM ProductDetails pd
+JOIN SupplyChain sc ON pd.p_partkey = sc.ps_partkey
+JOIN CustomerPurchases cu ON sc.ps_suppkey = cu.c_custkey
+WHERE pd.last_ship_date > cast('1998-10-01' as date) - INTERVAL '1 YEAR'
+    AND sc.ps_availqty > (SELECT AVG(ps_availqty) FROM partsupp)
+    AND (c.c_nationkey IS NOT NULL OR c.c_nationkey NOT IN (SELECT n.n_nationkey FROM nation n WHERE n.n_comment LIKE '%US%'))
+ORDER BY customer_value, pd.avg_supply_cost DESC
+FETCH FIRST 100 ROWS ONLY;

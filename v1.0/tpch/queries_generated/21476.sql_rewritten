@@ -1,0 +1,44 @@
+WITH RECURSIVE CustomerCTE AS (
+    SELECT c_custkey, c_name, c_acctbal, c_nationkey, 1 AS level
+    FROM customer
+    WHERE c_acctbal > (SELECT AVG(c_acctbal) FROM customer) 
+
+    UNION ALL
+
+    SELECT c.c_custkey, c.c_name, c.c_acctbal, c.c_nationkey, cc.level + 1
+    FROM customer c
+    JOIN CustomerCTE cc ON c.c_nationkey = cc.c_nationkey
+    WHERE c.c_acctbal > cc.c_acctbal
+), OrderDetails AS (
+    SELECT o.o_orderkey, o.o_custkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'O' AND l.l_shipdate > '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey
+), SupplierStats AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost) AS total_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_supplycost) > 1000
+), FilteredOrders AS (
+    SELECT od.o_orderkey, od.total_price, cc.c_name
+    FROM OrderDetails od
+    JOIN CustomerCTE cc ON od.o_custkey = cc.c_custkey
+    WHERE total_price > (
+        SELECT AVG(total_price) FROM OrderDetails
+        WHERE o_custkey IN (SELECT c_custkey FROM customer WHERE c_nationkey = cc.c_nationkey)
+    )
+), FinalResult AS (
+    SELECT fo.o_orderkey, fo.total_price, fo.c_name, ps.total_supplycost
+    FROM FilteredOrders fo
+    LEFT OUTER JOIN SupplierStats ps ON fo.o_orderkey = (SELECT MAX(o_orderkey) FROM orders WHERE o_custkey = fo.o_orderkey)
+)
+SELECT DISTINCT fr.o_orderkey, fr.total_price, fr.c_name, COALESCE(fr.total_supplycost, 0) AS total_supplycost,
+       CASE 
+           WHEN fr.total_price > 5000 THEN 'High Value Order'
+           WHEN fr.total_price BETWEEN 1000 AND 5000 THEN 'Medium Value Order'
+           ELSE 'Low Value Order'
+       END AS order_value_category
+FROM FinalResult fr
+WHERE fr.total_supplycost IS NULL OR fr.total_supplycost > 0
+ORDER BY fr.total_price DESC, fr.o_orderkey;

@@ -1,0 +1,20 @@
+
+WITH string_benchmark AS (
+    SELECT 
+        c.c_customer_id,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        SUBSTRING(c.c_email_address, 1, CHAR_LENGTH(c.c_email_address) - CHAR_LENGTH(SUBSTRING_INDEX(c.c_email_address, '@', -1))) AS email_prefix,
+        REGEXP_REPLACE(c.c_email_address, '[^a-zA-Z0-9]', '') AS sanitized_email,
+        TRIM(LOWER(CONCAT(c.c_first_name, ' ', c.c_last_name))) AS trimmed_lower_name,
+        LENGTH(c.c_email_address) AS email_length
+    FROM customer c
+    WHERE c.c_current_addr_sk IS NOT NULL
+)
+SELECT 
+    COUNT(*) AS total_records,
+    MAX(LENGTH(full_name)) AS max_name_length,
+    AVG(email_length) AS avg_email_length,
+    COUNT(DISTINCT email_prefix) AS unique_email_prefixes,
+    COUNT(DISTINCT sanitized_email) AS unique_sanitized_emails
+FROM string_benchmark
+WHERE LENGTH(full_name) > 0;

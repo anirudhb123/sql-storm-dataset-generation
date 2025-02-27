@@ -1,0 +1,35 @@
+
+SELECT 
+    l.returnflag,
+    l.linestatus,
+    SUM(l.quantity) AS sum_qty,
+    SUM(l.extendedprice) AS sum_base_price,
+    SUM(l.discount) AS sum_discount_amount,
+    SUM(l.tax) AS sum_charge,
+    COUNT(*) AS count_order
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.orderkey = o.orderkey
+JOIN 
+    customer c ON o.custkey = c.custkey
+JOIN 
+    supplier s ON l.suppkey = s.suppkey
+JOIN 
+    partsupp ps ON l.partkey = ps.partkey
+JOIN 
+    part p ON ps.partkey = p.partkey
+JOIN 
+    nation n ON s.nationkey = n.nationkey
+JOIN 
+    region r ON n.regionkey = r.regionkey
+WHERE 
+    r.name = 'ASIA'
+    AND o.orderdate >= DATE '1995-01-01' 
+    AND o.orderdate < DATE '1996-01-01'
+GROUP BY 
+    l.returnflag, 
+    l.linestatus
+ORDER BY 
+    l.returnflag, 
+    l.linestatus;

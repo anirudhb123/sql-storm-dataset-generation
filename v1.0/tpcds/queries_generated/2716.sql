@@ -1,0 +1,91 @@
+
+WITH MonthlySales AS (
+    SELECT
+        dd.d_month AS sale_month,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM
+        web_sales ws
+    JOIN
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE
+        dd.d_year = 2023
+    GROUP BY
+        dd.d_month
+),
+TopStores AS (
+    SELECT
+        s.s_store_id,
+        s.s_store_name,
+        SUM(ss.ss_ext_sales_price) AS store_sales
+    FROM
+        store_sales ss
+    JOIN
+        store s ON ss.ss_store_sk = s.s_store_sk
+    GROUP BY
+        s.s_store_sk
+    ORDER BY
+        store_sales DESC
+    LIMIT 5
+),
+CustomerStats AS (
+    SELECT
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY
+        cd.cd_gender
+),
+StorePerformance AS (
+    SELECT
+        s.s_store_id,
+        COALESCE(SUM(ss.ss_net_profit), 0) AS total_profit,
+        COUNT(ss.ss_ticket_number) AS total_transactions
+    FROM
+        store s
+    LEFT JOIN
+        store_sales ss ON s.s_store_sk = ss.ss_store_sk
+    GROUP BY
+        s.s_store_id
+),
+MaxCustomer AS (
+    SELECT
+        c.c_customer_id,
+        MAX(ws.ws_net_profit) AS max_profit
+    FROM
+        web_sales ws
+    JOIN
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY
+        c.c_customer_id
+)
+SELECT
+    ms.sale_month,
+    ms.total_sales,
+    ms.order_count,
+    ts.s_store_name,
+    cs.cd_gender,
+    cs.customer_count,
+    cs.avg_purchase_estimate,
+    sp.total_profit,
+    sp.total_transactions,
+    mc.c_customer_id,
+    mc.max_profit
+FROM
+    MonthlySales ms
+CROSS JOIN
+    TopStores ts
+CROSS JOIN
+    CustomerStats cs
+CROSS JOIN
+    StorePerformance sp
+LEFT JOIN
+    MaxCustomer mc ON mc.max_profit > 1000
+WHERE
+    ms.total_sales > 10000
+ORDER BY
+    ms.sale_month, ts.store_sales DESC;

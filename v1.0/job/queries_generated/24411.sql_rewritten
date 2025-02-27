@@ -1,0 +1,79 @@
+WITH RecursiveMovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.kind_id = 1 
+
+    UNION ALL
+
+    SELECT
+        lm.linked_movie_id,
+        l.linked_movie_id,
+        lm.production_year,
+        r.level + 1
+    FROM
+        RecursiveMovieHierarchy r
+    JOIN movie_link ml ON r.movie_id = ml.movie_id
+    JOIN title l ON ml.linked_movie_id = l.id
+    JOIN aka_title lm ON l.id = lm.movie_id
+    WHERE
+        lm.kind_id = 1
+        AND r.level < 5 
+),
+
+FilteredCast AS (
+    SELECT
+        ci.movie_id,
+        ci.person_id,
+        ci.role_id,
+        COALESCE(cmt.kind_id, 0) AS company_type_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM
+        cast_info ci
+    LEFT JOIN movie_companies mc ON ci.movie_id = mc.movie_id
+    LEFT JOIN company_type cmt ON mc.company_type_id = cmt.id 
+    WHERE
+        ci.nr_order IS NOT NULL AND
+        (ci.note IS NULL OR ci.note NOT LIKE '%uncredited%') 
+),
+
+AggregatedData AS (
+    SELECT
+        mh.movie_id,
+        COUNT(DISTINCT fc.person_id) AS total_cast,
+        STRING_AGG(DISTINCT na.name, ', ') AS actor_names,
+        SUM(CASE WHEN fc.company_type_id IS NOT NULL THEN 1 ELSE 0 END) AS total_companies
+    FROM
+        RecursiveMovieHierarchy mh
+    LEFT JOIN FilteredCast fc ON mh.movie_id = fc.movie_id
+    LEFT JOIN aka_name na ON fc.person_id = na.person_id
+    GROUP BY
+        mh.movie_id
+),
+
+FinalOutput AS (
+    SELECT
+        ad.movie_id,
+        ad.total_cast,
+        ad.actor_names,
+        ad.total_companies,
+        CASE
+            WHEN ad.total_cast = 0 THEN 'No Cast'
+            WHEN ad.total_companies = 0 THEN 'No Companies'
+            ELSE 'Complete'
+        END AS status,
+        RANK() OVER (ORDER BY ad.total_cast DESC) AS movie_rank
+    FROM
+        AggregatedData ad
+)
+
+SELECT *
+FROM FinalOutput
+WHERE status = 'Complete'
+  AND movie_rank <= 10
+ORDER BY production_year DESC;

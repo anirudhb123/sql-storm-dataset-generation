@@ -1,0 +1,85 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_item_sk
+    
+    UNION ALL
+    
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_sales
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        cs_item_sk
+),
+SalesSummary AS (
+    SELECT 
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(SUM(s.total_sales), 0) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        item i
+    LEFT JOIN 
+        (SELECT 
+            ws_item_sk,
+            SUM(ws_quantity) AS total_sales
+        FROM 
+            web_sales
+        WHERE 
+            ws_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        GROUP BY 
+            ws_item_sk
+        UNION ALL
+        SELECT 
+            cs_item_sk,
+            SUM(cs_quantity) AS total_sales
+        FROM 
+            catalog_sales
+        WHERE 
+            cs_sold_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        GROUP BY 
+            cs_item_sk) s ON i.i_item_sk = s.ws_item_sk
+    GROUP BY 
+        i.i_item_id, i.i_item_desc
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        SUM(cd_purchase_estimate) AS total_estimate
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_demo_sk, cd_gender, cd_marital_status, cd_education_status
+)
+
+SELECT 
+    s.i_item_id,
+    s.i_item_desc,
+    s.total_sales,
+    s.order_count,
+    cd.cd_gender,
+    cd.total_estimate
+FROM 
+    SalesSummary s
+LEFT JOIN 
+    CustomerDemographics cd ON cd.cd_demo_sk = (SELECT c.c_current_cdemo_sk FROM customer c WHERE c.c_current_hdemo_sk = 0 LIMIT 1)
+WHERE 
+    s.total_sales > 0
+ORDER BY 
+    s.total_sales DESC
+LIMIT 10;
+

@@ -1,0 +1,80 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ss_store_sk,
+        SUM(ss_net_paid) AS total_sales,
+        COUNT(DISTINCT ss_ticket_number) AS transaction_count,
+        RANK() OVER (ORDER BY SUM(ss_net_paid) DESC) AS sales_rank
+    FROM 
+        store_sales 
+    WHERE 
+        ss_sold_date_sk BETWEEN 1 AND 30
+    GROUP BY 
+        ss_store_sk
+),
+High_Performance_Stores AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_city,
+        s_state,
+        s_country,
+        COALESCE(s.total_sales, 0) AS total_sales,
+        COALESCE(s.transaction_count, 0) AS transaction_count
+    FROM 
+        store s
+    LEFT JOIN 
+        Sales_CTE s ON s.s_store_sk = s_store_sk
+    WHERE 
+        s.total_sales > (SELECT AVG(total_sales) FROM Sales_CTE)
+    ORDER BY 
+        total_sales DESC
+    LIMIT 10
+),
+Customer_Returns AS (
+    SELECT 
+        sr_customer_sk,
+        COUNT(*) AS return_count,
+        SUM(sr_return_amt_inc_tax) AS total_return_value
+    FROM 
+        store_returns
+    WHERE 
+        sr_returned_date_sk BETWEEN 1 AND 30
+    GROUP BY 
+        sr_customer_sk
+),
+Customer_Demographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cb.total_return_value,
+        cb.return_count
+    FROM 
+        customer_demographics cd
+    LEFT JOIN 
+        Customer_Returns cb ON cb.sr_customer_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender IS NOT NULL AND (cd.cd_marital_status IS NOT NULL OR cd.cd_marital_status IS NULL)
+)
+SELECT
+    s.s_store_name,
+    s.s_city,
+    cd.cd_gender,
+    cd.cd_marital_status,
+    SUM(s.total_sales) AS total_sales,
+    AVG(cd.return_count) AS avg_return_count
+FROM
+    High_Performance_Stores s
+JOIN 
+    Customer_Demographics cd ON cd.cd_demo_sk = s.ss_store_sk
+GROUP BY 
+    s.s_store_name, 
+    s.s_city, 
+    cd.cd_gender, 
+    cd.cd_marital_status
+HAVING 
+    COUNT(*) >= 5
+ORDER BY 
+    total_sales DESC, 
+    avg_return_count DESC;

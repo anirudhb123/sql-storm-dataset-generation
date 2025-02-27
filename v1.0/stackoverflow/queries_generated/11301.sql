@@ -1,0 +1,54 @@
+-- Performance benchmarking query to analyze posts, users, and vote statistics
+WITH UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(v.Id) AS TotalVotes,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(SUM(CASE WHEN v.VoteTypeId = 1 THEN 1 ELSE 0 END), 0) AS AcceptedAnswers,
+        COALESCE(SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END), 0) AS AnswerCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate
+)
+SELECT 
+    u.UserId,
+    u.DisplayName,
+    u.TotalVotes,
+    u.UpVotes,
+    u.DownVotes,
+    ps.PostId,
+    ps.Title AS PostTitle,
+    ps.CreationDate AS PostCreationDate,
+    ps.CommentCount,
+    ps.UpVotes AS PostUpVotes,
+    ps.DownVotes AS PostDownVotes,
+    ps.AcceptedAnswers,
+    ps.AnswerCount
+FROM 
+    UserVoteCounts u
+JOIN 
+    PostStatistics ps ON ps.UpVotes > 0 OR ps.DownVotes > 0
+ORDER BY 
+    u.TotalVotes DESC, ps.CommentCount DESC;

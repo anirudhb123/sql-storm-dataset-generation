@@ -1,0 +1,66 @@
+
+WITH RECURSIVE CustomerCounts AS (
+    SELECT c.c_customer_sk, 
+           COUNT(DISTINCT sr.ticket_number) AS return_count,
+           SUM(sr.return_quantity) AS total_return_quantity
+    FROM customer c
+    LEFT JOIN store_returns sr ON c.c_customer_sk = sr.sr_customer_sk
+    GROUP BY c.c_customer_sk
+), 
+
+Demographics AS (
+    SELECT cd.cd_demo_sk,
+           cd.cd_gender,
+           cd.cd_marital_status,
+           cd.cd_purchase_estimate,
+           ib.ib_upper_bound,
+           CASE 
+               WHEN cd.cd_purchase_estimate IS NULL 
+               THEN 'Unknown' 
+               WHEN cd.cd_purchase_estimate < 10000 
+               THEN 'Low' 
+               WHEN cd.cd_purchase_estimate >= 10000 AND cd.cd_purchase_estimate < 50000 
+               THEN 'Medium' 
+               ELSE 'High' 
+           END AS purchase_segment,
+           ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_group_rank
+    FROM customer_demographics cd
+    JOIN income_band ib ON cd.cd_purchase_estimate >= ib.ib_lower_bound AND cd.cd_purchase_estimate < ib.ib_upper_bound
+), 
+
+SalesData AS (
+    SELECT 
+        ws.ws_sold_date_sk, 
+        SUM(ws.ws_sales_price) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        SUM(ws.ws_quantity) AS total_quantity,
+        CASE 
+            WHEN SUM(ws.ws_sales_price) IS NULL 
+            THEN 0 
+            ELSE SUM(ws.ws_sales_price) 
+        END AS safe_total_sales
+    FROM web_sales ws
+    GROUP BY ws.ws_sold_date_sk
+) 
+
+SELECT 
+    cc.c_customer_sk,
+    d.cd_gender,
+    d.cd_marital_status,
+    d.purchase_segment,
+    COALESCE(DENSE_RANK() OVER (PARTITION BY d.purchase_segment ORDER BY cc.return_count DESC), 0) AS return_rank,
+    COALESCE(SUM(sd.total_sales) FILTER (WHERE d.cd_gender = 'M'), 0) AS male_total_sales,
+    COALESCE(SUM(sd.total_sales) FILTER (WHERE d.cd_gender = 'F'), 0) AS female_total_sales,
+    COALESCE(MAX(sd.total_profit), 0) AS max_profit,
+    CASE 
+        WHEN MAX(sd.total_quantity) IS NULL OR MAX(sd.total_quantity) < 1 
+        THEN 'No sales' 
+        ELSE 'Sales exist' 
+    END AS sales_existence
+FROM CustomerCounts cc
+JOIN Demographics d ON cc.c_customer_sk = d.cd_demo_sk
+LEFT JOIN SalesData sd ON sd.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+GROUP BY cc.c_customer_sk, d.cd_gender, d.cd_marital_status, d.purchase_segment
+HAVING SUM(cc.return_count) > 0 OR COUNT(sd.total_sales) > 0
+ORDER BY return_rank, cc.c_customer_sk DESC
+LIMIT 50;

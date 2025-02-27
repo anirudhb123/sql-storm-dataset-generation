@@ -1,0 +1,94 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.CreationDate DESC) AS rn,
+        COUNT(*) OVER (PARTITION BY p.PostTypeId) AS post_count
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges,
+        u.Reputation,
+        RANK() OVER (ORDER BY SUM(b.Class) DESC, u.Reputation DESC) AS BadgeRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+    HAVING 
+        SUM(b.Class) > 0 OR u.Reputation > 1000
+),
+PostStatistics AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        COUNT(v.Id) AS VoteCount,
+        COALESCE(MAX(c.CreationDate), p.CreationDate) AS LastActiveDate,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            WHEN p.AcceptedAnswerId IS NOT NULL THEN 'Answered'
+            ELSE 'Unanswered' 
+        END AS PostStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        p.Id
+),
+UserPostRanks AS (
+    SELECT 
+        pu.UserId,
+        COUNT(*) AS UserPostCount,
+        RANK() OVER (ORDER BY COUNT(*) DESC) AS UserRank
+    FROM 
+        Posts p
+    JOIN 
+        Users pu ON p.OwnerUserId = pu.Id
+    WHERE 
+        pu.Reputation > 100
+    GROUP BY 
+        pu.UserId
+)
+SELECT 
+    pu.DisplayName AS UserName,
+    ps.Title,
+    ps.VoteCount,
+    ps.LastActiveDate,
+    ps.PostStatus,
+    CASE 
+        WHEN rp.rn <= 5 THEN 'Top Posts'
+        ELSE 'Other Posts'
+    END AS PostCategory,
+    u.GoldBadges,
+    u.SilverBadges,
+    u.BronzeBadges
+FROM 
+    PostStatistics ps
+JOIN 
+    RankedPosts rp ON ps.Id = rp.PostId
+JOIN 
+    TopUsers u ON ps.Id IN (SELECT p.Id FROM Posts p WHERE p.OwnerUserId = u.UserId)
+JOIN 
+    UserPostRanks pur ON u.UserId = pur.UserId
+WHERE 
+    (ps.PostStatus = 'Answered' OR ps.PostStatus = 'Closed')
+    AND pur.UserPostCount > 2
+ORDER BY 
+    ps.LastActiveDate DESC, ps.VoteCount DESC
+LIMIT 100 OFFSET 0

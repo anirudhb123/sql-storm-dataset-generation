@@ -1,0 +1,54 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS cast_count
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN
+        cast c ON t.id = c.movie_id  -- Assuming 'cast' is the correct table for person_id
+    WHERE 
+        cn.country_code = 'USA'
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+MoviesWithKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword k ON mt.keyword_id = k.id
+    GROUP BY 
+        mt.movie_id
+),
+FinalResults AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        rt.cast_count,
+        mwk.keywords
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        MoviesWithKeywords mwk ON rt.title_id = mwk.movie_id
+    WHERE 
+        rt.cast_count > 5  
+)
+SELECT 
+    title,
+    production_year,
+    cast_count,
+    keywords
+FROM 
+    FinalResults
+ORDER BY 
+    production_year DESC, 
+    cast_count DESC;

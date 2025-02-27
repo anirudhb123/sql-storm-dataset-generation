@@ -1,0 +1,57 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_returned_date_sk, 
+        sr_return_time_sk, 
+        sr_item_sk, 
+        sr_customer_sk, 
+        sr_return_quantity,
+        ROW_NUMBER() OVER (PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rnk
+    FROM store_returns
+), RecentSales AS (
+    SELECT 
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ws_order_number,
+        MAX(ws_sold_date_sk) OVER (PARTITION BY ws_item_sk) AS max_sold_date
+    FROM web_sales
+    WHERE ws_sales_price > (SELECT AVG(ws_sales_price) FROM web_sales)
+), CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COALESCE(hd.hd_income_band_sk, 0) AS income_band,
+        DENSE_RANK() OVER (PARTITION BY c.c_current_addr_sk ORDER BY c.c_birth_year ASC) AS addr_rank
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+    WHERE cd.cd_marital_status IS NOT NULL OR cd.cd_gender IS NOT NULL
+), SalesSummary AS (
+    SELECT 
+        r.rnk,
+        s.ws_item_sk,
+        SUM(s.ws_net_paid_inc_tax) AS total_net_paid,
+        COUNT(*) AS count_sales,
+        DENSE_RANK() OVER (PARTITION BY s.ws_item_sk ORDER BY SUM(s.ws_net_paid_inc_tax) DESC) AS sales_rank
+    FROM RecentSales s
+    JOIN RankedReturns r ON s.ws_item_sk = r.sr_item_sk
+    WHERE r.rnk <= 5 AND s.max_sold_date >= r.sr_returned_date_sk
+    GROUP BY r.rnk, s.ws_item_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ss.ws_item_sk,
+    ss.total_net_paid,
+    ss.count_sales,
+    ci.income_band
+FROM SalesSummary ss
+JOIN CustomerInfo ci ON ss.rnk = ci.addr_rank
+WHERE ci.income_band IS NOT NULL
+ORDER BY ci.c_last_name ASC, ss.total_net_paid DESC
+LIMIT 10 OFFSET (SELECT COUNT(*) FROM CustomerInfo) / 2

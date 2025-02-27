@@ -1,0 +1,53 @@
+WITH UserEngagement AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END), 0) AS UpVotes,
+        COALESCE(SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END), 0) AS DownVotes,
+        COUNT(DISTINCT C.Id) AS CommentCount,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        COUNT(DISTINCT B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Comments C ON C.UserId = U.Id
+    LEFT JOIN 
+        Posts P ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Badges B ON B.UserId = U.Id
+    GROUP BY 
+        U.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        UpVotes, 
+        DownVotes, 
+        CommentCount,
+        PostCount,
+        BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY (UpVotes - DownVotes) DESC, PostCount DESC) AS Rank
+    FROM 
+        UserEngagement
+)
+SELECT 
+    TU.DisplayName,
+    TU.UpVotes,
+    TU.DownVotes,
+    TU.CommentCount,
+    TU.PostCount,
+    TU.BadgeCount,
+    CASE 
+        WHEN TU.BadgeCount > 10 THEN 'Veteran'
+        WHEN TU.BadgeCount BETWEEN 5 AND 10 THEN 'Experienced'
+        ELSE 'Newcomer'
+    END AS UserLevel
+FROM 
+    TopUsers TU
+WHERE 
+    TU.Rank <= 10
+ORDER BY 
+    TU.Rank;

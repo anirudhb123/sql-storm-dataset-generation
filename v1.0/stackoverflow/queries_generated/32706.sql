@@ -1,0 +1,100 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.PostHistoryTypeId,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (10, 11, 12, 13, 14) -- Only interested in post close, reopen, delete, and undelete actions
+),
+PostStatistics AS (
+    SELECT 
+        p.Id as PostId,
+        p.Title,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT ph.UserId) AS EditorCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        RecursivePostHistory rph ON p.Id = rph.PostId
+    GROUP BY 
+        p.Id, p.Title
+),
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+    HAVING 
+        COUNT(DISTINCT p.Id) > 0 -- Users must have posted at least once
+),
+ClosedPosts AS (
+    SELECT 
+        p.Id AS ClosedPostId,
+        ph.CreationDate AS ClosedDate,
+        rph.UserId AS CloseUserId
+    FROM 
+        Posts p
+    JOIN 
+        RecursivePostHistory rph ON p.Id = rph.PostId 
+    WHERE 
+        rph.PostHistoryTypeId = 10 -- Posts that were closed
+),
+FinalOutput AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.UpVoteCount,
+        ps.DownVoteCount,
+        ps.CommentCount,
+        ps.EditorCount,
+        c.ClosedPostId,
+        c.ClosedDate,
+        u.TotalBadges,
+        u.TotalPosts
+    FROM 
+        PostStatistics ps
+    LEFT JOIN 
+        ClosedPosts c ON ps.PostId = c.ClosedPostId
+    LEFT JOIN 
+        TopUsers u ON ps.EditorCount > u.TotalPosts-- Linking editor stats to user stats
+)
+SELECT 
+    fo.PostId,
+    fo.Title,
+    fo.UpVoteCount,
+    fo.DownVoteCount,
+    fo.CommentCount,
+    CASE 
+        WHEN fo.EditorCount = 0 THEN 'No Editors'
+        ELSE CAST(fo.EditorCount AS VARCHAR(10))
+    END AS EditorCount,
+    fo.ClosedDate,
+    u.DisplayName AS CloseUserName,
+    fo.TotalBadges,
+    fo.TotalPosts
+FROM 
+    FinalOutput fo
+LEFT JOIN 
+    Users u ON fo.ClosedDate IS NOT NULL AND u.Id = (SELECT CloseUserId FROM ClosedPosts WHERE ClosedPostId = fo.PostId)
+ORDER BY 
+    fo.UpVoteCount DESC, fo.ClosedDate DESC NULLS LAST;

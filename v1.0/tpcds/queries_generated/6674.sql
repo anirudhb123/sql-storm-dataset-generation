@@ -1,0 +1,51 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ss.ss_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ss.ss_ticket_number) AS sales_count,
+        COUNT(DISTINCT sr.sr_ticket_number) AS returns_count,
+        SUM(sr.sr_return_amt) AS total_returns
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_sales ss ON c.c_customer_sk = ss.ss_customer_sk
+    LEFT JOIN 
+        store_returns sr ON ss.ss_customer_sk = sr.sr_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1975 AND 1995
+        AND c.c_current_cdemo_sk IS NOT NULL
+    GROUP BY 
+        c.c_customer_id
+),
+Demographics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(cs.c_customer_id) AS customer_count,
+        AVG(cs.total_sales) AS avg_sales,
+        AVG(cs.sales_count) AS avg_sales_count,
+        AVG(cs.returns_count) AS avg_returns_count,
+        SUM(cs.total_returns) AS total_returns
+    FROM 
+        CustomerSales cs
+    INNER JOIN 
+        customer_demographics cd ON cs.c_customer_id = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+)
+SELECT 
+    d.cd_gender,
+    d.cd_marital_status,
+    d.customer_count,
+    d.avg_sales,
+    d.avg_sales_count,
+    d.avg_returns_count,
+    d.total_returns,
+    (d.avg_sales - d.total_returns) AS net_sales
+FROM 
+    Demographics d
+WHERE 
+    d.customer_count > 50
+ORDER BY 
+    net_sales DESC;

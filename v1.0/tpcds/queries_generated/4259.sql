@@ -1,0 +1,57 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.web_site_id,
+        SUM(ws.ws_net_paid_inc_tax) AS Total_Sales,
+        COUNT(DISTINCT ws.ws_order_number) AS Total_Orders
+    FROM 
+        web_sales ws
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        ws.web_site_id
+), 
+PromotionsData AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT ws.ws_order_number) AS Promotion_Orders
+    FROM 
+        promotion p
+    LEFT JOIN 
+        web_sales ws ON p.p_promo_sk = ws.ws_promo_sk
+    GROUP BY 
+        p.p_promo_id
+), 
+CustomerDemographics AS (
+    SELECT 
+        cd.cd_demo_sk,
+        SUM(ss.ss_net_profit) AS Total_Store_Profit
+    FROM 
+        store_sales ss
+    JOIN 
+        customer c ON ss.ss_customer_sk = c.c_customer_sk
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE 
+        cd.cd_gender = 'F' AND
+        cd.cd_marital_status = 'M'
+    GROUP BY 
+        cd.cd_demo_sk
+)
+SELECT 
+    sd.web_site_id,
+    sd.Total_Sales,
+    sd.Total_Orders,
+    COALESCE(pd.Promotion_Orders, 0) AS Promotion_Orders,
+    cd.Total_Store_Profit
+FROM 
+    SalesData sd
+LEFT JOIN 
+    PromotionsData pd ON sd.Total_Orders > 0
+LEFT JOIN 
+    CustomerDemographics cd ON cd.Total_Store_Profit > 1000
+ORDER BY 
+    sd.Total_Sales DESC
+LIMIT 10;

@@ -1,0 +1,23 @@
+SELECT
+    at.title AS movie_title,
+    ak.name AS actor_name,
+    c.role_id AS role_id,
+    ct.kind AS company_type,
+    m.production_year,
+    m.info AS movie_info
+FROM
+    aka_title AS at
+JOIN
+    cast_info AS c ON at.id = c.movie_id
+JOIN
+    aka_name AS ak ON c.person_id = ak.person_id
+JOIN
+    movie_companies AS mc ON at.id = mc.movie_id
+JOIN
+    company_type AS ct ON mc.company_type_id = ct.id
+JOIN
+    movie_info AS m ON at.id = m.movie_id
+WHERE
+    m.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+ORDER BY
+    m.production_year DESC, at.title;

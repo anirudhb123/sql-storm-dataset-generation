@@ -1,0 +1,90 @@
+
+WITH RECURSIVE RecursionCTE AS (
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        n.n_regionkey,
+        1 AS level
+    FROM 
+        nation n
+    WHERE 
+        n.n_name LIKE 'A%'
+    
+    UNION ALL
+    
+    SELECT 
+        n.n_nationkey,
+        n.n_name,
+        r.n_regionkey,
+        r.level + 1
+    FROM 
+        RecursionCTE r
+    JOIN 
+        nation n ON n.n_regionkey = r.n_regionkey
+    WHERE 
+        r.level < 5
+),
+AggregatedSales AS (
+    SELECT 
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey
+),
+SupplierRegion AS (
+    SELECT 
+        s.s_suppkey,
+        r.r_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY 
+        s.s_suppkey, r.r_name
+),
+FinalOutput AS (
+    SELECT 
+        c.c_name,
+        a.total_revenue,
+        sr.r_name,
+        sr.total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY sr.r_name ORDER BY a.total_revenue DESC) AS revenue_rank
+    FROM 
+        AggregatedSales a
+    JOIN 
+        customer c ON a.c_custkey = c.c_custkey
+    LEFT JOIN 
+        SupplierRegion sr ON sr.total_supply_cost IS NOT NULL
+    WHERE 
+        a.total_revenue > 10000
+)
+SELECT 
+    f.c_name,
+    f.total_revenue,
+    COALESCE(f.r_name, 'Unknown') AS region_name,
+    COALESCE(f.total_supply_cost, 0) AS supplier_cost,
+    f.revenue_rank
+FROM 
+    FinalOutput f
+WHERE 
+    EXISTS (
+        SELECT 
+            1 
+        FROM 
+            RecursionCTE rc 
+        WHERE 
+            rc.n_nationkey = c.c_nationkey
+    )
+ORDER BY 
+    f.total_revenue DESC;

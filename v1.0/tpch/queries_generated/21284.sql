@@ -1,0 +1,43 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS rn
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    WHERE s.s_acctbal IS NOT NULL AND n.n_name IS NOT NULL
+),
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, 
+           CASE WHEN p.p_retailprice > 1000 THEN 'High' ELSE 'Low' END AS price_category
+    FROM part p
+    WHERE p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_availqty > 50)
+),
+LatestOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, 
+           SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE l.l_shipdate >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderdate
+)
+SELECT 
+    n.n_name AS nation_name,
+    s.s_name AS supplier_name,
+    hp.p_name AS part_name,
+    LO.total_price,
+    COALESCE(MAX(rs.s_acctbal), 0) AS max_supplier_acctbal,
+    COUNT(DISTINCT lo.o_orderkey) AS order_count
+FROM LatestOrders lo
+JOIN HighValueParts hp ON lo.o_orderkey = (
+    SELECT l.l_orderkey 
+    FROM lineitem l 
+    WHERE l.l_partkey = hp.p_partkey 
+    ORDER BY l.l_extendedprice DESC 
+    LIMIT 1
+)
+FULL OUTER JOIN RankedSuppliers rs ON rs.rn = 1 
+LEFT JOIN nation n ON rs.s_suppkey = n.n_nationkey
+WHERE hp.price_category = 'High' 
+AND (lo.total_price IS NOT NULL OR h.p_retailprice < 500) 
+GROUP BY n.n_name, s.s_name, hp.p_name, LO.total_price
+HAVING COUNT(DISTINCT lo.o_orderkey) > 2 OR MAX(rs.s_acctbal) > (SELECT AVG(s_acctbal) FROM supplier)
+ORDER BY total_price DESC NULLS LAST;

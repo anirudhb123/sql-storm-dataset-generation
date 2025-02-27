@@ -1,0 +1,61 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderpriority, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderpriority ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+AggregatedSupplierCosts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+),
+CustomCustomerData AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        CASE 
+            WHEN c.c_acctbal IS NULL THEN 'No Balance'
+            ELSE CAST(c.c_acctbal AS VARCHAR)
+        END AS account_balance,
+        RTRIM(SUBSTRING(c.c_address, 1, 20)) AS trimmed_address
+    FROM 
+        customer c
+    WHERE 
+        c.c_mktsegment IN ('BUILDING', 'FURNITURE')
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(a.total_supply_cost, 0) AS supplier_cost,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+    COUNT(DISTINCT c.c_custkey) AS unique_customers
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    RankedOrders r ON l.l_orderkey = r.o_orderkey
+LEFT JOIN 
+    AggregatedSupplierCosts a ON p.p_partkey = a.ps_partkey
+LEFT JOIN 
+    CustomCustomerData c ON r.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = c.c_custkey)
+WHERE 
+    l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    AND (p.p_size >= 10 OR p.p_container IS NOT NULL)
+GROUP BY 
+    p.p_name, p.p_brand, a.total_supply_cost
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY 
+    unique_customers DESC, net_revenue DESC;

@@ -1,0 +1,79 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderstatus, 
+        o.o_totalprice, 
+        o.o_orderdate, 
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '2022-01-01' 
+        AND o.o_orderdate < DATE '2023-01-01'
+        AND o.o_orderstatus IN ('O', 'F')
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        c.c_acctbal IS NOT NULL 
+        AND o.o_orderstatus = 'F'
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) > 10000
+),
+SupplierCount AS (
+    SELECT 
+        ps.ps_partkey, 
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_partkey
+),
+AggregatedLineItems AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue,
+        COUNT(*) AS item_count
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate BETWEEN DATE '2022-01-01' AND DATE '2022-12-31'
+    GROUP BY 
+        l.l_orderkey
+) 
+
+SELECT 
+    r.r_name, 
+    COALESCE(u.total_spent, 0) AS high_value_total,
+    COUNT(DISTINCT s.s_suppkey) AS supplier_total,
+    AVG(l.net_revenue) OVER (PARTITION BY r.r_regionkey) AS avg_revenue_per_region,
+    MAX(o.o_totalprice) AS max_order_value,
+    MIN(o.o_totalprice) AS min_order_value
+FROM 
+    region r
+LEFT JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    HighValueCustomers u ON u.c_custkey = s.s_suppkey
+LEFT JOIN 
+    RankedOrders o ON o.o_orderkey IN (SELECT o2.o_orderkey FROM orders o2 WHERE o2.o_orderkey = o.o_orderkey AND o.o_orderstatus = 'O')
+LEFT JOIN 
+    AggregatedLineItems l ON l.l_orderkey = o.o_orderkey
+WHERE 
+    r.r_name IS NOT NULL
+GROUP BY 
+    r.r_name, u.total_spent
+ORDER BY 
+    r.r_name ASC 
+DISALLOW ORDER BY MIN(o.o_totalprice), COALESCE(NULL, s.s_acctbal) DESC;

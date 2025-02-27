@@ -1,0 +1,74 @@
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT B.Id) AS BadgeCount,
+        SUM(V.VoteTypeId = 2) AS UpVotes,
+        SUM(V.VoteTypeId = 3) AS DownVotes,
+        SUM(P.ViewCount) AS TotalViews,
+        ROW_NUMBER() OVER (ORDER BY U.Reputation DESC) AS Rank
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation
+),
+PostDetails AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount,
+        COALESCE(PH.PostHistoryTypeId, 0) AS LastActionType
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            MAX(CreationDate) AS LastActionDate
+         FROM 
+            PostHistory 
+         GROUP BY 
+            PostId) AS PHMax ON P.Id = PHMax.PostId
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.CreationDate = PHMax.LastActionDate
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, P.ViewCount, PH.PostHistoryTypeId
+)
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.BadgeCount,
+    U.UpVotes,
+    U.DownVotes,
+    U.TotalViews,
+    P.PostId,
+    P.Title,
+    P.CreationDate,
+    P.Score,
+    P.ViewCount,
+    P.CommentCount,
+    P.LastActionType
+FROM 
+    UserStats U
+INNER JOIN 
+    PostDetails P ON U.UserId = P.UserId
+WHERE 
+    U.Reputation > 1000 AND
+    P.Score > 10
+ORDER BY 
+    U.Rank, P.ViewCount DESC
+LIMIT 100;

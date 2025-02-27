@@ -1,0 +1,58 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.OwnerUserId,
+        RANK() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS RankByUser
+    FROM 
+        Posts P
+    WHERE 
+        P.PostTypeId = 1 
+        AND P.CreationDate >= CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year'
+),
+TopPosts AS (
+    SELECT 
+        RP.*,
+        U.DisplayName AS OwnerDisplayName,
+        U.Reputation,
+        U.Location,
+        (SELECT COUNT(*) FROM Comments C WHERE C.PostId = RP.PostId) AS CommentCount
+    FROM 
+        RankedPosts RP
+    JOIN 
+        Users U ON RP.OwnerUserId = U.Id
+    WHERE 
+        RP.RankByUser = 1
+)
+SELECT 
+    TP.PostId,
+    TP.Title,
+    TP.CreationDate,
+    TP.Score,
+    COALESCE(TP.ViewCount, 0) AS ViewCount,
+    TP.OwnerDisplayName,
+    TP.Reputation,
+    NULLIF(TP.Location, '') AS UserLocation,
+    TP.CommentCount,
+    CASE 
+        WHEN TP.Reputation >= 1000 THEN 'High Reputation User'
+        ELSE 'Regular User'
+    END AS UserType,
+    COALESCE((
+        SELECT STRING_AGG(Tag.TagName, ', ')
+        FROM Tags Tag
+        WHERE Tag.Id IN (
+            SELECT UNNEST(string_to_array(SUBSTRING(P.Tags FROM 2 FOR LENGTH(P.Tags) - 2), '><'))::int
+        )
+        LIMIT 5
+    ), 'No Tags') AS Tags
+FROM 
+    TopPosts TP
+ORDER BY 
+    TP.Score DESC,
+    TP.CreationDate DESC
+LIMIT 10;

@@ -1,0 +1,51 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, 1 AS order_level
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderstatus = 'O'
+    
+    UNION ALL
+    
+    SELECT co.c_custkey, co.c_name, o.o_orderkey, o.o_orderdate, o.o_totalprice, co.order_level + 1
+    FROM CustomerOrders co
+    JOIN orders o ON co.o_orderkey = o.o_orderkey
+    WHERE co.order_level < 5
+),
+SupplierCosts AS (
+    SELECT p.p_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey
+),
+FrequentSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, COUNT(ps.ps_partkey) AS supply_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING COUNT(ps.ps_partkey) > 10
+)
+SELECT co.c_custkey, co.c_name, COUNT(DISTINCT co.o_orderkey) AS total_orders,
+       SUM(cs.total_supply_cost) AS total_supply_cost, 
+       ROW_NUMBER() OVER (PARTITION BY co.c_custkey ORDER BY SUM(cs.total_supply_cost) DESC) AS rn,
+       (
+            SELECT COUNT(*)
+            FROM lineitem l
+            WHERE l.l_orderkey = co.o_orderkey AND l.l_discount > 0.1
+       ) AS high_discount_count
+FROM CustomerOrders co
+LEFT JOIN SupplierCosts cs ON cs.p_partkey = (
+    SELECT ps.ps_partkey 
+    FROM partsupp ps
+    JOIN FrequentSuppliers fs ON ps.ps_suppkey = fs.s_suppkey
+    WHERE ps.ps_supplycost = (
+        SELECT MIN(ps2.ps_supplycost) 
+        FROM partsupp ps2
+        WHERE ps2.ps_partkey = ps.ps_partkey
+    )
+    LIMIT 1
+)
+GROUP BY co.c_custkey, co.c_name
+HAVING SUM(cs.total_supply_cost) IS NOT NULL
+ORDER BY total_orders DESC, total_supply_cost DESC
+FETCH FIRST 10 ROWS ONLY;

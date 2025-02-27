@@ -1,0 +1,70 @@
+
+WITH RECURSIVE ActorHierarchy AS (
+    SELECT ci.person_id, ct.kind AS role, 1 AS level 
+    FROM cast_info ci
+    JOIN comp_cast_type ct ON ci.person_role_id = ct.id
+    WHERE ci.nr_order = 1  
+
+    UNION ALL
+
+    SELECT ci.person_id, ct.kind AS role, ah.level + 1
+    FROM cast_info ci
+    JOIN ActorHierarchy ah ON ci.movie_id = (SELECT movie_id FROM cast_info WHERE person_id = ah.person_id LIMIT 1)
+    JOIN comp_cast_type ct ON ci.person_role_id = ct.id
+    WHERE ci.nr_order > 1
+),
+MovieStats AS (
+    SELECT 
+        mt.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_actors,
+        COUNT(DISTINCT mv.id) AS total_movies,
+        SUM(CASE WHEN mv.production_year = 2023 THEN 1 ELSE 0 END) AS movies_in_2023
+    FROM aka_title mt
+    JOIN movie_companies mc ON mt.id = mc.movie_id
+    JOIN company_name cn ON mc.company_id = cn.id
+    JOIN cast_info ci ON ci.movie_id = mt.id
+    JOIN title mv ON mv.id = mt.movie_id
+    GROUP BY mt.production_year
+),
+ActorMovies AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movies_count,
+        MAX(mv.production_year) AS last_movie_year
+    FROM aka_name a
+    LEFT JOIN cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN aka_title mt ON ci.movie_id = mt.id
+    LEFT JOIN title mv ON mt.id = mv.id
+    WHERE a.name IS NOT NULL
+    GROUP BY a.id, a.name
+),
+CombinedStats AS (
+    SELECT 
+        ms.production_year,
+        asm.actor_id,
+        asm.actor_name,
+        asm.movies_count,
+        asm.last_movie_year,
+        ms.total_actors,
+        ms.total_movies,
+        ms.movies_in_2023
+    FROM MovieStats ms
+    JOIN ActorMovies asm ON 1 = 1  
+)
+
+SELECT 
+    cs.production_year,
+    cs.actor_id,
+    cs.actor_name,
+    cs.movies_count,
+    cs.last_movie_year,
+    cs.total_actors,
+    cs.total_movies,
+    cs.movies_in_2023,
+    CASE 
+        WHEN cs.movies_in_2023 > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS activity_status
+FROM CombinedStats cs
+ORDER BY cs.production_year DESC, cs.movies_count DESC;

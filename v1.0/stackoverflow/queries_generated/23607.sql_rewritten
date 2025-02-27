@@ -1,0 +1,87 @@
+WITH UserVoteCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT P.Id) AS PostCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    LEFT JOIN 
+        Posts P ON V.PostId = P.Id
+    WHERE 
+        U.Reputation > 0 
+    GROUP BY 
+        U.Id, U.DisplayName
+),
+
+TopVotedPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.Score,
+        P.ViewCount,
+        ROW_NUMBER() OVER (ORDER BY P.Score DESC) AS Rank
+    FROM 
+        Posts P
+    WHERE 
+        P.ViewCount IS NOT NULL AND 
+        P.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '90 days' 
+),
+
+ClosedPosts AS (
+    SELECT 
+        Ph.PostId,
+        Ph.CreationDate,
+        P.Title,
+        C.Name AS CloseReason
+    FROM 
+        PostHistory Ph
+    JOIN 
+        CloseReasonTypes C ON C.Id = CAST(Ph.Comment AS INT) 
+    JOIN 
+        Posts P ON P.Id = Ph.PostId
+    WHERE 
+        Ph.PostHistoryTypeId = 10 
+),
+
+AggregatedResults AS (
+    SELECT 
+        U.UserId,
+        U.DisplayName,
+        COUNT(DISTINCT TP.PostId) AS TopVotedPostCount,
+        COUNT(DISTINCT CP.PostId) AS ClosedPostCount,
+        COALESCE(UC.UpVotes, 0) AS UpVotes,
+        COALESCE(UC.DownVotes, 0) AS DownVotes
+    FROM 
+        UserVoteCounts UC 
+    FULL OUTER JOIN 
+        Users U ON U.Id = UC.UserId 
+    LEFT JOIN 
+        TopVotedPosts TP ON U.Id = TP.PostId 
+    LEFT JOIN 
+        ClosedPosts CP ON U.Id = CP.PostId 
+    GROUP BY 
+        U.UserId, U.DisplayName, UC.UpVotes, UC.DownVotes
+)
+
+SELECT 
+    DisplayName,
+    TopVotedPostCount,
+    ClosedPostCount,
+    UpVotes,
+    DownVotes,
+    CASE 
+        WHEN TopVotedPostCount > 0 THEN 'Popular Contributor'
+        WHEN ClosedPostCount > 0 THEN 'Inactive Contributor'
+        ELSE 'Regular User'
+    END AS UserType
+FROM 
+    AggregatedResults
+WHERE 
+    (TopVotedPostCount > 3 OR ClosedPostCount > 5)
+ORDER BY 
+    UpVotes DESC NULLS LAST, 
+    DownVotes ASC NULLS LAST;

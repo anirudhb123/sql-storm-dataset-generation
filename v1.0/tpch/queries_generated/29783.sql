@@ -1,0 +1,33 @@
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 
+           ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) as rank
+    FROM supplier s
+),
+FilteredParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_size, p.p_retailprice,
+           SUM(CASE WHEN ps.ps_availqty > 0 THEN ps.ps_supplycost ELSE 0 END) as total_supplycost
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, p.p_size, p.p_retailprice
+    HAVING COUNT(ps.ps_suppkey) > 3
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+)
+SELECT r.r_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count, 
+       AVG(p.total_supplycost) AS avg_supplycost, 
+       SUM(od.total_revenue) AS total_order_revenue
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN RankedSuppliers s ON n.n_nationkey = s.s_nationkey AND s.rank <= 5
+JOIN FilteredParts p ON s.s_suppkey = (SELECT ps.ps_suppkey
+                                        FROM partsupp ps
+                                        WHERE ps.ps_partkey = p.p_partkey
+                                        ORDER BY ps.ps_supplycost DESC
+                                        LIMIT 1)
+JOIN OrderDetails od ON od.total_revenue > 100000
+GROUP BY r.r_name
+ORDER BY total_order_revenue DESC;

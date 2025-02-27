@@ -1,0 +1,60 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available,
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+), 
+CustomerStats AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+OrderStats AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_line_value
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderstatus 
+)
+SELECT 
+    cs.c_name AS customer_name,
+    cs.total_spent AS total_spent,
+    ss.s_name AS supplier_name,
+    ss.total_available as supplier_total_available,
+    os.total_line_value AS order_value,
+    ROW_NUMBER() OVER (PARTITION BY cs.c_custkey ORDER BY cs.total_spent DESC) AS rank_within_customer
+FROM 
+    CustomerStats cs
+LEFT JOIN 
+    SupplierStats ss ON cs.order_count > 5 
+LEFT JOIN 
+    OrderStats os ON cs.c_custkey = os.o_orderkey
+WHERE 
+    COALESCE(ss.total_available, 0) > 100 AND 
+    os.o_orderstatus = 'O' 
+ORDER BY 
+    cs.total_spent DESC, 
+    ss.total_available DESC;

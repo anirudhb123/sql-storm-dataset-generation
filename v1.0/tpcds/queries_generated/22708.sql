@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        cs_item_sk,
+        cs_order_number,
+        cs_net_profit,
+        DENSE_RANK() OVER (PARTITION BY cs_item_sk ORDER BY cs_net_profit DESC) AS rank_profit
+    FROM 
+        catalog_sales
+    WHERE 
+        cs_sold_date_sk >= (SELECT MAX(d_date_sk) - 30 FROM date_dim WHERE d_current_month = '1')
+      AND cs_net_profit IS NOT NULL
+),
+AggregateSales AS (
+    SELECT 
+        rv.cs_item_sk,
+        COUNT(rv.cs_order_number) AS total_orders,
+        SUM(rv.cs_net_profit) AS total_profit,
+        MAX(rv.cs_net_profit) AS max_profit,
+        AVG(rv.cs_net_profit) AS avg_profit
+    FROM 
+        RankedSales rv
+    JOIN 
+        catalog_sales cs ON rv.cs_item_sk = cs.cs_item_sk AND rv.cs_order_number = cs.cs_order_number
+    GROUP BY 
+        rv.cs_item_sk
+)
+SELECT 
+    ca.ca_city,
+    ca.ca_state,
+    COUNT(DISTINCT s.ss_ticket_number) AS total_store_sales,
+    SUM(s.ss_net_profit) AS total_net_profit,
+    CASE 
+        WHEN COUNT(DISTINCT s.ss_ticket_number) = 0 THEN NULL 
+        ELSE SUM(s.ss_net_profit) / NULLIF(COUNT(DISTINCT s.ss_ticket_number), 0) 
+    END AS avg_profit_per_sale,
+    COALESCE(MAX(as.max_profit), 0) AS max_profit_item,
+    CASE 
+        WHEN SUM(s.ss_net_profit) < 0 THEN 'Loss'
+        WHEN SUM(s.ss_net_profit) = 0 THEN 'Break-even'
+        ELSE 'Profit'
+    END AS financial_status
+FROM 
+    store_sales s
+LEFT JOIN 
+    customer_address ca ON s.ss_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    AggregateSales as ON s.ss_item_sk = as.cs_item_sk
+WHERE 
+    s.ss_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023 AND d_current_year = '1')
+    AND ca.ca_country = 'USA'
+GROUP BY 
+    ca.ca_city, 
+    ca.ca_state
+HAVING 
+    SUM(s.ss_net_profit) > 1000 OR MAX(as.max_profit) > 100
+ORDER BY 
+    total_net_profit DESC NULLS LAST;

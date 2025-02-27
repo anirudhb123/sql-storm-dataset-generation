@@ -1,0 +1,74 @@
+
+WITH RECURSIVE SalesHierarchy AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        p.p_promo_name,
+        ws.ws_net_profit,
+        1 AS level
+    FROM 
+        customer AS c
+    JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    JOIN 
+        promotion AS p ON ws.ws_promo_sk = p.p_promo_sk
+    WHERE 
+        ws.ws_sold_date_sk = (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    
+    UNION ALL
+    
+    SELECT 
+        s.ss_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        NULL AS p_promo_name,
+        s.ss_net_profit,
+        sh.level + 1
+    FROM 
+        store_sales AS s
+    JOIN 
+        customer AS c ON s.ss_customer_sk = c.c_customer_sk
+    JOIN 
+        SalesHierarchy AS sh ON sh.c_customer_sk = s.ss_customer_sk
+    WHERE 
+        sh.level < 5 -- Limit to 5 levels for the hierarchy
+), TopSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_profit) AS total_web_profit,
+        SUM(ss.ss_net_profit) AS total_store_profit
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        web_sales AS ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        store_sales AS ss ON c.c_customer_sk = ss.ss_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+), RankedSales AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(ts.total_web_profit, 0) AS total_web_profit,
+        COALESCE(ts.total_store_profit, 0) AS total_store_profit,
+        RANK() OVER (ORDER BY COALESCE(ts.total_web_profit, 0) + COALESCE(ts.total_store_profit, 0) DESC) AS rank
+    FROM 
+        customer AS c
+    LEFT JOIN 
+        TopSales AS ts ON c.c_customer_sk = ts.c_customer_sk
+)
+SELECT 
+    r.rank,
+    c.c_first_name,
+    c.c_last_name,
+    r.total_web_profit,
+    r.total_store_profit,
+    (r.total_web_profit - r.total_store_profit) AS profit_difference
+FROM 
+    RankedSales AS r
+JOIN 
+    customer AS c ON r.c_customer_sk = c.c_customer_sk
+WHERE 
+    r.rank <= 10 -- Get top 10 customers based on profit
+ORDER BY 
+    profit_difference DESC;

@@ -1,0 +1,55 @@
+
+WITH SalesData AS (
+    SELECT 
+        w.warehouse_id,
+        d.d_year,
+        d.d_month_seq,
+        SUM(ws.net_paid) AS total_net_sales,
+        AVG(ws.net_paid_inc_tax) AS avg_sales_price,
+        COUNT(DISTINCT ws.order_number) AS total_orders,
+        COUNT(DISTINCT ws.bill_customer_sk) AS unique_customers
+    FROM 
+        web_sales ws
+    JOIN 
+        warehouse w ON ws.warehouse_sk = w.warehouse_sk
+    JOIN 
+        date_dim d ON ws.sold_date_sk = d.d_date_sk
+    WHERE 
+        d.d_year = 2023
+    GROUP BY 
+        w.warehouse_id, d.d_year, d.d_month_seq
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        CD.education_status,
+        SUM(sd.total_net_sales) AS total_sales
+    FROM 
+        customer_demographics cd
+    JOIN 
+        customer c ON cd.cd_demo_sk = c.c_current_cdemo_sk
+    JOIN 
+        SalesData sd ON c.c_customer_sk = sd.warehouse_id
+    GROUP BY 
+        cd_demo_sk, cd_gender, cd_marital_status, cd.education_status
+),
+RankedSales AS (
+    SELECT 
+        *,
+        DENSE_RANK() OVER (PARTITION BY cd_gender ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        CustomerDemographics
+)
+SELECT 
+    gender,
+    marital_status,
+    education_status,
+    total_sales
+FROM 
+    RankedSales
+WHERE 
+    sales_rank <= 10
+ORDER BY 
+    gender, total_sales DESC;

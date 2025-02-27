@@ -1,0 +1,90 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        row_number() OVER (PARTITION BY p.OwnerUserId ORDER BY p.ViewCount DESC) AS ViewRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+        AND p.ViewCount > 0
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        COALESCE(v.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(v.DownVotes, 0) AS TotalDownVotes,
+        ABS(COALESCE(v.UpVotes, 0) - COALESCE(v.DownVotes, 0)) AS VoteVariance,
+        COUNT(c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Votes v ON v.PostId = rp.PostId
+    LEFT JOIN 
+        Comments c ON c.PostId = rp.PostId
+    LEFT JOIN 
+        Badges b ON b.UserId = rp.OwnerUserId
+    WHERE 
+        rp.ViewRank = 1
+    GROUP BY 
+        rp.PostId, rp.Title
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        COUNT(CASE WHEN ph.PostHistoryTypeId IN (10, 11) THEN 1 END) AS CloseReopenCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 12 THEN 1 END) AS DeleteCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 13 THEN 1 END) AS UndeleteCount,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 2 THEN 1 END) AS InitialBodyCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+),
+FinalReport AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.TotalUpVotes,
+        ps.TotalDownVotes,
+        ps.VoteVariance,
+        ps.CommentCount,
+        phs.CloseReopenCount,
+        phs.DeleteCount,
+        phs.UndeleteCount,
+        phs.InitialBodyCount,
+        CASE 
+            WHEN ps.TotalUpVotes > ps.TotalDownVotes THEN 'Positive'
+            WHEN ps.TotalUpVotes < ps.TotalDownVotes THEN 'Negative'
+            ELSE 'Neutral'
+        END AS VoteSentiment
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        PostHistoryStats phs ON ps.PostId = phs.PostId
+    ORDER BY 
+        ps.VoteVariance DESC, 
+        ps.CommentCount DESC
+)
+SELECT 
+    PostId, 
+    Title,
+    TotalUpVotes,
+    TotalDownVotes,
+    VoteVariance,
+    CommentCount,
+    CloseReopenCount,
+    DeleteCount,
+    UndeleteCount,
+    InitialBodyCount,
+    VoteSentiment
+FROM 
+    FinalReport
+WHERE 
+    CloseReopenCount > 0 OR DeleteCount > 0
+ORDER BY 
+    CloseReopenCount DESC, VoteSentiment ASC;

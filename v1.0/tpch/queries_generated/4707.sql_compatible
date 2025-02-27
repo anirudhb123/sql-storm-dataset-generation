@@ -1,0 +1,67 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.orderkey,
+        o.totalprice,
+        c.custkey,
+        c.c_name,
+        RANK() OVER (PARTITION BY c.custkey ORDER BY o.totalprice DESC) AS rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.custkey = c.c_custkey
+    WHERE 
+        o.orderdate >= DATE '1997-01-01'
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.partkey,
+        SUM(ps.availqty) AS total_availqty
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.partkey
+),
+PartDetails AS (
+    SELECT 
+        p.partkey,
+        p.name,
+        p.type,
+        p.retailprice,
+        COALESCE(pa.total_availqty, 0) AS avail_qty
+    FROM 
+        part p
+    LEFT JOIN 
+        SupplierAvailability pa ON p.partkey = pa.partkey
+)
+SELECT 
+    r.regionkey,
+    r.r_name,
+    SUM(CASE 
+            WHEN l.discount > 0.1 THEN l.extendedprice * (1 - l.discount)
+            ELSE l.extendedprice
+        END) AS net_sales,
+    COUNT(DISTINCT o.orderkey) AS order_count,
+    AVG(l.quantity) AS avg_quantity,
+    STRING_AGG(DISTINCT pd.name, ', ') AS parts_ordered
+FROM 
+    lineitem l
+JOIN 
+    orders o ON l.orderkey = o.orderkey
+JOIN 
+    RankedOrders ro ON ro.orderkey = o.orderkey
+JOIN 
+    customer c ON ro.custkey = c.c_custkey
+JOIN 
+    nation n ON c.nationkey = n.n_nationkey
+JOIN 
+    region r ON n.regionkey = r.r_regionkey
+JOIN 
+    PartDetails pd ON l.partkey = pd.partkey
+GROUP BY 
+    r.regionkey, r.r_name
+HAVING 
+    COUNT(DISTINCT o.orderkey) > 5
+ORDER BY 
+    net_sales DESC
+LIMIT 10;

@@ -1,0 +1,45 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_net_paid,
+        ws.ws_sold_date_sk,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_paid DESC) AS sales_rank,
+        d.d_year,
+        d.d_month_seq
+    FROM
+        web_sales ws
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2023
+),
+CustomerReturns AS (
+    SELECT
+        wr.returning_customer_sk,
+        SUM(wr.return_amt) AS total_return_amt
+    FROM
+        web_returns wr
+    WHERE
+        wr.returned_date_sk BETWEEN 20230101 AND 20231231
+    GROUP BY
+        wr.returning_customer_sk
+)
+SELECT
+    r.web_site_sk,
+    COUNT(DISTINCT r.ws_order_number) AS total_orders,
+    SUM(CASE WHEN r.sales_rank <= 5 THEN r.ws_net_paid ELSE 0 END) AS top_sales,
+    COALESCE(c.total_return_amt, 0) AS total_returns,
+    (SUM(CASE WHEN r.sales_rank <= 5 THEN r.ws_net_paid ELSE 0 END) - COALESCE(c.total_return_amt, 0)) AS net_profit
+FROM
+    RankedSales r
+LEFT JOIN
+    CustomerReturns c ON r.ws_order_number = c.returning_customer_sk
+WHERE
+    r.sales_rank <= 5
+GROUP BY
+    r.web_site_sk
+ORDER BY
+    net_profit DESC
+LIMIT 10;

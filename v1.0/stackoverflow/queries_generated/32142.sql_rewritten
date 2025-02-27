@@ -1,0 +1,64 @@
+WITH RecursivePosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 2  
+    UNION ALL
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        rp.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePosts rp ON p.Id = rp.ParentId
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId, 
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM 
+        Posts p 
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        MAX(CASE WHEN ph.PostHistoryTypeId = 10 THEN ph.CreationDate END) AS LastCloseDate,
+        COUNT(CASE WHEN ph.PostHistoryTypeId = 10 THEN 1 END) AS CloseCount
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId
+)
+SELECT 
+    p.Id AS PostId,
+    p.Title,
+    COALESCE(ps.UpVotes, 0) - COALESCE(ps.DownVotes, 0) AS NetVotes,
+    COALESCE(ph.LastCloseDate, 'Never Closed') AS LastCloseDate,
+    COALESCE(ph.CloseCount, 0) AS CloseCount,
+    rp.Level AS AnswerLevel
+FROM 
+    Posts p
+LEFT JOIN 
+    PostVoteSummary ps ON p.Id = ps.PostId
+LEFT JOIN 
+    PostHistoryAnalysis ph ON p.Id = ph.PostId
+LEFT JOIN 
+    RecursivePosts rp ON p.Id = rp.PostId
+WHERE 
+    p.PostTypeId = 1  
+    AND (rp.PostId IS NULL OR rp.Level <= 3)
+ORDER BY 
+    NetVotes DESC, 
+    LastCloseDate DESC NULLS LAST;

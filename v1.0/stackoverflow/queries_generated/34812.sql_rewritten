@@ -1,0 +1,96 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year' 
+        AND p.Score > 0
+),
+
+PostVoteSummary AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+
+PostHistoryAggregates AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS EditCount,
+        MAX(ph.CreationDate) AS LastEditDate,
+        STRING_AGG(CASE 
+            WHEN ph.PostHistoryTypeId IN (4, 5) THEN ph.Comment 
+            ELSE NULL 
+        END, ', ') AS EditComments
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5) 
+    GROUP BY 
+        ph.PostId
+),
+
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(*) AS BadgeCount,
+        STRING_AGG(b.Name, ', ') AS Badges
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+),
+
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(SUM(p.ViewCount), 0) AS TotalViews,
+        COALESCE(sub.BadgeCount, 0) AS TotalBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        UserBadges sub ON u.Id = sub.UserId
+    GROUP BY 
+        u.Id
+)
+
+SELECT 
+    up.PostId,
+    up.Title,
+    up.CreationDate,
+    up.ViewCount,
+    pv.Upvotes,
+    pv.Downvotes,
+    ph.EditCount,
+    ph.LastEditDate,
+    u.DisplayName AS PostOwner,
+    ua.TotalViews AS OwnerTotalViews,
+    ua.TotalBadges AS OwnerBadgeCount
+FROM 
+    RankedPosts up
+LEFT JOIN 
+    PostVoteSummary pv ON up.PostId = pv.PostId
+LEFT JOIN 
+    PostHistoryAggregates ph ON up.PostId = ph.PostId
+JOIN 
+    Users u ON up.OwnerUserId = u.Id
+LEFT JOIN 
+    UserActivity ua ON u.Id = ua.UserId
+WHERE 
+    up.Rank <= 5
+ORDER BY 
+    up.Score DESC;

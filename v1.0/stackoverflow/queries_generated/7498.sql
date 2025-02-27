@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(c.Id) AS CommentCount,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC, p.CreationDate DESC) AS ScoreRank
+    FROM
+        Posts p
+    LEFT JOIN
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    WHERE
+        p.PostTypeId IN (1, 2) -- 1 for Question, 2 for Answer
+    GROUP BY
+        p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate, u.DisplayName
+),
+TopPosts AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.ViewCount,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.CommentCount
+    FROM
+        RankedPosts rp
+    WHERE
+        rp.ScoreRank <= 5 -- Get top 5 posts per type
+)
+SELECT
+    tp.Title,
+    tp.Score,
+    tp.ViewCount,
+    tp.CreationDate,
+    tp.OwnerDisplayName,
+    tp.CommentCount,
+    COALESCE(BadgeCount, 0) AS UserBadgeCount
+FROM
+    TopPosts tp
+LEFT JOIN (
+    SELECT 
+        UserId, COUNT(*) AS BadgeCount
+    FROM 
+        Badges 
+    GROUP BY 
+        UserId
+) b ON tp.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = b.UserId)
+ORDER BY 
+    tp.Score DESC;

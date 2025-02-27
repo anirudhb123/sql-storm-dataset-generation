@@ -1,0 +1,61 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 50000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal / 2
+),
+
+PartSupplierCTE AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+
+HighValueParts AS (
+    SELECT p.p_partkey, p.p_name, p.p_retailprice, p.p_comment
+    FROM part p
+    WHERE p.p_retailprice > (
+        SELECT AVG(p2.p_retailprice)
+        FROM part p2
+    )
+),
+
+CustomerOrderTotals AS (
+    SELECT o.o_custkey, SUM(o.o_totalprice) AS total_orders
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    GROUP BY o.o_custkey
+),
+
+RegionNations AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+
+SELECT 
+    c.c_name,
+    SUM(lo.l_extendedprice * (1 - lo.l_discount)) AS total_spent,
+    r.n_name AS nation_name,
+    sh.level AS supplier_level,
+    CASE
+        WHEN SUM(lo.l_extendedprice) > 100000 THEN 'High Spending'
+        WHEN SUM(lo.l_extendedprice) BETWEEN 50000 AND 100000 THEN 'Moderate Spending'
+        ELSE 'Low Spending'
+    END AS spending_category
+FROM CustomerOrderTotals cot
+JOIN lineitem lo ON cot.o_custkey = lo.l_orderkey
+JOIN HighValueParts p ON lo.l_partkey = p.p_partkey
+JOIN RegionNations r ON cot.o_custkey = r.n_nationkey
+LEFT JOIN SupplierHierarchy sh ON r.n_nationkey = sh.s_nationkey
+WHERE lo.l_shipdate >= '2023-01-01'
+  AND (lo.l_returnflag IS NULL OR lo.l_returnflag != 'R')
+GROUP BY c.c_name, r.n_name, sh.level
+HAVING SUM(lo.l_extendedprice) IS NOT NULL
+ORDER BY total_spent DESC, supplier_level ASC;

@@ -1,0 +1,74 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.PostTypeId,
+        p.OwnerUserId,
+        p.ViewCount,
+        p.Score,
+        RANK() OVER (PARTITION BY p.PostTypeId ORDER BY p.ViewCount DESC) AS RankViewCount,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 year' 
+    GROUP BY 
+        p.Id
+), PopularTags AS (
+    SELECT 
+        UNNEST(string_to_array(_tags.Tags, '>')) AS Tag
+    FROM 
+        Posts _posts
+    WHERE 
+        _posts.PostTypeId = 1 -- Only questions
+        AND _posts.CreationDate >= CURRENT_DATE - INTERVAL '1 year'
+    ) AS TagList
+), UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), EnhancedVotes AS (
+    SELECT 
+        v.PostId,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.ViewCount,
+    rp.Score,
+    rp.CommentCount,
+    COALESCE(rv.UpVotes, 0) AS TotalUpVotes,
+    COALESCE(rv.DownVotes, 0) AS TotalDownVotes,
+    ut.UserId,
+    ut.DisplayName AS UserDisplayName,
+    ut.Reputation AS UserReputation,
+    (SELECT STRING_AGG(Tag, ', ') FROM PopularTags) AS AllTags
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    EnhancedVotes rv ON rp.PostId = rv.PostId
+JOIN 
+    UserReputation ut ON rp.OwnerUserId = ut.UserId
+WHERE 
+    rp.RankViewCount <= 10 -- Top 10 by view count
+    AND rp.Score > 0 -- Only questions with positive score
+ORDER BY 
+    rp.Score DESC, rp.ViewCount DESC;
+
+This SQL query employs multiple advanced constructs including common table expressions (CTEs), window functions, aggregate functions, and string handling. It ranks posts by view count, extracts popular tags, calculates user reputation and badge counts, and aggregates upvotes and downvotes for each post. The final selection filters down to the top 10 posts with a positive score, providing a rich dataset for performance benchmarking and analysis.

@@ -1,0 +1,87 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_ext_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS sales_rank
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_credit_rating,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY cd.cd_purchase_estimate DESC) AS gender_rank
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+
+top_customers AS (
+    SELECT 
+        ci.c_customer_sk,
+        ci.c_first_name,
+        ci.c_last_name,
+        SUM(sd.ws_quantity) AS total_quantity,
+        SUM(sd.ws_ext_sales_price) AS total_sales
+    FROM 
+        customer_info ci
+    LEFT JOIN 
+        sales_data sd ON ci.c_customer_sk = sd.ws_item_sk
+    WHERE 
+        ci.gender_rank <= 10
+    GROUP BY 
+        ci.c_customer_sk, ci.c_first_name, ci.c_last_name
+),
+
+sales_summary AS (
+    SELECT 
+        w.w_warehouse_id,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_sales,
+        SUM(ss.ss_net_paid_inc_tax) AS total_net_income,
+        AVG(ss.ss_ext_discount_amt) AS avg_discount
+    FROM 
+        store_sales ss
+    JOIN 
+        store s ON ss.ss_store_sk = s.s_store_sk
+    JOIN 
+        warehouse w ON s.s_company_id = w.w_warehouse_sk
+    WHERE 
+        ss.ss_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        w.w_warehouse_id
+)
+
+SELECT 
+    tc.c_first_name,
+    tc.c_last_name,
+    tc.total_quantity,
+    tc.total_sales,
+    ss.total_sales AS total_store_sales,
+    ss.total_net_income,
+    ss.avg_discount
+FROM 
+    top_customers tc
+FULL OUTER JOIN 
+    sales_summary ss ON tc.c_customer_sk = ss.total_sales
+WHERE 
+    (tc.total_sales IS NOT NULL OR ss.total_store_sales IS NOT NULL)
+    AND (tc.total_quantity > 5 OR ss.total_net_income > 1000)
+ORDER BY 
+    COALESCE(tc.total_sales, 0) DESC, 
+    COALESCE(ss.total_net_income, 0) DESC;

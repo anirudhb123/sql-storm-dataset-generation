@@ -1,0 +1,59 @@
+WITH movie_details AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        GROUP_CONCAT(DISTINCT c.name) AS cast_names,
+        GROUP_CONCAT(DISTINCT k.keyword) AS movie_keywords,
+        GROUP_CONCAT(DISTINCT p.info) AS additional_info
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        m.id, m.title, m.production_year
+    ORDER BY 
+        m.production_year DESC
+),
+company_details AS (
+    SELECT 
+        mc.movie_id,
+        GROUP_CONCAT(DISTINCT cn.name) AS company_names,
+        GROUP_CONCAT(DISTINCT ct.kind) AS company_types
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id
+)
+SELECT 
+    md.movie_id,
+    md.title,
+    md.production_year,
+    md.cast_names,
+    cd.company_names,
+    cd.company_types,
+    md.movie_keywords,
+    md.additional_info
+FROM 
+    movie_details md
+LEFT JOIN 
+    company_details cd ON md.movie_id = cd.movie_id
+WHERE 
+    md.production_year >= 2000
+    AND md.cast_names IS NOT NULL
+ORDER BY 
+    md.production_year DESC, md.title ASC;

@@ -1,0 +1,57 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        RANK() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        orders o
+),
+AggregateSupplier AS (
+    SELECT 
+        ps.s_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.s_suppkey
+),
+CustomerStatus AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+        COUNT(o.o_orderkey) AS total_orders
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+SELECT 
+    c.c_name,
+    cs.total_spent,
+    cs.total_orders,
+    COALESCE(ro.o_orderdate, 'No recent orders') AS last_order_date,
+    CASE 
+        WHEN cs.total_spent > 10000 THEN 'High Value'
+        WHEN cs.total_spent BETWEEN 5000 AND 10000 THEN 'Medium Value'
+        ELSE 'Low Value'
+    END AS customer_value,
+    AS.s_name,
+    s.total_supply_value
+FROM 
+    customer c
+LEFT JOIN 
+    CustomerStatus cs ON c.c_custkey = cs.c_custkey
+LEFT JOIN 
+    RankedOrders ro ON c.c_custkey = ro.o_orderkey AND ro.order_rank = 1
+LEFT JOIN 
+    AggregateSupplier s ON s.s_suppkey = c.c_custkey
+WHERE 
+    cs.total_orders > 0
+ORDER BY 
+    cs.total_spent DESC, c.c_name ASC;

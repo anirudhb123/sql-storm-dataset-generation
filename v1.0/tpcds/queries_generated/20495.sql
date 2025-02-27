@@ -1,0 +1,67 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        cs.cs_item_sk,
+        cs.cs_order_number,
+        ROW_NUMBER() OVER (PARTITION BY cs.cs_item_sk ORDER BY cs.cs_sold_date_sk DESC) AS sales_rank,
+        COALESCE(SUM(cs.cs_net_profit) OVER (PARTITION BY cs.cs_item_sk ORDER BY cs.cs_sold_date_sk ROWS BETWEEN 6 PRECEDING AND CURRENT ROW), 0) AS rolling_net_profit,
+        SUBSTRING(item.i_item_desc, 1, 30) || '...' AS item_description
+    FROM 
+        catalog_sales cs
+    JOIN 
+        item ON cs.cs_item_sk = item.i_item_sk
+    WHERE 
+        cs.cs_sold_date_sk >= (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_year = 2022) 
+        AND item.i_current_price IS NOT NULL
+),
+customer_summary AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_paid) AS total_spent,
+        MAX(ws.ws_sold_date_sk) AS last_order_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+high_rollers AS (
+    SELECT 
+        cs.c_customer_sk,
+        cs.total_orders,
+        cs.total_spent,
+        cs.last_order_date,
+        RANK() OVER (ORDER BY cs.total_spent DESC) AS spending_rank
+    FROM 
+        customer_summary cs
+    WHERE 
+        cs.total_spent > (SELECT AVG(total_spent) FROM customer_summary)
+),
+item_return_data AS (
+    SELECT 
+        sr.sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr.sr_return_amt) AS total_return_amt
+    FROM 
+        store_returns sr
+    GROUP BY 
+        sr.sr_item_sk
+)
+SELECT 
+    h.customer_rank,
+    h.total_orders,
+    h.total_spent,
+    r.total_returns,
+    r.total_return_amt,
+    r.total_return_amt - (SELECT SUM(rolling_net_profit) FROM ranked_sales WHERE cs_item_sk = r.sr_item_sk) AS net_effect
+FROM 
+    high_rollers h
+JOIN 
+    item_return_data r ON h.c_customer_sk = r.sr_item_sk -- Potentially bizarre join condition
+WHERE 
+    h.spending_rank <= 50
+    AND (h.last_order_date IS NULL OR h.last_order_date > (SELECT MIN(d.d_date) FROM date_dim d WHERE d.d_current_year = 'Y'))
+ORDER BY 
+    h.total_spent DESC;

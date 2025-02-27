@@ -1,0 +1,35 @@
+WITH RECURSIVE RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, RANK() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+),
+HighValueParts AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 10000
+),
+FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_totalprice
+    FROM orders o
+    WHERE o.o_orderstatus = 'O' AND o.o_orderdate BETWEEN '2023-01-01' AND '2023-12-31'
+),
+FinalSummary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS net_revenue, COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM lineitem l
+    JOIN FilteredOrders o ON l.l_orderkey = o.o_orderkey
+    GROUP BY o.o_orderkey
+)
+
+SELECT 
+    R.r_name AS region_name,
+    COALESCE(S.rank, 0) AS supplier_rank,
+    COUNT(DISTINCT HS.ps_partkey) AS high_value_part_count,
+    SUM(FS.net_revenue) AS total_net_revenue
+FROM region R
+LEFT JOIN nation N ON R.r_regionkey = N.n_regionkey
+LEFT JOIN RankedSuppliers S ON N.n_nationkey = S.s_suppkey
+LEFT JOIN HighValueParts HS ON HS.ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_mfgr LIKE 'Manufacturer%')
+LEFT JOIN FinalSummary FS ON FS.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')
+GROUP BY R.r_name, S.rank
+ORDER BY R.r_name, supplier_rank DESC;

@@ -1,0 +1,42 @@
+
+WITH string_benchmark AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        LENGTH(c.c_email_address) AS email_length,
+        TRIM(c.c_salutation) AS trimmed_salutation,
+        UPPER(c.c_country) AS upper_country,
+        LOWER(c.c_login) AS lower_login,
+        REPLACE(c.c_email_address, '@', '[at]') AS modified_email,
+        SUBSTRING(c.c_first_name FROM 1 FOR 3) AS first_name_substr,
+        SUBSTRING(c.c_last_name FROM LENGTH(c.c_last_name) FOR 3) AS last_name_suffix
+    FROM 
+        customer c
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE 
+        ca.ca_state = 'CA' AND
+        c.c_preferred_cust_flag = 'Y'
+),
+final_benchmark AS (
+    SELECT 
+        full_name,
+        email_length,
+        trimmed_salutation,
+        upper_country,
+        lower_login,
+        modified_email,
+        first_name_substr,
+        last_name_suffix,
+        CHAR_LENGTH(CONCAT(full_name, ' - ', email_length, ' chars')) AS benchmark_length
+    FROM 
+        string_benchmark
+)
+SELECT 
+    *,
+    RANK() OVER (ORDER BY benchmark_length DESC) AS length_rank
+FROM 
+    final_benchmark
+ORDER BY 
+    length_rank
+LIMIT 100;

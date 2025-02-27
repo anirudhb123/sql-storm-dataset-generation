@@ -1,0 +1,35 @@
+WITH ranked_movies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT a.name) AS actors,
+        ROW_NUMBER() OVER (PARTITION BY t.kind_id ORDER BY COUNT(DISTINCT c.person_id) DESC) AS rank
+    FROM title t
+    JOIN cast_info c ON t.id = c.movie_id
+    JOIN aka_name a ON c.person_id = a.person_id
+    WHERE t.production_year >= 2000
+    GROUP BY t.id, t.title, t.production_year, t.kind_id
+),
+top_movies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_count,
+        rm.actors
+    FROM ranked_movies rm
+    WHERE rm.rank <= 5
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    tm.cast_count,
+    STRING_AGG(tm.actors, ', ') AS featured_actors
+FROM top_movies tm
+JOIN movie_info mi ON tm.movie_id = mi.movie_id
+JOIN info_type it ON mi.info_type_id = it.id
+WHERE it.info ILIKE '%Academy Award%'
+GROUP BY tm.title, tm.production_year, tm.cast_count
+ORDER BY tm.cast_count DESC;

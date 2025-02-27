@@ -1,0 +1,66 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+), 
+TopRetailers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws_net_profit) AS total_spent,
+        COUNT(DISTINCT ws_order_number) AS orders_count
+    FROM 
+        web_sales WS
+        JOIN customer C ON WS.ws_bill_customer_sk = C.c_customer_sk
+    GROUP BY 
+        C.c_customer_sk, C.c_first_name, C.c_last_name
+    HAVING 
+        SUM(ws_net_profit) > 5000
+), 
+CustomerTypes AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS customer_count,
+        AVG(cd_purchase_estimate) AS average_purchase_estimate
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+Promotions AS (
+    SELECT 
+        p.p_promo_id AS promo_id,
+        COUNT(DISTINCT ws_order_number) AS promo_orders,
+        SUM(ws_net_profit) AS promo_profit
+    FROM 
+        web_sales WS
+        JOIN promotion P ON WS.ws_promo_sk = P.p_promo_sk
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    RTS.c_first_name,
+    RTS.c_last_name,
+    RTS.total_spent,
+    CTP.cd_gender,
+    CTP.customer_count,
+    CTP.average_purchase_estimate,
+    P.promo_id,
+    P.promo_orders,
+    P.promo_profit
+FROM 
+    TopRetailers RTS
+    LEFT JOIN CustomerTypes CTP ON RTS.c_customer_sk = CTP.cd_demo_sk
+    LEFT JOIN Promotions P ON RTS.total_spent = P.promo_orders
+WHERE 
+    RTS.total_spent > (SELECT AVG(total_profit) FROM SalesCTE)
+ORDER BY 
+    RTS.total_spent DESC;

@@ -1,0 +1,72 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_paid_inc_tax) AS TotalSales,
+        COUNT(ws_order_number) AS NumOrders,
+        DENSE_RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_paid_inc_tax) DESC) AS rnk
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2023)
+    GROUP BY 
+        ws_bill_customer_sk
+),
+HighValueCustomers AS (
+    SELECT 
+        r.ws_bill_customer_sk,
+        r.TotalSales,
+        r.NumOrders,
+        cd_income_band_sk,
+        CASE 
+            WHEN cd_income_band_sk IS NULL THEN 'Unknown'
+            WHEN cd_income_band_sk >= 1 AND cd_income_band_sk <= 5 THEN 'Low Income'
+            WHEN cd_income_band_sk > 5 AND cd_income_band_sk <= 15 THEN 'Medium Income'
+            ELSE 'High Income' 
+        END AS IncomeCategory
+    FROM 
+        RankedSales r
+    LEFT JOIN 
+        customer c ON r.ws_bill_customer_sk = c.c_customer_sk
+    LEFT JOIN 
+        household_demographics hd ON c.c_current_hdemo_sk = hd.hd_demo_sk
+)
+SELECT 
+    hvc.IncomeCategory,
+    COUNT(*) AS CustomerCount,
+    AVG(hvc.TotalSales) AS AvgTotalSales,
+    SUM(hvc.NumOrders) AS TotalOrders
+FROM 
+    HighValueCustomers hvc
+WHERE 
+    hvc.rnk <= 10
+GROUP BY 
+    hvc.IncomeCategory
+ORDER BY 
+    AvgTotalSales DESC;
+
+WITH RecentReturns AS (
+    SELECT 
+        wr_returning_customer_sk,
+        SUM(wr_return_amt) AS TotalReturns,
+        COUNT(wr_order_number) AS ReturnCount
+    FROM 
+        web_returns
+    WHERE 
+        wr_returned_date_sk >= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_date = CURRENT_DATE - INTERVAL '30 days')
+    GROUP BY 
+        wr_returning_customer_sk
+)
+SELECT 
+    r.ReturnCount,
+    r.TotalReturns,
+    CASE 
+        WHEN r.TotalReturns = 0 THEN 'No Returns'
+        WHEN r.TotalReturns < 100 THEN 'Low Returns'
+        ELSE 'High Returns'
+    END AS ReturnCategory
+FROM 
+    RecentReturns r
+ORDER BY 
+    TotalReturns DESC
+LIMIT 5;

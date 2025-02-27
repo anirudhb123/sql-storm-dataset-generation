@@ -1,0 +1,70 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        p.Id,
+        p.Title,
+        p.ParentId,
+        rph.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+PostDetails AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        COALESCE(u.DisplayName, 'Community User') AS OwnerDisplayName,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        (SELECT COUNT(*) FROM Posts WHERE AcceptedAnswerId = p.Id) AS AcceptedAnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY rph.Level ORDER BY p.CreationDate DESC) AS RowNum
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        RecursivePostHierarchy rph ON p.Id = rph.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId, u.DisplayName, rph.Level
+),
+RankedPosts AS (
+    SELECT 
+        pd.*,
+        RANK() OVER (ORDER BY pd.UpVotes DESC, pd.CommentCount DESC) AS PopularityRank
+    FROM 
+        PostDetails pd
+)
+SELECT 
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.UpVotes,
+    rp.DownVotes,
+    rp.CommentCount,
+    rp.AcceptedAnswerCount,
+    rp.PopularityRank
+FROM 
+    RankedPosts rp
+WHERE 
+    rp.RowNum <= 5
+ORDER BY 
+    rp.PopularityRank, rp.CreationDate DESC;

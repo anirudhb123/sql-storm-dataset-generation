@@ -1,0 +1,95 @@
+WITH RECURSIVE PostHierarchy AS (
+    SELECT
+        Id,
+        Title,
+        ParentId,
+        0 AS Level
+    FROM
+        Posts
+    WHERE
+        ParentId IS NULL
+
+    UNION ALL
+
+    SELECT
+        p.Id,
+        p.Title,
+        p.ParentId,
+        ph.Level + 1
+    FROM
+        Posts p
+    INNER JOIN PostHierarchy ph ON p.ParentId = ph.Id
+),
+PostVotes AS (
+    SELECT
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 WHEN VoteTypeId = 3 THEN -1 ELSE 0 END) AS Score,
+        COUNT(CASE WHEN VoteTypeId IN (2, 3) THEN 1 END) AS VoteCount
+    FROM
+        Votes
+    GROUP BY
+        PostId
+),
+PostStatistics AS (
+    SELECT
+        p.Id,
+        p.Title,
+        COALESCE(ph.Level, 0) AS HierarchyLevel,
+        COALESCE(v.Score, 0) AS TotalScore,
+        COALESCE(v.VoteCount, 0) AS TotalVotes,
+        COUNT(DISTINCT c.Id) AS CommentCount
+    FROM
+        Posts p
+    LEFT JOIN PostHierarchy ph ON p.Id = ph.Id OR p.ParentId = ph.Id
+    LEFT JOIN PostVotes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY
+        p.Id,
+        p.Title,
+        ph.Level
+),
+TopPosts AS (
+    SELECT
+        Id,
+        Title,
+        TotalScore,
+        TotalVotes,
+        CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY HierarchyLevel ORDER BY TotalScore DESC, TotalVotes DESC) AS Rank
+    FROM
+        PostStatistics
+)
+SELECT
+    tp.Id,
+    tp.Title,
+    tp.TotalScore,
+    tp.TotalVotes,
+    tp.CommentCount,
+    CASE 
+        WHEN tp.Rank = 1 THEN 'Top Post' 
+        WHEN tp.Rank BETWEEN 2 AND 5 THEN 'Top Posts Group'
+        ELSE 'Other Posts'
+    END AS PostCategory,
+    CASE 
+        WHEN tp.TotalScore > 100 THEN 'Highly Popular'
+        WHEN tp.TotalScore BETWEEN 50 AND 100 THEN 'Moderately Popular'
+        ELSE 'Less Popular'
+    END AS PopularityStatus,
+    CONCAT(tp.Title, ' (Level: ', tp.HierarchyLevel, ')') AS FullTitle
+FROM
+    TopPosts tp
+WHERE
+    tp.Rank <= 5 OR tp.TotalScore > 0
+ORDER BY
+    tp.HierarchyLevel,
+    tp.TotalScore DESC;
+
+This SQL query does the following:
+
+1. **Recursive CTE** (`PostHierarchy`): Builds a hierarchy of post IDs and their levels of nesting.
+2. **PostVotes CTE**: Aggregates the total scores and vote counts for posts based on user interactions.
+3. **PostStatistics CTE**: Collects total scores, vote counts, and comment counts for each post, considering its position in the hierarchy.
+4. **TopPosts CTE**: Ranks posts within their hierarchy levels based on scores and vote counts.
+5. **Final Selection**: Displays top posts, categorizes them based on ranking and scores, and concatenates post titles for clarity.
+
+Through the use of CTEs, complex conditional logic, and window functions, the query demonstrates a sophisticated approach to analyzing post performance within the schema provided.

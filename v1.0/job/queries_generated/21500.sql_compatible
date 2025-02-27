@@ -1,0 +1,65 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank_by_cast
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    LEFT JOIN 
+        complete_cast cc ON at.movie_id = cc.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+SignificantMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rm.total_cast,
+        CASE 
+            WHEN rm.production_year < 2000 THEN 'Classic'
+            WHEN rm.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+            ELSE 'Recent'
+        END AS era
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.total_cast > 5
+),
+MovieKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title mt ON mk.movie_id = mt.movie_id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    sm.title,
+    sm.production_year,
+    sm.total_cast,
+    sm.era,
+    COALESCE(mk.keywords, 'No Keywords') AS keywords,
+    ARRAY_AGG(DISTINCT co.name ORDER BY co.name) AS companies_involved
+FROM 
+    SignificantMovies sm
+LEFT JOIN 
+    movie_companies mc ON sm.title = (SELECT title FROM aka_title WHERE movie_id = mc.movie_id LIMIT 1)
+LEFT JOIN 
+    company_name co ON mc.company_id = co.id
+LEFT JOIN 
+    MovieKeywords mk ON sm.production_year = (SELECT production_year FROM aka_title WHERE movie_id = mk.movie_id LIMIT 1)
+GROUP BY 
+    sm.title, sm.production_year, sm.total_cast, sm.era
+ORDER BY 
+    sm.production_year DESC,
+    sm.total_cast DESC
+LIMIT 100;

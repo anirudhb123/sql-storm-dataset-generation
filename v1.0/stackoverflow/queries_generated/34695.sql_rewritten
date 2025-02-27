@@ -1,0 +1,66 @@
+WITH RecursiveTagHierarchy AS (
+    SELECT Id, TagName, Count, ExcerptPostId, WikiPostId, IsModeratorOnly, IsRequired
+    FROM Tags
+    WHERE Id IN (SELECT DISTINCT TagId FROM PostsTags) 
+    
+    UNION ALL
+    
+    SELECT t.Id, t.TagName, t.Count, t.ExcerptPostId, t.WikiPostId, t.IsModeratorOnly, t.IsRequired
+    FROM Tags t
+    JOIN RecursiveTagHierarchy rth ON rth.Id = t.Id 
+),
+UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        SUM(COALESCE(v.Count, 0)) AS UpVoteCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS Count
+        FROM Votes
+        WHERE VoteTypeId = 2  
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    GROUP BY u.Id, u.DisplayName
+),
+TopUsers AS (
+    SELECT UserId, DisplayName, PostCount, CommentCount, UpVoteCount,
+           RANK() OVER (ORDER BY PostCount DESC, UpVoteCount DESC) AS Rank
+    FROM UserActivity
+),
+PostDetail AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Body,
+        p.ViewCount,
+        COALESCE(ph.Comment, 'No Comments') AS LastPostChange,
+        ROW_NUMBER() OVER (PARTITION BY p.Id ORDER BY ph.CreationDate DESC) AS PostChangeRow
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId
+    WHERE p.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.CommentCount,
+    tu.UpVoteCount,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.LastPostChange
+FROM TopUsers tu
+JOIN PostDetail pd ON pd.PostId IN (
+    SELECT p.Id
+    FROM Posts p
+    WHERE p.OwnerUserId = tu.UserId
+    ORDER BY p.CreationDate DESC
+    LIMIT 5
+)
+WHERE tu.Rank <= 10
+ORDER BY tu.Rank, pd.CreationDate DESC;

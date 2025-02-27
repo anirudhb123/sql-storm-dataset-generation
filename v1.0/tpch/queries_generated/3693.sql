@@ -1,0 +1,57 @@
+WITH SupplierStats AS (
+    SELECT 
+        s.n_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.n_nationkey
+), CustomerOrders AS (
+    SELECT 
+        c.c_nationkey, 
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O' AND 
+        o.o_orderdate > CURRENT_DATE - INTERVAL '1 year'
+    GROUP BY 
+        c.c_nationkey
+), CombinedStats AS (
+    SELECT 
+        n.n_nationkey, 
+        COALESCE(ss.total_supply_value, 0) AS total_supply_value, 
+        COALESCE(co.total_orders, 0) AS total_orders,
+        COALESCE(co.avg_order_value, 0) AS avg_order_value,
+        r.r_name AS region_name
+    FROM 
+        nation n
+    LEFT JOIN 
+        SupplierStats ss ON n.n_nationkey = ss.n_nationkey
+    LEFT JOIN 
+        CustomerOrders co ON n.n_nationkey = co.c_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT 
+    region_name,
+    total_supply_value,
+    total_orders,
+    avg_order_value,
+    CASE 
+        WHEN total_orders > 0 THEN total_supply_value / total_orders 
+        ELSE NULL 
+    END AS average_supply_per_order,
+    RANK() OVER (ORDER BY total_supply_value DESC) AS rank_by_supply
+FROM 
+    CombinedStats
+WHERE 
+    (total_orders > 10 OR total_supply_value > 50000)
+ORDER BY 
+    region_name;

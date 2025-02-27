@@ -1,0 +1,67 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_item_sk,
+        ws_web_site_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_net_paid,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS rank
+    FROM
+        web_sales
+    JOIN
+        web_page ON ws_web_page_sk = wp_web_page_sk
+    WHERE
+        wp_autogen_flag = 'Y'
+    GROUP BY
+        ws_item_sk,
+        ws_web_site_sk
+),
+TopSellingItems AS (
+    SELECT
+        rs.ws_item_sk,
+        i.i_item_id,
+        i.i_product_name,
+        rs.total_quantity,
+        rs.total_net_paid
+    FROM
+        RankedSales rs
+    JOIN
+        item i ON rs.ws_item_sk = i.i_item_sk
+    WHERE
+        rs.rank <= 10
+),
+SalesWithDemographics AS (
+    SELECT
+        tsi.ws_item_sk,
+        tsi.i_item_id,
+        tsi.i_product_name,
+        tsi.total_quantity,
+        tsi.total_net_paid,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk
+    FROM
+        TopSellingItems tsi
+    JOIN
+        customer c ON c.c_customer_sk IN (
+            SELECT DISTINCT ws_bill_customer_sk FROM web_sales WHERE ws_item_sk = tsi.ws_item_sk
+        )
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+)
+SELECT
+    swd.ws_item_sk,
+    swd.i_item_id,
+    swd.i_product_name,
+    swd.total_quantity,
+    SUM(CASE WHEN swd.cd_gender = 'M' THEN swd.total_net_paid ELSE 0 END) AS total_net_paid_male,
+    SUM(CASE WHEN swd.cd_gender = 'F' THEN swd.total_net_paid ELSE 0 END) AS total_net_paid_female,
+    AVG(swd.cd_income_band_sk) AS average_income_band
+FROM
+    SalesWithDemographics swd
+GROUP BY
+    swd.ws_item_sk,
+    swd.i_item_id,
+    swd.i_product_name
+ORDER BY
+    total_quantity DESC;

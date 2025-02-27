@@ -1,0 +1,49 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws.web_site_sk,
+        ws.ws_order_number,
+        SUM(ws.ws_net_paid_inc_tax) AS total_revenue,
+        RANK() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws.ws_net_paid_inc_tax) DESC) AS revenue_rank
+    FROM web_sales ws
+    WHERE ws.ws_ship_date_sk IS NOT NULL
+    GROUP BY ws.web_site_sk, ws.ws_order_number
+),
+CustomerReturns AS (
+    SELECT 
+        cr_returning_customer_sk,
+        COUNT(DISTINCT cr_order_number) AS return_count,
+        SUM(cr_return_amount) AS total_return_amount
+    FROM catalog_returns
+    WHERE cr_return_quantity > 0
+    GROUP BY cr_returning_customer_sk
+),
+HighValueCustomers AS (
+    SELECT
+        c.c_customer_sk,
+        CASE
+            WHEN cd.cd_marital_status = 'M' AND cd.cd_dep_employed_count IS NULL THEN 'Unknown'
+            ELSE COALESCE(cd.cd_gender, 'Not Specified')
+        END AS customer_gender,
+        COALESCE(CAST(SUM(cs.cs_net_profit) OVER (PARTITION BY c.c_customer_sk) AS decimal(10,2)), 0) AS net_profit
+    FROM customer c
+    LEFT JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    WHERE c.c_birth_year IS NOT NULL AND (c.c_first_name LIKE 'A%' OR c.c_last_name LIKE 'Z%')
+)
+SELECT 
+    hvc.c_customer_sk,
+    hvc.customer_gender,
+    COALESCE(cr.return_count, 0) AS return_count,
+    COALESCE(cr.total_return_amount, 0) AS total_return_amount,
+    sky.total_revenue
+FROM HighValueCustomers hvc
+LEFT JOIN CustomerReturns cr ON hvc.c_customer_sk = cr.cr_returning_customer_sk
+LEFT JOIN (
+    SELECT rs.web_site_sk, SUM(rs.total_revenue) AS total_revenue
+    FROM RankedSales rs
+    WHERE rs.revenue_rank <= 5
+    GROUP BY rs.web_site_sk
+) sky ON sky.web_site_sk = (SELECT web_site_sk FROM web_site WHERE web_name ILIKE '%Online%' LIMIT 1)
+WHERE hvc.net_profit > 1000.00
+ORDER BY hvc.c_customer_sk DESC, return_count ASC;

@@ -1,0 +1,91 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        CAST(m.title AS VARCHAR(255)) AS path
+    FROM
+        aka_title m
+    UNION ALL
+    SELECT
+        mh.movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || m.title AS VARCHAR(255))
+    FROM
+        MovieHierarchy mh
+    JOIN
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE
+        mh.level < 5  -- Limit the recursion depth to avoid overly large results
+),
+MovieInfo AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        COALESCE(mi.info, 'No Info') AS additional_info,
+        COALESCE(ka.name, 'Unknown') AS known_actor,
+        COUNT(DISTINCT mk.keyword) AS keyword_count,
+        ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY m.production_year DESC) AS rn
+    FROM
+        aka_title m
+    LEFT JOIN
+        movie_info mi ON m.id = mi.movie_id
+    LEFT JOIN
+        cast_info ci ON ci.movie_id = m.id
+    LEFT JOIN
+        aka_name ka ON ci.person_id = ka.person_id
+    LEFT JOIN
+        movie_keyword mk ON mk.movie_id = m.id
+    WHERE
+        m.production_year IS NOT NULL
+    GROUP BY
+        m.id, m.title, mi.info, ka.name
+),
+FinalSelection AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mi.additional_info,
+        mi.known_actor,
+        mi.keyword_count,
+        mh.level,
+        mh.path
+    FROM
+        MovieHierarchy mh
+    JOIN
+        MovieInfo mi ON mh.movie_id = mi.movie_id
+    WHERE
+        mi.rn = 1  -- Fetch only the latest info for each movie
+)
+SELECT
+    fs.movie_id,
+    fs.title,
+    fs.production_year,
+    fs.additional_info,
+    fs.known_actor,
+    fs.keyword_count,
+    fs.level,
+    fs.path
+FROM
+    FinalSelection fs
+WHERE
+    fs.keyword_count > 0
+ORDER BY
+    fs.production_year DESC,
+    fs.keyword_count DESC
+LIMIT 100;  -- Limit for performance benchmarking
+
+This SQL query generates a complex report of movies along with additional information such as actors and keywords associated with those movies. It utilizes various SQL features, including:
+- Recursive CTEs for building a movie hierarchy,
+- Outer joins to gather additional data,
+- Grouping and counting operations,
+- Window functions for ranking results,
+- Conditional expressions to handle nulls and defaults.
+
+The final selection filters out movies with available keywords, sorts results, and limits the output for performance benchmarking.

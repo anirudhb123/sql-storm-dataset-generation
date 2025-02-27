@@ -1,0 +1,76 @@
+
+WITH RECURSIVE discounted_prices AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        ps_availqty, 
+        ps_supplycost * 0.9 AS discounted_cost,
+        0 AS level
+    FROM 
+        partsupp
+    WHERE 
+        ps_supplycost IS NOT NULL
+        
+    UNION ALL
+    
+    SELECT 
+        p.ps_partkey, 
+        dp.ps_suppkey, 
+        dp.ps_availqty - 10, 
+        dp.discounted_cost * 1.05,
+        level + 1
+    FROM 
+        discounted_prices dp
+    JOIN 
+        partsupp p ON p.ps_partkey = dp.ps_partkey
+    WHERE 
+        dp.ps_availqty > 0 AND level < 3
+),
+
+order_details AS (
+    SELECT 
+        o.o_orderkey, 
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_linenumber) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON l.l_orderkey = o.o_orderkey
+    WHERE 
+        o.o_orderstatus = 'O' 
+        AND l.l_shipdate > DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey
+),
+
+supplier_details AS (
+    SELECT 
+        s.s_suppkey, 
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        MAX(sp.discounted_cost) AS max_discounted_cost
+    FROM 
+        supplier s
+    LEFT JOIN 
+        discounted_prices sp ON s.s_suppkey = sp.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+)
+
+SELECT 
+    n.n_name AS nation_name, 
+    SUM(od.total_price) AS total_sales,
+    COUNT(DISTINCT od.o_orderkey) AS total_orders,
+    COALESCE(SUM(sd.max_discounted_cost), 0) AS max_cost
+FROM 
+    nation n
+JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN 
+    supplier_details sd ON s.s_suppkey = sd.s_suppkey
+LEFT JOIN 
+    order_details od ON sd.part_count > 0
+GROUP BY 
+    n.n_name
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

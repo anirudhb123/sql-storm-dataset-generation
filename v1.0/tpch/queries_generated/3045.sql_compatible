@@ -1,0 +1,82 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY s.s_acctbal DESC) AS rn
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrderCounts AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(coc.order_count, 0) AS total_orders,
+        RANK() OVER (ORDER BY COALESCE(coc.order_count, 0) DESC) AS rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        CustomerOrderCounts coc ON c.c_custkey = coc.c_custkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    ps.ps_availqty,
+    s.s_name AS supplier_name,
+    cs.c_name AS top_customer,
+    cs.total_orders,
+    p.p_retailprice * (1 - AVG(l.l_discount) OVER (PARTITION BY p.p_partkey)) AS adjusted_price,
+    CASE 
+        WHEN cs.total_orders > 0 THEN 'Active'
+        ELSE 'Inactive'
+    END AS customer_status
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey AND s.rn = 1
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    TopCustomers cs ON p.p_partkey IN (
+        SELECT 
+            DISTINCT ps.ps_partkey 
+        FROM 
+            partsupp ps
+        JOIN 
+            supplier s2 ON ps.ps_suppkey = s2.s_suppkey
+        WHERE 
+            s2.s_acctbal > 5000
+    )
+WHERE 
+    p.p_size > 10 
+    AND p.p_retailprice IS NOT NULL
+GROUP BY 
+    p.p_partkey,
+    p.p_name,
+    ps.ps_availqty,
+    s.s_name,
+    cs.c_name,
+    cs.total_orders
+ORDER BY 
+    adjusted_price DESC,
+    customer_status,
+    p.p_name
+LIMIT 50;

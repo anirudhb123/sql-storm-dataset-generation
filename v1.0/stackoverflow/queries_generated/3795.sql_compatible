@@ -1,0 +1,79 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        COUNT(c.Id) AS CommentCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY COUNT(v.Id) DESC) AS VoteRank,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.OwnerUserId
+), UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverBadges,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+), RankedPosts AS (
+    SELECT 
+        ps.PostId,
+        ps.Title,
+        ps.CreationDate,
+        ps.CommentCount,
+        ps.UpVotes,
+        ps.DownVotes,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        UserBadges ub ON ps.OwnerUserId = ub.UserId
+    WHERE 
+        ps.VoteRank = 1
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.CommentCount,
+    rp.UpVotes,
+    rp.DownVotes,
+    COALESCE(rp.GoldBadges, 0) AS GoldBadges,
+    COALESCE(rp.SilverBadges, 0) AS SilverBadges,
+    COALESCE(rp.BronzeBadges, 0) AS BronzeBadges
+FROM 
+    RankedPosts rp
+ORDER BY 
+    rp.UpVotes DESC, rp.CommentCount DESC
+LIMIT 10
+UNION ALL
+SELECT 
+    NULL AS PostId,
+    'Total Upvotes' AS Title,
+    NULL AS CreationDate,
+    NULL AS CommentCount,
+    SUM(rp.UpVotes) AS UpVotes,
+    SUM(rp.DownVotes) AS DownVotes,
+    NULL AS GoldBadges,
+    NULL AS SilverBadges,
+    NULL AS BronzeBadges
+FROM 
+    RankedPosts rp;

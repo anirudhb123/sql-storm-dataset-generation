@@ -1,0 +1,86 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS Rank,
+        COALESCE(phc.UserId, -1) AS ClosedByUserID,
+        ph.CreationDate AS ClosedDate,
+        CASE 
+            WHEN Tags.TagName IS NOT NULL THEN 'has tags'
+            ELSE 'no tags' 
+        END AS TagStatus
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    LEFT JOIN 
+        Tags ON Tags.ExcerptPostId = p.Id
+    LEFT JOIN 
+        PostHistory phc ON p.Id = phc.PostId AND phc.PostHistoryTypeId = 10
+    WHERE 
+        p.PostTypeId IN (1, 2) 
+        AND (p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year' OR phc.UserId IS NOT NULL)
+),
+AggregatedStats AS (
+    SELECT 
+        UP.UserId,
+        COUNT(DISTINCT p.Id) AS PostedQuestions,
+        SUM(CASE WHEN p.Score >= 0 THEN 1 ELSE 0 END) AS TotalNonNegativeScores,
+        COUNT(CASE WHEN b.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN b.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN b.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users UP
+    LEFT JOIN 
+        Posts p ON UP.Id = p.OwnerUserId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Badges b ON UP.Id = b.UserId
+    GROUP BY 
+        UP.UserId
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        PostedQuestions,
+        TotalNonNegativeScores,
+        GoldBadges,
+        SilverBadges,
+        BronzeBadges,
+        ROW_NUMBER() OVER (ORDER BY TotalNonNegativeScores DESC, PostedQuestions DESC) AS UserRank
+    FROM 
+        AggregatedStats
+)
+SELECT 
+    R.PostId,
+    R.Title,
+    R.Score,
+    R.CreationDate,
+    R.Rank,
+    CASE
+        WHEN C.Comment IS NOT NULL THEN 'Commented'
+        ELSE 'No Comment'
+    END AS CommentStatus,
+    T.UserId,
+    T.PostedQuestions,
+    T.TotalNonNegativeScores,
+    T.GoldBadges,
+    T.SilverBadges,
+    T.BronzeBadges,
+    CASE
+        WHEN R.ClosedByUserID <> -1 THEN 'Closed by User: ' || R.ClosedByUserID
+        ELSE 'Open Post'
+    END AS ClosureStatus
+FROM 
+    RankedPosts R
+JOIN 
+    Comments C ON R.PostId = C.PostId
+JOIN 
+    TopUsers T ON C.UserId = T.UserId
+WHERE 
+    R.Rank <= 10
+    AND (R.TagStatus = 'has tags' OR R.ClosedByUserID IS NOT NULL)
+ORDER BY 
+    R.Score DESC, 
+    R.CreationDate ASC;

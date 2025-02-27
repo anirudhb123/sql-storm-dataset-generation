@@ -1,0 +1,57 @@
+WITH RECURSIVE price_history AS (
+    SELECT ps.partkey, ps.suppkey, 
+           ps.ps_supplycost, 
+           ROW_NUMBER() OVER (PARTITION BY ps.partkey ORDER BY ps.ps_supplycost DESC) AS rank
+    FROM partsupp ps
+    WHERE ps.ps_supplycost IS NOT NULL
+    UNION ALL
+    SELECT p.partkey, p.suppkey, 
+           p.ps_supplycost * 0.95, 
+           rank + 1
+    FROM price_history ph
+    JOIN partsupp p 
+      ON ph.partkey = p.partkey 
+      AND ph.suppkey = p.suppkey
+    WHERE rank < 5
+),
+customer_summary AS (
+    SELECT c.c_custkey, c.c_name, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o 
+      ON c.c_custkey = o.o_custkey 
+      AND o.o_orderstatus = 'O'
+    GROUP BY c.custkey
+),
+nation_stats AS (
+    SELECT n.n_nationkey, n.n_name, 
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count, 
+           COALESCE(SUM(s.s_acctbal), 0) AS total_balance
+    FROM nation n
+    LEFT JOIN supplier s 
+      ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey
+),
+extended_quantity AS (
+    SELECT l.l_orderkey, 
+           l.l_partkey, 
+           SUM(l.l_quantity) OVER (PARTITION BY l.l_orderkey) AS total_quantity,
+           CASE WHEN l.l_discount > 0.1 THEN 'Discounted' ELSE 'Regular' END AS sale_type
+    FROM lineitem l
+    WHERE l.l_shipdate < cast('1998-10-01' as date)
+)
+SELECT DISTINCT ph.partkey, 
+                ns.n_name AS nation_name, 
+                cs.c_name AS customer_name,
+                eq.total_quantity AS order_quantity,
+                (ph.ps_supplycost) * eq.total_quantity AS total_cost
+FROM price_history ph
+JOIN extended_quantity eq 
+  ON ph.partkey = eq.l_partkey
+LEFT JOIN customer_summary cs 
+  ON cs.total_spent > 10000
+JOIN nation_stats ns 
+  ON ns.supplier_count > 10
+WHERE ph.rank = 1 
+  AND (ph.ps_supplycost IS NOT NULL OR ph.ps_supplycost IS NULL)
+ORDER BY total_cost DESC, ns.n_name;

@@ -1,0 +1,72 @@
+
+WITH RECURSIVE TagHierarchy AS (
+    SELECT Id, TagName, Count, 1 AS Level
+    FROM Tags
+    WHERE IsModeratorOnly = 0  
+    UNION ALL
+    SELECT t.Id, CONCAT(th.TagName, ' > ', t.TagName) AS TagName, t.Count, Level + 1
+    FROM Tags t
+    INNER JOIN TagHierarchy th ON t.WikiPostId = th.Id
+),
+UserBadgeCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u 
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id
+),
+MostActiveUsers AS (
+    SELECT 
+        u.Id,
+        u.DisplayName,
+        COUNT(p.Id) AS PostCount,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId 
+    GROUP BY u.Id, u.DisplayName
+    HAVING COUNT(p.Id) > 5  
+    ORDER BY TotalViews DESC
+    LIMIT 10
+),
+PostVoteSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVotes,
+        COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVotes,
+        COUNT(v.Id) AS TotalVotes
+    FROM Posts p
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+SELECT 
+    mu.DisplayName,
+    bh.UserId,
+    bh.BadgeCount,
+    bh.GoldBadges,
+    bh.SilverBadges,
+    bh.BronzeBadges,
+    mu.PostCount,
+    mu.TotalViews,
+    COALESCE(ps.UpVotes, 0) AS UpVotes,
+    COALESCE(ps.DownVotes, 0) AS DownVotes,
+    COALESCE(ps.TotalVotes, 0) AS TotalVotes,
+    STRING_AGG(DISTINCT th.TagName, ', ') AS TagsHierarchy
+FROM UserBadgeCounts bh
+JOIN MostActiveUsers mu ON bh.UserId = mu.Id
+LEFT JOIN PostVoteSummary ps ON ps.PostId IN (
+    SELECT p.Id
+    FROM Posts p
+    WHERE p.OwnerUserId = mu.Id
+)
+LEFT JOIN TagHierarchy th ON th.Id IN (
+    SELECT DISTINCT t.Id
+    FROM Tags t
+    JOIN Posts p ON t.WikiPostId = p.Id
+    WHERE p.OwnerUserId = mu.Id
+)
+GROUP BY mu.DisplayName, bh.UserId, bh.BadgeCount, bh.GoldBadges, bh.SilverBadges, bh.BronzeBadges, mu.PostCount, mu.TotalViews
+ORDER BY mu.TotalViews DESC;

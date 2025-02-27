@@ -1,0 +1,65 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        1 AS depth
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year >= 2000
+  
+    UNION ALL
+
+    SELECT 
+        m2.id,
+        CONCAT(mh.title, ' -> ', m2.title),
+        mh.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m2 ON ml.linked_movie_id = m2.id
+    WHERE 
+        mh.depth < 4  
+)
+
+SELECT 
+    p.id AS person_id,
+    a.name AS actor_name,
+    ARRAY_AGG(DISTINCT mh.title) AS movies_referenced,
+    COUNT(mh.movie_id) AS movie_count,
+    AVG(coalesce(m.profit_margin, 0)) AS average_profit_margin
+FROM 
+    aka_name a
+LEFT JOIN 
+    cast_info ci ON a.person_id = ci.person_id
+LEFT JOIN 
+    MovieHierarchy mh ON ci.movie_id = mh.movie_id
+LEFT JOIN 
+    (SELECT 
+        movie_id,
+        SUM(revenue) - SUM(cost) AS profit_margin
+     FROM 
+        (SELECT 
+            m.id AS movie_id,
+            COALESCE(SUM(revenue.amount), 0) AS revenue,
+            COALESCE(SUM(cost.amount), 0) AS cost
+         FROM 
+            aka_title m
+         LEFT JOIN 
+            revenue ON m.id = revenue.movie_id
+         LEFT JOIN 
+            cost ON m.id = cost.movie_id
+         GROUP BY 
+            m.id) profit
+     GROUP BY 
+        movie_id) m ON mh.movie_id = m.movie_id
+WHERE 
+    a.name IS NOT NULL
+GROUP BY 
+    p.id, a.name
+HAVING 
+    COUNT(mh.movie_id) > 2
+ORDER BY 
+    average_profit_margin DESC NULLS LAST;

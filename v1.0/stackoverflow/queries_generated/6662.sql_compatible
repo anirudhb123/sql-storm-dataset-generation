@@ -1,0 +1,50 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerDisplayName,
+        COUNT(a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, u.DisplayName
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Score,
+        rp.CreationDate,
+        rp.OwnerDisplayName,
+        rp.AnswerCount,
+        rp.Rank
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.Rank <= 10
+)
+SELECT 
+    tp.Title,
+    tp.OwnerDisplayName,
+    tp.CreationDate,
+    tp.Score,
+    COALESCE((SELECT STRING_AGG(tag.TagName, ', ') 
+               FROM Tags tag 
+               JOIN LATERAL string_to_array(SUBSTRING(tp.Tags, 2, LENGTH(tp.Tags) - 2), '><') AS t(tag.TagName) ON true), 'No Tags') AS Tags,
+    COALESCE((SELECT COUNT(*) 
+               FROM Comments c 
+               WHERE c.PostId = tp.PostId), 0) AS CommentCount
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.CreationDate DESC;

@@ -1,0 +1,67 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS nation_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+        ROW_NUMBER() OVER (PARTITION BY n.n_regionkey ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rnk
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name, n.n_regionkey
+),
+BestSuppliers AS (
+    SELECT 
+        rnk,
+        s.s_suppkey,
+        s.s_name,
+        ns.nation_name
+    FROM 
+        RankedSuppliers rs
+    JOIN 
+        supplier s ON rs.s_suppkey = s.s_suppkey
+    JOIN 
+        nation ns ON s.s_nationkey = ns.n_nationkey
+    WHERE 
+        rnk <= 3
+),
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name AS customer_name,
+        c.c_acctbal,
+        bs.nation_name,
+        COUNT(li.l_orderkey) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem li ON o.o_orderkey = li.l_orderkey
+    JOIN 
+        BestSuppliers bs ON li.l_suppkey = bs.s_suppkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice, c.c_name, c.c_acctbal, bs.nation_name
+)
+SELECT 
+    os.o_orderkey,
+    os.o_orderdate,
+    os.o_totalprice,
+    os.customer_name,
+    os.c_acctbal,
+    os.item_count,
+    bt.s_name AS best_supplier
+FROM 
+    OrderSummary os
+JOIN 
+    BestSuppliers bt ON bt.nation_name = os.nation_name
+WHERE 
+    os.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+ORDER BY 
+    os.o_totalprice DESC;

@@ -1,0 +1,63 @@
+-- Performance Benchmark Query
+WITH PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        p.LastActivityDate,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(v.VoteTypeId IN (2)) AS UpvoteCount,  -- 2 = UpMod
+        SUM(v.VoteTypeId IN (3)) AS DownvoteCount  -- 3 = DownMod
+    FROM 
+        Posts p
+    LEFT JOIN
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN
+        Badges b ON p.OwnerUserId = b.UserId
+    LEFT JOIN
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.ViewCount, p.CreationDate, p.LastActivityDate
+),
+UserMetrics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(b.Class = 1) AS GoldBadges,     -- Gold badges
+        SUM(b.Class = 2) AS SilverBadges,   -- Silver badges
+        SUM(b.Class = 3) AS BronzeBadges     -- Bronze badges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+)
+SELECT 
+    pm.PostId,
+    pm.Title,
+    pm.Score,
+    pm.ViewCount,
+    pm.LastActivityDate,
+    um.UserId,
+    um.Reputation,
+    um.PostCount,
+    um.GoldBadges,
+    um.SilverBadges,
+    um.BronzeBadges,
+    pm.CommentCount,
+    pm.UpvoteCount,
+    pm.DownvoteCount
+FROM 
+    PostMetrics pm
+JOIN 
+    Users um ON pm.OwnerUserId = um.Id
+ORDER BY 
+    pm.Score DESC, pm.ViewCount DESC
+LIMIT 100;

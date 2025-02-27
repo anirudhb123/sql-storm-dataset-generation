@@ -1,0 +1,50 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(COALESCE(c.Score, 0)) AS TotalCommentScore,
+        RANK() OVER (ORDER BY u.Reputation DESC) AS ReputationRank
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentPostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+)
+SELECT 
+    ua.DisplayName,
+    ua.TotalPosts,
+    ua.QuestionCount,
+    ua.AnswerCount,
+    ua.TotalCommentScore,
+    COALESCE(pd.PostId, -1) AS RecentPostId,
+    COALESCE(pd.Title, 'No Posts') AS RecentPostTitle,
+    COALESCE(pd.CreationDate, 'N/A') AS RecentPostCreationDate,
+    COALESCE(pd.LastActivityDate, 'N/A') AS RecentPostLastActivity,
+    ua.ReputationRank
+FROM 
+    UserActivity ua
+LEFT JOIN 
+    PostDetails pd ON ua.UserId = pd.OwnerUserId AND pd.RecentPostRank = 1
+WHERE 
+    ua.TotalPosts > 0
+ORDER BY 
+    ua.ReputationRank ASC
+LIMIT 100;

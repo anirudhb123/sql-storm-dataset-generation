@@ -1,0 +1,70 @@
+
+WITH RankedReturns AS (
+    SELECT 
+        sr_item_sk,
+        sr_returned_date_sk,
+        sr_customer_sk,
+        ROW_NUMBER() OVER(PARTITION BY sr_item_sk ORDER BY sr_returned_date_sk DESC) AS rnk
+    FROM 
+        store_returns
+), 
+ReturnStats AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(*) AS total_returns,
+        SUM(sr_return_quantity) AS total_returned_quantity,
+        AVG(sr_return_amt) AS avg_return_amt
+    FROM 
+        RankedReturns
+    WHERE 
+        rnk = 1
+    GROUP BY 
+        sr_item_sk
+),
+HighReturnItems AS (
+    SELECT 
+        r.item_desc,
+        r.total_returns,
+        r.total_returned_quantity,
+        r.avg_return_amt
+    FROM 
+        ReturnStats r
+    JOIN 
+        item i ON r.sr_item_sk = i.i_item_sk
+    WHERE 
+        r.total_returns > (
+            SELECT AVG(total_returns) FROM ReturnStats
+        )
+),
+ShipmentStats AS (
+    SELECT
+        sm.sm_type AS shipping_method,
+        COUNT(ws.ws_order_number) AS orders_count,
+        SUM(ws.ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales ws
+    JOIN 
+        ship_mode sm ON ws.ws_ship_mode_sk = sm.sm_ship_mode_sk
+    GROUP BY 
+        sm.sm_type
+)
+SELECT 
+    hi.item_desc,
+    hi.total_returns,
+    hi.total_returned_quantity,
+    hi.avg_return_amt,
+    ss.shipping_method,
+    ss.orders_count,
+    ss.total_net_profit
+FROM 
+    HighReturnItems hi
+LEFT JOIN 
+    ShipmentStats ss ON ss.orders_count > 1000
+WHERE 
+    hi.avg_return_amt IS NOT NULL
+    AND hi.total_returned_quantity > (
+        SELECT COALESCE(AVG(total_returned_quantity), 0) FROM ReturnStats
+    )
+ORDER BY 
+    hi.total_returned_quantity DESC
+FETCH FIRST 10 ROWS ONLY;

@@ -1,0 +1,77 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ss_item_sk, 
+        ss_ticket_number, 
+        ss_sales_price, 
+        ss_quantity, 
+        ss_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ss_item_sk ORDER BY ss_net_profit DESC) AS rank
+    FROM 
+        store_sales
+    WHERE 
+        ss_sold_date_sk BETWEEN 1 AND 10000
+),
+HighProfitSales AS (
+    SELECT 
+        item.i_item_sk,
+        item.i_item_id,
+        item.i_product_name,
+        COALESCE(SUM(rs.ss_net_profit), 0) AS total_net_profit,
+        COUNT(rs.ss_ticket_number) AS total_sales_count
+    FROM 
+        item
+    LEFT JOIN 
+        RankedSales rs ON item.i_item_sk = rs.ss_item_sk
+    WHERE 
+        rs.rank = 1
+    GROUP BY 
+        item.i_item_sk, item.i_item_id, item.i_product_name
+),
+DateRange AS (
+    SELECT 
+        MIN(d_date_sk) AS min_date,
+        MAX(d_date_sk) AS max_date
+    FROM 
+        date_dim
+    WHERE 
+        d_year = 2022 AND d_month_seq BETWEEN 1 AND 6
+),
+TopProfitableItems AS (
+    SELECT 
+        hps.i_item_sk,
+        hps.i_item_id,
+        hps.i_product_name,
+        hps.total_net_profit
+    FROM 
+        HighProfitSales hps
+    CROSS JOIN 
+        DateRange dr
+    WHERE 
+        hps.total_net_profit > (
+            SELECT 
+                AVG(total_net_profit) 
+            FROM 
+                HighProfitSales
+        )
+    ORDER BY 
+        hps.total_net_profit DESC
+)
+SELECT 
+    tpi.i_item_id,
+    tpi.i_product_name,
+    tpi.total_net_profit,
+    ROUND((tpi.total_net_profit / NULLIF((SELECT SUM(total_net_profit) FROM TopProfitableItems), 0)) * 100, 2) AS profit_percentage,
+    CASE 
+        WHEN tpi.total_net_profit > 5000 THEN 'High Profit'
+        WHEN tpi.total_net_profit BETWEEN 1000 AND 5000 THEN 'Medium Profit'
+        ELSE 'Low Profit'
+    END AS profit_category
+FROM 
+    TopProfitableItems tpi
+WHERE 
+    tpi.total_net_profit IS NOT NULL OR tpi.total_net_profit <> 0
+HAVING 
+    profit_percentage IS NOT NULL
+ORDER BY 
+    tpi.total_net_profit DESC;

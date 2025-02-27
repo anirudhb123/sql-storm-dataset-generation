@@ -1,0 +1,84 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.ParentId,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.PostId
+    WHERE 
+        p.PostTypeId = 2  
+),
+PostVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        COUNT(CASE WHEN VoteTypeId = 1 THEN 1 END) AS AcceptedVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+PostStatistics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        ph.Level,
+        COALESCE(pvc.UpVotes, 0) AS UpVotes,
+        COALESCE(pvc.DownVotes, 0) AS DownVotes,
+        COALESCE(pvc.AcceptedVotes, 0) AS AcceptedVotes,
+        p.Score,
+        p.ViewCount,
+        p.CreationDate,
+        CASE 
+            WHEN p.ClosedDate IS NOT NULL THEN 'Closed'
+            ELSE 'Open'
+        END AS Status
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursivePostHierarchy ph ON p.Id = ph.PostId
+    LEFT JOIN 
+        PostVoteCounts pvc ON p.Id = pvc.PostId
+)
+
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Level,
+    ps.UpVotes,
+    ps.DownVotes,
+    ps.AcceptedVotes,
+    ps.Score,
+    ps.ViewCount,
+    ps.CreationDate,
+    ps.Status,
+    CASE 
+        WHEN ps.Level = 1 AND ps.AcceptedVotes > 0 THEN 'This question has an accepted answer.'
+        WHEN ps.Level = 1 AND ps.DownVotes > ps.UpVotes THEN 'This question has received more downvotes than upvotes.'
+        ELSE 'Status unchanged.'
+    END AS Evaluation
+FROM 
+    PostStatistics ps
+WHERE 
+    ps.ViewCount > 1000
+ORDER BY 
+    ps.Level ASC, 
+    ps.Score DESC, 
+    ps.CreationDate DESC;

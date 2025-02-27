@@ -1,0 +1,66 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        COUNT(DISTINCT mk.keyword_id) AS total_keywords,
+        STRING_AGG(DISTINCT mk.keyword, ', ') AS keywords_list,
+        AVG(CASE 
+                WHEN t.production_year IS NULL THEN 0 
+                ELSE EXTRACT(YEAR FROM DATE '2024-10-01') - t.production_year 
+            END) AS average_years_since_release
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+ActorDetails AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(DISTINCT ci.movie_id) AS total_movies,
+        SUM(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE 0 END) AS notes_count
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    GROUP BY 
+        a.id, a.name
+),
+RecentMovies AS (
+    SELECT 
+        md.title_id,
+        md.title,
+        md.production_year,
+        md.average_years_since_release,
+        SUM(CASE WHEN md.production_year >= (EXTRACT(YEAR FROM DATE '2024-10-01') - 5) THEN 1 ELSE 0 END) AS recent_count
+    FROM 
+        MovieDetails md
+    GROUP BY 
+        md.title_id, md.title, md.production_year, md.average_years_since_release
+)
+SELECT 
+    ad.actor_id,
+    ad.name,
+    ad.total_movies,
+    ad.notes_count,
+    COALESCE(rm.recent_count, 0) AS recent_movies_count,
+    md.keywords_list
+FROM 
+    ActorDetails ad
+LEFT JOIN 
+    RecentMovies rm ON ad.total_movies > 5 AND ad.notes_count > 0
+LEFT JOIN 
+    MovieDetails md ON ad.total_movies > md.total_cast
+WHERE 
+    ad.notes_count IS NOT NULL
+    AND (ad.total_movies > 0 OR md.total_keywords > 0)
+ORDER BY 
+    ad.total_movies DESC, ad.notes_count ASC
+LIMIT 100;

@@ -1,0 +1,48 @@
+
+WITH CustomerProcessing AS (
+    SELECT
+        c.c_customer_sk,
+        CONCAT(c.c_first_name, ' ', c.c_last_name) AS full_name,
+        SUBSTRING(c.c_email_address, POSITION('@' IN c.c_email_address) + 1) AS email_domain,
+        CASE 
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS gender,
+        COALESCE(CONCAT(LEFT(ca.ca_street_number, 5), ' ', ca.ca_street_name, ' ', ca.ca_street_type), 'Unknown Address') AS address,
+        COALESCE(CAST(CONCAT(c.c_birth_year, '-', c.c_birth_month, '-', c.c_birth_day) AS DATE), 'Unknown Date') AS birth_date
+    FROM
+        customer c
+    JOIN
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE
+        cd.cd_marital_status = 'M' AND cd.cd_purchase_estimate > 50000
+),
+GenderStats AS (
+    SELECT
+        gender,
+        COUNT(*) AS count,
+        AVG(LENGTH(full_name)) AS avg_name_length
+    FROM
+        CustomerProcessing
+    GROUP BY
+        gender
+)
+SELECT
+    gs.gender,
+    gs.count,
+    gs.avg_name_length,
+    COALESCE(ca.ca_city, 'Unknown City') AS city,
+    COUNT(DISTINCT ca.ca_state) AS states_count
+FROM
+    GenderStats gs
+LEFT JOIN
+    customer c ON gs.count > 0
+LEFT JOIN
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+GROUP BY
+    gs.gender, gs.count, gs.avg_name_length, ca.ca_city
+ORDER BY
+    gs.count DESC, gs.gender;

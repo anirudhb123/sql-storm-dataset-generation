@@ -1,0 +1,86 @@
+WITH RECURSIVE part_supplier AS (
+    SELECT 
+        ps_partkey, 
+        ps_suppkey, 
+        ps_availqty, 
+        ps_supplycost
+    FROM 
+        partsupp
+    WHERE 
+        ps_availqty > 0
+    UNION ALL
+    SELECT 
+        ps.partkey,
+        ps.suppkey,
+        ps.availqty,
+        ps.supplycost
+    FROM 
+        part_supplier ps
+    JOIN 
+        partsupp p ON ps.ps_partkey = p.ps_partkey AND ps.ps_suppkey <> p.ps_suppkey
+    WHERE 
+        ps.ps_supplycost < p.ps_supplycost
+),
+order_costs AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_cost
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_returnflag = 'N'
+    GROUP BY 
+        o.o_orderkey
+),
+supplier_info AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        CASE 
+            WHEN s.s_acctbal IS NULL THEN 'No Account'
+            WHEN s.s_acctbal < 100.00 THEN 'Low Balance'
+            ELSE 'Healthy Balance'
+        END AS balance_status
+    FROM 
+        supplier s
+    LEFT JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    WHERE 
+        n.n_name LIKE 'A%'
+),
+final_selection AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        ps.ps_availqty AS available_quantity,
+        o.total_cost,
+        si.balance_status
+    FROM 
+        part p
+    LEFT JOIN 
+        part_supplier ps ON p.p_partkey = ps.ps_partkey
+    JOIN 
+        order_costs o ON o.total_cost > 1000
+    LEFT JOIN 
+        supplier_info si ON ps.ps_suppkey = si.s_suppkey
+)
+SELECT 
+    f.p_partkey,
+    f.p_name,
+    COALESCE(f.available_quantity, 0) AS available_quantity,
+    CASE 
+        WHEN f.available_quantity IS NULL THEN 'Out of Stock'
+        WHEN f.total_cost > 5000 THEN 'High Order Cost'
+        ELSE 'Normal Order Cost'
+    END AS order_cost_status
+FROM 
+    final_selection f
+WHERE 
+    f.available_quantity > 1 AND 
+    f.p_name NOT LIKE '%test%'
+ORDER BY 
+    f.total_cost DESC, 
+    f.p_partkey ASC;

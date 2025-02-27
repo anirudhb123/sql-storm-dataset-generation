@@ -1,0 +1,113 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        p.Score,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 -- Select only questions
+    UNION ALL
+    SELECT 
+        p1.Id,
+        p1.Title,
+        p1.OwnerUserId,
+        p1.ParentId,
+        p1.Score,
+        rp.Level + 1
+    FROM 
+        Posts p1
+    INNER JOIN 
+        RecursivePostHierarchy rp ON p1.ParentId = rp.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(p.Id) AS PostCount,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        PostCount,
+        BadgeCount,
+        ROW_NUMBER() OVER (ORDER BY Reputation DESC, PostCount DESC) AS Rank
+    FROM 
+        UserReputation
+    WHERE 
+        Reputation > 1000
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.ViewCount,
+        COALESCE(ph.AnswerCount, 0) AS AnswerCount,
+        COALESCE(ph.CommentCount, 0) AS CommentCount,
+        COALESCE(ph.FavoriteCount, 0) AS FavoriteCount
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT 
+            ParentId,
+            COUNT(Id) AS AnswerCount,
+            SUM(CommentCount) AS CommentCount,
+            SUM(FavoriteCount) AS FavoriteCount
+        FROM 
+            Posts
+        WHERE 
+            PostTypeId = 2
+        GROUP BY 
+            ParentId
+    ) ph ON p.Id = ph.ParentId
+)
+SELECT 
+    u.DisplayName,
+    u.Reputation,
+    p.Title,
+    p.Score,
+    p.ViewCount,
+    p.AnswerCount,
+    p.CommentCount,
+    p.FavoriteCount,
+    CASE 
+        WHEN p.Score IS NULL THEN 'No Score'
+        WHEN p.Score > 10 THEN 'High Score'
+        ELSE 'Lower Score'
+    END AS ScoreCategory
+FROM 
+    TopUsers u
+JOIN 
+    PostMetrics p ON p.PostId IN (
+        SELECT 
+            PostId 
+        FROM 
+            Votes 
+        WHERE 
+            VoteTypeId = 2 
+            AND UserId = u.UserId
+    )
+WHERE 
+    p.AnswerCount > 0 
+    AND p.ViewCount > 100
+ORDER BY 
+    u.Reputation DESC,
+    p.Score DESC
+OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;
+This query utilizes a recursive Common Table Expression (CTE) to obtain a hierarchy of posts, as well as layered CTEs to summarize user reputation and post metrics. It incorporates complex joins, conditional logic, and filters to yield a well-defined performance benchmarking scenario suitable for analysis.

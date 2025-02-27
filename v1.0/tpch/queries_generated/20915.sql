@@ -1,0 +1,71 @@
+WITH RankedSales AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        part p
+    JOIN 
+        lineitem l ON p.p_partkey = l.l_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name
+),
+HighValueParts AS (
+    SELECT 
+        r.r_regionkey,
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        COALESCE(MAX(s.s_acctbal), 0) AS max_supplier_balance
+    FROM 
+        RankedSales r_s
+    JOIN 
+        partsupp ps ON r_s.p_partkey = ps.ps_partkey
+    LEFT JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        r_s.sales_rank = 1
+    GROUP BY 
+        r.r_regionkey, p.p_partkey, p.p_name, p.p_retailprice
+),
+FinalSummary AS (
+    SELECT 
+        hvp.p_partkey,
+        hvp.p_name,
+        hvp.p_retailprice,
+        hvp.max_supplier_balance,
+        CASE 
+            WHEN hvp.max_supplier_balance > 100000 THEN 'High'
+            WHEN hvp.max_supplier_balance BETWEEN 50000 AND 100000 THEN 'Medium'
+            ELSE 'Low' 
+        END AS supplier_balance_category
+    FROM 
+        HighValueParts hvp
+)
+SELECT 
+    f.p_partkey,
+    f.p_name,
+    f.p_retailprice,
+    f.max_supplier_balance,
+    f.supplier_balance_category,
+    (SELECT COUNT(DISTINCT c.c_custkey) 
+     FROM customer c 
+     WHERE c.c_nationkey IN (SELECT n.n_nationkey 
+                             FROM nation n 
+                             JOIN supplier s ON n.n_nationkey = s.s_nationkey 
+                             WHERE s.s_acctbal > f.max_supplier_balance)) AS customer_count
+FROM 
+    FinalSummary f
+WHERE 
+    f.supplier_balance_category = 'High'
+ORDER BY 
+    f.max_supplier_balance DESC
+LIMIT 10
+OFFSET 3;
+
+

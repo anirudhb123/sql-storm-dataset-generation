@@ -1,0 +1,102 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        OwnerUserId,
+        ParentId,
+        CreationDate,
+        Tags,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.ParentId,
+        p.CreationDate,
+        p.Tags,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p.ParentId = rph.Id
+    WHERE 
+        p.PostTypeId = 2  
+),
+EnhancedUserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS QuestionsAsked,
+        COUNT(DISTINCT a.Id) AS AnswersProvided,
+        COUNT(DISTINCT b.Id) AS BadgesEarned,
+        COUNT(DISTINCT v.Id) AS VotesReceived,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId AND p.PostTypeId = 1  
+    LEFT JOIN 
+        Posts a ON u.Id = a.OwnerUserId AND a.PostTypeId = 2  
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId  
+    LEFT JOIN 
+        Votes v ON (p.Id = v.PostId OR a.Id = v.PostId)  
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        unnest(string_to_array(p.Tags, '>')) AS TagName
+    FROM 
+        Posts p
+    WHERE 
+        p.Tags IS NOT NULL
+),
+PostRankings AS (
+    SELECT 
+        ph.Id AS PostId,
+        ph.Title,
+        pu.Reputation AS UserReputation,
+        ROW_NUMBER() OVER (PARTITION BY ph.Id ORDER BY pu.Reputation DESC) AS ReputationRank,
+        COUNT(DISTINCT pt.TagName) AS TagCount
+    FROM 
+        RecursivePostHierarchy ph
+    JOIN 
+        Users pu ON ph.OwnerUserId = pu.Id
+    LEFT JOIN 
+        PostTags pt ON ph.Id = pt.PostId
+    GROUP BY 
+        ph.Id, ph.Title, pu.Reputation
+)
+SELECT 
+    pus.UserId,
+    pus.Reputation,
+    pus.QuestionsAsked, 
+    pus.AnswersProvided, 
+    pus.BadgesEarned,
+    pus.VotesReceived,
+    pus.UpVotes,
+    pus.DownVotes,
+    pr.Title AS PostTitle,
+    pr.TagCount,
+    pr.ReputationRank
+FROM 
+    EnhancedUserStats pus
+JOIN 
+    PostRankings pr ON pus.UserId = pr.OwnerUserId
+WHERE 
+    pus.Reputation > 1000  
+ORDER BY 
+    pus.QuestionsAsked DESC,
+    pus.Reputation DESC,
+    pr.ReputationRank ASC;

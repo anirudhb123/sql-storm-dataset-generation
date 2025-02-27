@@ -1,0 +1,69 @@
+
+WITH RECURSIVE sales_data AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) AS sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+top_selling_items AS (
+    SELECT 
+        sd.ws_item_sk,
+        i.i_item_desc,
+        sd.total_sales
+    FROM 
+        sales_data sd
+    JOIN 
+        item i ON sd.ws_item_sk = i.i_item_sk
+    WHERE 
+        sd.sales_rank <= 5
+),
+customer_stats AS (
+    SELECT 
+        c.c_customer_sk,
+        CASE 
+            WHEN cd.cd_marital_status = 'M' THEN 'Married'
+            ELSE 'Single'
+        END AS marital_status,
+        COUNT(DISTINCT cs.cs_order_number) AS total_orders,
+        AVG(ws.ws_net_paid) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_bill_customer_sk
+    LEFT JOIN 
+        catalog_sales cs ON c.c_customer_sk = cs.cs_bill_customer_sk
+    GROUP BY 
+        c.c_customer_sk, cd.cd_marital_status
+),
+final_report AS (
+    SELECT 
+        c.customer_sk,
+        c.marital_status,
+        i.i_item_desc,
+        SUM(s.total_sales) AS item_sales
+    FROM 
+        customer_stats c
+    LEFT JOIN 
+        top_selling_items s ON c.total_orders > 0
+    LEFT JOIN 
+        item i ON s.ws_item_sk = i.i_item_sk
+    GROUP BY 
+        c.c_customer_sk, c.marital_status, i.i_item_desc
+)
+SELECT 
+    fr.marital_status,
+    COUNT(fr.customer_sk) AS number_of_customers,
+    SUM(fr.item_sales) AS total_item_sales
+FROM 
+    final_report fr
+GROUP BY 
+    fr.marital_status
+ORDER BY 
+    total_item_sales DESC;

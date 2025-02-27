@@ -1,0 +1,43 @@
+
+WITH RankedOrders AS (
+    SELECT o.o_orderkey,
+           o.o_orderdate,
+           o.o_totalprice,
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01' AND o.o_orderdate < '1998-01-01'
+),
+SupplierPartDetails AS (
+    SELECT s.s_suppkey,
+           s.s_name,
+           p.p_partkey,
+           p.p_name,
+           ps.ps_availqty,
+           ps.ps_supplycost,
+           COALESCE(NULLIF(ps.ps_supplycost, 0), NULL) AS adjusted_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+),
+CustomerOrderSummary AS (
+    SELECT c.c_custkey,
+           c.c_name,
+           c.c_acctbal,
+           COALESCE(SUM(l.l_extendedprice * (1 - l.l_discount)), 0) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY c.c_custkey, c.c_name, c.c_acctbal
+)
+SELECT r.r_name,
+       SUM(pd.adjusted_supplycost * pd.ps_availqty) AS total_cost,
+       COUNT(DISTINCT co.c_custkey) AS unique_customers,
+       COUNT(DISTINCT ro.o_orderkey) AS orders_count
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN SupplierPartDetails pd ON pd.s_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey = n.n_nationkey)
+LEFT JOIN CustomerOrderSummary co ON co.total_spent > 1000
+LEFT JOIN RankedOrders ro ON co.c_custkey IN (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = ro.o_orderkey)
+GROUP BY r.r_name
+HAVING SUM(pd.adjusted_supplycost * pd.ps_availqty) > 50000
+ORDER BY total_cost DESC;

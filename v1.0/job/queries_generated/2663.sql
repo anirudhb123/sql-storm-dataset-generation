@@ -1,0 +1,60 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(DISTINCT c.person_id) DESC) AS year_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+
+HighestRatedMovies AS (
+    SELECT 
+        m.title,
+        m.production_year,
+        m.actor_count,
+        ROW_NUMBER() OVER (ORDER BY m.actor_count DESC) AS overall_rank
+    FROM 
+        RankedMovies m
+    WHERE 
+        m.year_rank = 1
+),
+
+ActorsWithHighAwards AS (
+    SELECT 
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS movies_worked_in,
+        SUM(CASE WHEN p.info_type_id = 1 THEN 1 ELSE 0 END) AS awards_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON a.person_id = c.person_id
+    LEFT JOIN 
+        person_info p ON a.person_id = p.person_id
+    GROUP BY 
+        a.id
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5 AND SUM(CASE WHEN p.info_type_id = 1 THEN 1 ELSE 0 END) > 0
+)
+
+SELECT 
+    hm.title,
+    hm.production_year,
+    ah.name,
+    ah.movies_worked_in,
+    ah.awards_count
+FROM 
+    HighestRatedMovies hm
+JOIN 
+    ActorsWithHighAwards ah ON EXISTS (
+        SELECT 1 
+        FROM cast_info c 
+        WHERE c.movie_id IN (SELECT id FROM aka_title WHERE title = hm.title) AND c.person_id = ah.id
+    )
+ORDER BY 
+    hm.production_year DESC, ah.awards_count DESC
+LIMIT 10;

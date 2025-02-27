@@ -1,0 +1,78 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS ranking
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id
+), 
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        STRING_AGG(DISTINCT c.country_code, ', ') AS countries
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+), 
+MovieDetails AS (
+    SELECT 
+        rm.movie_id, 
+        rm.title, 
+        rm.production_year,
+        COALESCE(SUM(CASE WHEN mi.info_type_id = (SELECT id FROM info_type WHERE info='Box Office') THEN mi.info::numeric ELSE 0 END), 0) AS box_office,
+        COALESCE(STRING_AGG(DISTINCT k.keyword, ', '), 'N/A') AS keywords,
+        ROW_NUMBER() OVER (ORDER BY rm.production_year DESC) AS new_release_rank
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        movie_info mi ON rm.movie_id = mi.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON rm.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        rm.movie_id, rm.title, rm.production_year
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.box_office,
+    ci.company_name,
+    ci.company_type,
+    ci.countries,
+    CASE 
+        WHEN md.box_office IS NULL THEN 'Not available'
+        WHEN md.box_office > 1000000 THEN 'Blockbuster'
+        ELSE 'Average Hit'
+    END AS box_office_category,
+    COALESCE((
+        SELECT GROUP_CONCAT( DISTINCT ak.name ORDER BY ak.name) 
+        FROM aka_name ak 
+        WHERE ak.person_id IN (
+            SELECT DISTINCT ci.person_id 
+            FROM cast_info ci 
+            WHERE ci.movie_id = md.movie_id
+        )
+    ), 'No known aliases') AS actor_aliases
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    CompanyInfo ci ON md.movie_id = ci.movie_id
+WHERE 
+    (md.production_year >= 2010 OR md.box_office > 500000)
+    AND (md.title LIKE '%Adventure%' OR ci.company_name IS NOT NULL)
+ORDER BY 
+    md.new_release_rank DESC, md.box_office DESC;

@@ -1,0 +1,68 @@
+-- Performance benchmarking query
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(v.BountyAmount) AS TotalBounty
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Votes v ON v.UserId = u.Id
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostSummary AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.FavoriteCount,
+        COALESCE(c.Id, 0) AS Closed,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId AND p.ClosedDate IS NOT NULL
+)
+SELECT 
+    u.UserId,
+    u.Reputation,
+    u.PostCount,
+    u.QuestionCount,
+    u.AnswerCount,
+    u.TotalBounty,
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.LastActivityDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerCount AS PostAnswerCount,
+    ps.CommentCount,
+    ps.FavoriteCount,
+    ps.Closed,
+    ps.Rank
+FROM 
+    UserStats u
+JOIN 
+    PostSummary ps ON ps.PostId IN (
+        SELECT 
+            p.Id 
+        FROM 
+            Posts p 
+        ORDER BY 
+            p.Score DESC 
+        LIMIT 10
+    )
+ORDER BY 
+    u.Reputation DESC, ps.Score DESC;

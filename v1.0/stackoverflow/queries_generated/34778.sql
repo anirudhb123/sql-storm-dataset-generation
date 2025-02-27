@@ -1,0 +1,105 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        0 AS Level
+    FROM Posts p
+    WHERE p.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.PostTypeId,
+        Level + 1
+    FROM Posts p
+    INNER JOIN RecursivePostHierarchy rph ON p.ParentId = rph.PostId
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COUNT(b.Id) AS BadgeCount,
+        AVG(b.Date) OVER (PARTITION BY u.Id) AS AvgBadgeDate
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName, u.Reputation
+),
+RecentPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM Posts p
+    WHERE p.CreationDate > NOW() - INTERVAL '30 days'
+),
+PostWithCounts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(v.VoteCount, 0) AS VoteCount,
+        COALESCE(ph.RevisionCount, 0) AS RevisionCount,
+        u.DisplayName AS PostedBy
+    FROM Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount
+        FROM Comments
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS VoteCount
+        FROM Votes
+        GROUP BY PostId
+    ) v ON p.Id = v.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS RevisionCount
+        FROM PostHistory
+        GROUP BY PostId
+    ) ph ON p.Id = ph.PostId
+    LEFT JOIN Users u ON p.OwnerUserId = u.Id
+)
+SELECT 
+    rph.PostId,
+    rph.Title,
+    rph.OwnerUserId,
+    rph.Level,
+    up.DisplayName AS OwnerDisplayName,
+    up.Reputation AS OwnerReputation,
+    COALESCE(pc.CommentCount, 0) AS CommentCount,
+    COALESCE(pc.VoteCount, 0) AS VoteCount,
+    CTE.BadgeCount,
+    CTE.AvgBadgeDate,
+    CASE 
+        WHEN rph.Level = 0 THEN 'Top Level Post'
+        ELSE 'Child Post'
+    END AS PostType,
+    STRING_AGG(t.TagName, ', ') AS Tags,
+    COUNT(DISTINCT pl.RelatedPostId) AS RelatedPostsCount
+FROM RecursivePostHierarchy rph
+JOIN UserReputation CTE ON rph.OwnerUserId = CTE.UserId
+LEFT JOIN PostWithCounts pc ON rph.PostId = pc.PostId
+LEFT JOIN Posts p ON p.Id = rph.PostId
+LEFT JOIN unnest(string_to_array(p.Tags, ',')) AS t(TagName)
+LEFT JOIN PostLinks pl ON rph.PostId = pl.PostId
+GROUP BY 
+    rph.PostId, 
+    rph.Title, 
+    rph.OwnerUserId, 
+    rph.Level,
+    up.DisplayName,
+    up.Reputation,
+    CTE.BadgeCount,
+    CTE.AvgBadgeDate
+ORDER BY 
+    rph.Level, 
+    rph.Title;

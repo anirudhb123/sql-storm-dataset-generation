@@ -1,0 +1,88 @@
+WITH RecursiveCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.LastActivityDate,
+        1 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.ParentId IS NULL  -- Start with top-level questions
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.LastActivityDate,
+        Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursiveCTE r ON p.ParentId = r.PostId  -- Recursive join to find answers for each question
+),
+UserVotes AS (
+    SELECT 
+        v.UserId,
+        COUNT(v.Id) AS VoteCount,
+        SUM(CASE WHEN vt.Name = 'UpMod' THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN vt.Name = 'DownMod' THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        v.UserId
+),
+PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        pv.Score,
+        pv.ViewCount,
+        COALESCE(r.Level, 0) AS AnswerLevel,
+        u.DisplayName AS OwnerDisplayName,
+        COALESCE(uv.VoteCount, 0) AS UserVoteCount,
+        COALESCE(uv.UpVotes, 0) AS UpVotesReceived,
+        COALESCE(uv.DownVotes, 0) AS DownVotesReceived
+    FROM 
+        Posts p
+    LEFT JOIN 
+        RecursiveCTE r ON p.Id = r.PostId
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        UserVotes uv ON u.Id = uv.UserId
+    INNER JOIN 
+        PostHistory ph ON p.Id = ph.PostId
+    WHERE 
+        ph.CreationDate >= DATEADD(month, -6, GETDATE())  -- Posts which were edited in the last six months
+    GROUP BY 
+        p.Id, pv.Score, pv.ViewCount, r.Level, u.DisplayName, uv.VoteCount, uv.UpVotes, uv.DownVotes
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.Score,
+    ps.ViewCount,
+    ps.AnswerLevel,
+    ps.OwnerDisplayName,
+    ps.UserVoteCount,
+    ps.UpVotesReceived,
+    ps.DownVotesReceived,
+    CASE 
+        WHEN ps.UserVoteCount > 0 THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS VoteStatus
+FROM 
+    PostStats ps
+WHERE 
+    ps.Score > 0  -- Only return posts with a positive score
+ORDER BY 
+    ps.Score DESC,
+    ps.ViewCount DESC,
+    ps.AnswerLevel DESC;

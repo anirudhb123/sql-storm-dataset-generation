@@ -1,0 +1,60 @@
+
+WITH movie_data AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        ak.name AS director_name,
+        ci.nr_order AS cast_order,
+        c.name AS character_name,
+        mk.keyword AS movie_keyword,
+        COUNT(mk.keyword) AS keyword_count
+    FROM 
+        title t
+    JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    LEFT JOIN 
+        char_name c ON ak.id = c.imdb_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+        AND cn.country_code = 'USA'
+    GROUP BY 
+        t.title, 
+        t.production_year, 
+        ak.name, 
+        ci.nr_order, 
+        c.name
+),
+ranked_movies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        director_name,
+        cast_order,
+        character_name,
+        keyword_count,
+        RANK() OVER (PARTITION BY production_year ORDER BY keyword_count DESC) AS rank
+    FROM 
+        movie_data
+)
+SELECT 
+    movie_title,
+    production_year,
+    director_name,
+    cast_order,
+    character_name,
+    keyword_count,
+    rank
+FROM 
+    ranked_movies
+WHERE 
+    rank <= 5
+ORDER BY 
+    production_year DESC, rank;

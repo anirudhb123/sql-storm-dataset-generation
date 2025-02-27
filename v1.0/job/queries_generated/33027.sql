@@ -1,0 +1,82 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        CAST(0 AS INTEGER) AS level,
+        m.production_year
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year > 2000
+    UNION ALL
+    SELECT 
+        m.linked_movie_id AS movie_id,
+        sub.movie_title,
+        level + 1,
+        sub.production_year
+    FROM 
+        MovieHierarchy sub
+    JOIN 
+        movie_link ml ON sub.movie_id = ml.movie_id
+    WHERE 
+        ml.linked_movie_id IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        ci.movie_id,
+        an.name AS actor_name,
+        r.role AS role_type,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name an ON ci.person_id = an.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+),
+MoviesWithInfo AS (
+    SELECT 
+        mh.movie_id,
+        mh.movie_title,
+        mh.production_year,
+        STRING_AGG(DISTINCT ar.actor_name, ', ' ORDER BY ar.role_rank) AS actors_list,
+        COUNT(DISTINCT ar.actor_name) AS actor_count
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        ActorRoles ar ON mh.movie_id = ar.movie_id
+    WHERE 
+        mh.level < 3 
+    GROUP BY 
+        mh.movie_id, mh.movie_title, mh.production_year
+),
+CompanyProduction AS (
+    SELECT 
+        m.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(m.id) AS production_count
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    GROUP BY 
+        m.movie_id, c.name, ct.kind
+)
+SELECT 
+    mwi.movie_id,
+    mwi.movie_title,
+    mwi.production_year,
+    COALESCE(mwi.actors_list, 'No actors') AS actors_list,
+    mwi.actor_count,
+    COALESCE(cp.company_name, 'Unknown') AS company_name,
+    COALESCE(cp.company_type, 'N/A') AS company_type,
+    COALESCE(cp.production_count, 0) AS production_count
+FROM 
+    MoviesWithInfo mwi
+LEFT JOIN 
+    CompanyProduction cp ON mwi.movie_id = cp.movie_id
+ORDER BY 
+    mwi.production_year DESC, mwi.movie_title ASC;

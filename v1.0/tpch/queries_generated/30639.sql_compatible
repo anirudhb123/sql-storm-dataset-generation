@@ -1,0 +1,59 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (
+        SELECT AVG(s_acctbal)
+        FROM supplier
+    )
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+    WHERE sh.level < 2
+),
+CustomerOrderDetails AS (
+    SELECT
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderdate >= DATE '1996-01-01'
+    GROUP BY c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.total_spent
+    FROM CustomerOrderDetails c
+    ORDER BY c.total_spent DESC
+    LIMIT 10
+),
+PartSupplier AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        ps.ps_supplycost,
+        ps.ps_availqty,
+        ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY ps.ps_supplycost) AS rn
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty > 0
+)
+SELECT
+    c.c_name,
+    p.p_name,
+    ps.ps_supplycost,
+    COALESCE(NULLIF(ps.ps_availqty, 0), 'N/A') AS avail_qty,
+    sh.level,
+    CASE 
+        WHEN o.o_orderstatus = 'O' THEN 'Open Order'
+        ELSE 'Completed'
+    END AS order_status
+FROM TopCustomers c
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN PartSupplier ps ON ps.rn = 1
+JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+WHERE o.o_orderdate >= (DATE '1998-10-01' - INTERVAL '1 year')
+ORDER BY c.total_spent DESC, ps.ps_supplycost ASC;

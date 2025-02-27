@@ -1,0 +1,89 @@
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounties,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        AVG(u.Reputation) OVER () AS AvgReputation
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        u.Reputation > (SELECT AVG(Reputation) FROM Users) 
+        AND u.CreationDate < cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR'
+    GROUP BY 
+        u.Id
+),
+QuestionStats AS (
+    SELECT 
+        p.Id AS QuestionId,
+        p.Title,
+        p.Score,
+        COALESCE(ph.CloseReasonId, 'Not Closed') AS CloseReason,
+        COUNT(DISTINCT c.Id) AS NumberOfComments,
+        MAX(pb.Name) AS BestPostByBadge
+    FROM 
+        Posts p
+    LEFT JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) 
+    LEFT JOIN 
+        Badges b ON p.OwnerUserId = b.UserId AND b.Class = 1
+    LEFT JOIN 
+        (SELECT PostId, 
+                COUNT(DISTINCT Id) AS BadgeCount
+         FROM Badges
+         GROUP BY PostId) pb ON p.Id = pb.PostId
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.Score, ph.CloseReasonId
+),
+FinalReport AS (
+    SELECT 
+        ua.UserId,
+        ua.DisplayName,
+        ua.QuestionCount,
+        ua.AnswerCount,
+        ua.TotalBounties,
+        qs.QuestionId,
+        qs.Title,
+        qs.Score,
+        qs.CloseReason,
+        qs.NumberOfComments,
+        RANK() OVER (PARTITION BY ua.UserId ORDER BY qs.Score DESC) AS RankByScore
+    FROM 
+        UserActivity ua
+    JOIN 
+        QuestionStats qs ON ua.QuestionCount > 0
+    WHERE 
+        ua.AnswerCount > 0
+)
+
+SELECT 
+    fr.UserId,
+    fr.DisplayName,
+    fr.QuestionCount,
+    fr.AnswerCount,
+    fr.TotalBounties,
+    fr.QuestionId,
+    fr.Title,
+    fr.Score,
+    fr.CloseReason,
+    fr.NumberOfComments,
+    CASE 
+        WHEN fr.RankByScore = 1 THEN 'Top Performer'
+        ELSE 'Regular'
+    END AS PerformanceBadge
+FROM 
+    FinalReport fr
+WHERE 
+    fr.RankByScore <= 3
+ORDER BY 
+    fr.UserId, fr.Score DESC;

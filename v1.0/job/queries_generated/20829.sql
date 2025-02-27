@@ -1,0 +1,70 @@
+WITH RankedMovies AS (
+    SELECT 
+        a.id AS aka_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS rank,
+        COALESCE(mci.note, 'No Company Info') AS company_note,
+        COUNT(DISTINCT k.keyword) OVER (PARTITION BY t.id) AS keyword_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    LEFT JOIN 
+        movie_companies mci ON t.id = mci.movie_id
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        a.name IS NOT NULL AND 
+        ci.nr_order IS NOT NULL AND 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        rm.aka_id,
+        rm.title,
+        rm.production_year,
+        rm.company_note,
+        rm.keyword_count
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 3 AND 
+        (rm.production_year >= 2000 OR rm.company_note LIKE '%Production%')
+),
+MovieSummary AS (
+    SELECT 
+        production_year,
+        COUNT(*) AS total_movies,
+        SUM(keyword_count) AS total_keywords,
+        STRING_AGG(title, ', ') AS titles
+    FROM 
+        FilteredMovies
+    GROUP BY 
+        production_year
+)
+SELECT 
+    fs.production_year,
+    COALESCE(fs.total_movies, 0) AS total_movies,
+    COALESCE(fs.total_keywords, 0) AS total_keywords,
+    CASE 
+        WHEN fs.total_movies IS NULL THEN 'No Movies' 
+        ELSE fs.titles 
+    END AS movie_titles,
+    CASE 
+        WHEN fs.total_keywords > 10 THEN 'Many Keywords' 
+        WHEN fs.total_keywords IS NULL THEN 'No Keywords' 
+        ELSE 'Few Keywords' 
+    END AS keyword_summary
+FROM 
+    MovieSummary fs
+FULL OUTER JOIN 
+    (SELECT DISTINCT production_year FROM aka_title WHERE production_year < 2000) old_movies ON fs.production_year = old_movies.production_year
+WHERE 
+    fs.total_movies IS NOT NULL OR old_movies.production_year IS NOT NULL
+ORDER BY 
+    fs.production_year DESC NULLS LAST;

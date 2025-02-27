@@ -1,0 +1,25 @@
+SELECT 
+    pt.Name AS PostType,
+    COUNT(p.Id) AS TotalPosts,
+    AVG(u.Reputation) AS AverageUserReputation,
+    SUM(v.VoteTypeId = 2) AS TotalUpVotes,
+    COUNT(DISTINCT c.Id) AS TotalComments,
+    COUNT(DISTINCT b.Id) AS TotalBadges
+FROM 
+    Posts p
+JOIN 
+    PostTypes pt ON p.PostTypeId = pt.Id
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2
+LEFT JOIN 
+    Comments c ON p.Id = c.PostId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+WHERE 
+    p.CreationDate >= NOW() - INTERVAL '1 year'
+GROUP BY 
+    pt.Name
+ORDER BY 
+    TotalPosts DESC, AverageUserReputation DESC;

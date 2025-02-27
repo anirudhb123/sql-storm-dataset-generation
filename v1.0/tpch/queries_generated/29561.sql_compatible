@@ -1,0 +1,31 @@
+
+SELECT 
+    p.p_name,
+    s.s_name,
+    c.c_name,
+    o.o_orderkey,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    SUBSTRING(p.p_comment, 1, 20) AS short_comment,
+    CONCAT('Supplier: ', s.s_name, ' | Product: ', p.p_name) AS product_supplier_info,
+    COUNT(DISTINCT o.o_orderkey) AS order_count
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON l.l_partkey = p.p_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_retailprice > 20.00 
+    AND l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+GROUP BY 
+    p.p_name, s.s_name, c.c_name, o.o_orderkey, short_comment, product_supplier_info
+HAVING 
+    SUM(l.l_extendedprice * (1 - l.l_discount)) > 1000
+ORDER BY 
+    total_revenue DESC;

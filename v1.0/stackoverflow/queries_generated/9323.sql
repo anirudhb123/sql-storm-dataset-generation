@@ -1,0 +1,57 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        u.DisplayName AS OwnerDisplayName,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) AS RankScore,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, u.DisplayName
+),
+FilteredPosts AS (
+    SELECT 
+        rp.PostId, 
+        rp.Title, 
+        rp.CreationDate, 
+        rp.ViewCount, 
+        rp.Score, 
+        rp.OwnerDisplayName, 
+        rp.RankScore,
+        (SELECT ARRAY_AGG(tag.TagName) 
+         FROM Tags tag 
+         WHERE tag.Id IN (SELECT UNNEST(string_to_array(rp.Tags, ','))::int)) AS TagNames
+    FROM 
+        RankedPosts rp
+    WHERE 
+        rp.RankScore <= 5
+)
+SELECT 
+    fp.PostId, 
+    fp.Title, 
+    fp.CreationDate, 
+    fp.ViewCount, 
+    fp.Score, 
+    fp.OwnerDisplayName, 
+    fp.TagNames,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         Votes v 
+     WHERE 
+         v.PostId = fp.PostId 
+         AND v.UserId IS NOT NULL) AS VoteCount
+FROM 
+    FilteredPosts fp
+ORDER BY 
+    fp.Score DESC;

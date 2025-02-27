@@ -1,0 +1,73 @@
+
+WITH RECURSIVE Sales_CTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk >= (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023)
+        AND ws_sold_date_sk <= (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+Top_Sellers AS (
+    SELECT 
+        sc.ws_item_sk,
+        SUM(sc.ws_quantity) AS total_quantity,
+        SUM(sc.ws_net_profit) AS total_profit
+    FROM 
+        Sales_CTE sc
+    WHERE 
+        sc.rn <= 10
+    GROUP BY 
+        sc.ws_item_sk
+),
+Customer_Stats AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(DISTINCT CASE WHEN cd_marital_status IS NOT NULL THEN c.c_customer_sk END) AS married_customers,
+        COUNT(DISTINCT CASE WHEN cd_gender = 'F' AND cd_birth_year BETWEEN 1980 AND 1990 THEN c.c_customer_sk END) AS female_80s_births
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+Total_Stats AS (
+    SELECT 
+        s.ws_item_sk,
+        ts.total_quantity,
+        ts.total_profit,
+        cs.married_customers,
+        cs.female_80s_births,
+        LEAD(ts.total_quantity) OVER (ORDER BY ts.total_profit DESC) AS next_total_quantity
+    FROM 
+        Top_Sellers ts
+    FULL OUTER JOIN 
+        Customer_Stats cs ON cs.c_customer_sk IS NOT NULL
+    WHERE 
+        (ts.total_profit > COALESCE(next_total_quantity, 0)) 
+        OR (cs.married_customers IS NULL AND cs.female_80s_births IS NOT NULL)
+)
+SELECT 
+    s.ws_item_sk,
+    ts.total_quantity,
+    ts.total_profit,
+    CASE 
+        WHEN ts.total_quantity > 100 THEN 'High Seller'
+        WHEN ts.total_quantity BETWEEN 50 AND 100 THEN 'Medium Seller'
+        ELSE 'Low Seller'
+    END AS performance_category,
+    GREATEST(ts.total_profit, 0) AS max_profit
+FROM 
+    Total_Stats ts
+INNER JOIN 
+    item s ON ts.ws_item_sk = s.i_item_sk
+WHERE 
+    (ts.married_customers IS NOT NULL OR ts.female_80s_births IS NULL)
+ORDER BY 
+    ts.total_profit DESC, s.i_item_id
+LIMIT 50;

@@ -1,0 +1,29 @@
+WITH StringProcessingBenchmark AS (
+    SELECT
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.id AS title_id,
+        t.title AS movie_title,
+        t.production_year,
+        c.person_role_id,
+        r.role AS person_role,
+        p.info AS person_info
+    FROM aka_name a
+    JOIN cast_info c ON a.person_id = c.person_id
+    JOIN title t ON c.movie_id = t.id
+    JOIN role_type r ON c.person_role_id = r.id
+    LEFT JOIN person_info p ON a.person_id = p.person_id
+    WHERE a.name IS NOT NULL
+    AND pg_catalog.length(a.name) > 5
+    AND t.production_year >= 2000
+)
+SELECT
+    aka_name,
+    movie_title,
+    production_year,
+    person_role,
+    string_agg(DISTINCT person_info, ', ') AS additional_info,
+    COUNT(*) OVER (PARTITION BY aka_name ORDER BY production_year) AS movie_count
+FROM StringProcessingBenchmark
+GROUP BY aka_name, movie_title, production_year, person_role
+ORDER BY movie_count DESC, aka_name;

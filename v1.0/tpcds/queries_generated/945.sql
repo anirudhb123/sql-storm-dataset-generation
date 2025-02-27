@@ -1,0 +1,45 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_bill_customer_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        RANK() OVER (PARTITION BY ws_bill_customer_sk ORDER BY SUM(ws_net_profit) DESC) AS rank_profit
+    FROM web_sales
+    GROUP BY ws_bill_customer_sk
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_id,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ca.ca_city,
+        ca.ca_state,
+        ROW_NUMBER() OVER (PARTITION BY c.c_customer_sk ORDER BY c.c_last_name, c.c_first_name) AS rn
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+)
+SELECT 
+    ci.c_customer_id,
+    ci.c_first_name,
+    ci.c_last_name,
+    ci.ca_city,
+    ci.ca_state,
+    rs.total_net_profit,
+    coalesce(ib.ib_income_band_sk, 0) AS income_band,
+    (CASE 
+        WHEN rs.rank_profit = 1 THEN 'Top Performer'
+        ELSE 'Regular Customer' 
+    END) AS customer_status
+FROM CustomerInfo ci
+LEFT JOIN RankedSales rs ON ci.c_customer_id = rs.ws_bill_customer_sk
+LEFT JOIN household_demographics hd ON ci.c_current_cdemo_sk = hd.hd_demo_sk
+LEFT JOIN income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk
+WHERE 
+    (ci.ca_state IS NOT NULL AND ci.ca_state IN ('CA', 'NY'))
+    OR (ci.ca_city IS NOT NULL AND ci.ca_city LIKE '%San%')
+ORDER BY total_net_profit DESC NULLS LAST
+FETCH FIRST 100 ROWS ONLY;

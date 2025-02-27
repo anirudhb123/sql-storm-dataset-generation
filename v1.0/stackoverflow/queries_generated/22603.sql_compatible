@@ -1,0 +1,77 @@
+
+WITH RecursiveVoteCounts AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS DownVotes
+    FROM Votes
+    GROUP BY PostId
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        ph.Comment AS CloseReason,
+        COALESCE(vc.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(vc.DownVotes, 0) AS TotalDownVotes,
+        CASE 
+            WHEN ph.PostHistoryTypeId = 10 THEN 'Closed'
+            ELSE 'Active'
+        END AS PostStatus
+    FROM Posts p 
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId IN (10, 11) 
+    LEFT JOIN RecursiveVoteCounts vc ON p.Id = vc.PostId
+),
+TagStatistics AS (
+    SELECT 
+        t.Id AS TagId,
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(COALESCE(p.Score, 0)) AS TotalScores
+    FROM Tags t
+    JOIN Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    GROUP BY t.Id, t.TagName
+),
+RankedPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        ViewCount,
+        TotalUpVotes,
+        TotalDownVotes,
+        RANK() OVER (ORDER BY ViewCount DESC) AS ViewRank,
+        RANK() OVER (ORDER BY TotalUpVotes - TotalDownVotes DESC) AS VoteRank
+    FROM PostMetrics
+),
+FilteredPosts AS (
+    SELECT 
+        PostId,
+        Title,
+        ViewCount,
+        TotalUpVotes,
+        TotalDownVotes,
+        PostStatus,
+        ViewRank,
+        VoteRank,
+        ROW_NUMBER() OVER (PARTITION BY PostStatus ORDER BY TotalUpVotes - TotalDownVotes DESC) AS StatusRank
+    FROM RankedPosts
+    WHERE PostStatus = 'Active' AND ViewCount IS NOT NULL
+)
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.ViewCount,
+    fp.TotalUpVotes,
+    fp.TotalDownVotes,
+    fp.ViewRank,
+    fp.VoteRank,
+    t.TagName AS RelatedTag,
+    ts.PostCount,
+    ts.TotalScores
+FROM FilteredPosts fp
+LEFT JOIN TagStatistics ts ON ts.PostCount > 3
+LEFT JOIN Tags t ON POSITION(',' || t.TagName || ',' IN ',' || fp.Title || ',') > 0
+WHERE fp.StatusRank <= 5
+ORDER BY fp.VoteRank, fp.ViewCount DESC

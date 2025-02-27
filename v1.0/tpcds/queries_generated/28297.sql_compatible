@@ -1,0 +1,53 @@
+
+WITH CustomerAddress AS (
+    SELECT DISTINCT ca_city, ca_state, ca_country
+    FROM customer_address
+    WHERE ca_city IS NOT NULL
+),
+CustomerDemographics AS (
+    SELECT cd_gender, cd_marital_status, cd_education_status, cd_credit_rating
+    FROM customer_demographics
+    WHERE cd_purchase_estimate > 1000
+),
+DateDimension AS (
+    SELECT d_year, d_month_seq, d_day_name
+    FROM date_dim
+    WHERE d_year >= 2020
+),
+ItemDetails AS (
+    SELECT i_brand, i_category, i_color, i_item_desc
+    FROM item
+    WHERE i_current_price > 50
+),
+CombinedData AS (
+    SELECT 
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_country,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        dd.d_year,
+        dd.d_month_seq,
+        id.i_brand,
+        id.i_category,
+        id.i_color,
+        id.i_item_desc
+    FROM CustomerAddress ca
+    JOIN CustomerDemographics cd ON cd.cd_demo_sk IN (SELECT c_current_cdemo_sk FROM customer)
+    JOIN DateDimension dd ON dd.d_date_sk IN (SELECT DISTINCT ws_sold_date_sk FROM web_sales)
+    JOIN ItemDetails id ON id.i_item_sk IN (SELECT ws_item_sk FROM web_sales WHERE ws_net_paid > 50)
+)
+SELECT 
+    ca_city,
+    ca_state,
+    ca_country,
+    COUNT(*) AS customer_count,
+    AVG(cd_marital_status) AS avg_marital_status,
+    COUNT(DISTINCT d_year) AS active_years,
+    COUNT(DISTINCT i_brand) AS unique_brands,
+    COUNT(DISTINCT i_category) AS unique_categories
+FROM CombinedData
+GROUP BY ca_city, ca_state, ca_country
+ORDER BY customer_count DESC
+LIMIT 100;

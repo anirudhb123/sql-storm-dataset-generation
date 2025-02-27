@@ -1,0 +1,52 @@
+
+WITH actor_summary AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT ci.movie_id) AS movie_count,
+        AVG(CASE 
+            WHEN a.name ILIKE '%James%' AND ci.nr_order < 3 THEN 1 
+            ELSE 0 
+        END) AS early_appearance_ratio,
+        STRING_AGG(DISTINCT t.title, ', ') AS movie_titles
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    LEFT JOIN 
+        aka_title t ON ci.movie_id = t.movie_id
+    GROUP BY 
+        a.id, a.name
+),
+distinct_movie_info AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mk.keyword, 'No Keywords') AS keyword
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+)
+SELECT 
+    asum.actor_name,
+    asum.movie_count,
+    asum.early_appearance_ratio,
+    SUM(CASE WHEN dm.production_year > 2000 THEN 1 ELSE 0 END) AS recent_movies_count,
+    STRING_AGG(DISTINCT dm.keyword, ', ') AS keywords,
+    COUNT(DISTINCT dm.movie_id) AS distinct_movie_count,
+    CASE 
+        WHEN COUNT(DISTINCT dm.movie_id) > 5 THEN 'Prolific Actor'
+        ELSE 'Needs More Roles'
+    END AS actor_category
+FROM 
+    actor_summary asum
+LEFT JOIN 
+    distinct_movie_info dm ON asum.movie_count > 0
+GROUP BY 
+    asum.actor_name, asum.movie_count, asum.early_appearance_ratio
+HAVING 
+    SUM(CASE WHEN asum.movie_count > 10 THEN 1 ELSE 0 END) > 0
+ORDER BY 
+    asum.movie_count DESC, asum.actor_name;

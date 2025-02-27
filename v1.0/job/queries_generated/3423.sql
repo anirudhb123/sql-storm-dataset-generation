@@ -1,0 +1,47 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(ci.person_id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank_within_year
+    FROM 
+        title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+HighlyRatedMovies AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(mi.info, 'No Rating') AS rating_info
+    FROM 
+        RankedMovies m
+    LEFT JOIN 
+        movie_info mi ON m.movie_id = mi.movie_id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Rating')
+    WHERE 
+        m.actor_count > 1
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.rating_info,
+    COALESCE(ka.name, 'Unknown') AS actor_name
+FROM 
+    HighlyRatedMovies h
+LEFT JOIN 
+    complete_cast cc ON h.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    aka_name ka ON ci.person_id = ka.person_id
+WHERE 
+    h.rank_within_year <= 10
+ORDER BY 
+    h.production_year DESC, h.movie_id;

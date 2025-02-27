@@ -1,0 +1,97 @@
+WITH TagCounts AS (
+    SELECT 
+        TRIM(UNNEST(STRING_TO_ARRAY(SUBSTRING(Tags, 2, LENGTH(Tags) - 2), '><'))) AS Tag
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1
+),
+AggregatedTags AS (
+    SELECT 
+        Tag,
+        COUNT(*) AS UsageCount
+    FROM 
+        TagCounts
+    GROUP BY 
+        Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        UsageCount,
+        ROW_NUMBER() OVER (ORDER BY UsageCount DESC) AS Rank
+    FROM 
+        AggregatedTags
+    WHERE 
+        UsageCount > 5
+),
+PostsWithTopTags AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        t.Tag AS TopTag,
+        t.UsageCount
+    FROM 
+        Posts p
+    JOIN 
+        TagCounts tc ON TRIM(tc.Tag) = ANY(STRING_TO_ARRAY(SUBSTRING(p.Tags, 2, LENGTH(p.Tags) - 2), '><'))
+    JOIN 
+        TopTags t ON tc.Tag = t.Tag
+    WHERE 
+        p.PostTypeId = 1
+),
+ReputationSummary AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(b.Class) AS TotalBadges,
+        AVG(uc.Views) AS AvgViews,
+        COUNT(DISTINCT p.Id) AS TotalPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Users uc ON uc.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 50
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+PostsRanking AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.OwnerUserId,
+        p.Score,
+        ROW_NUMBER() OVER (ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1
+)
+SELECT 
+    pwt.PostId,
+    pwt.Title AS PostTitle,
+    pwt.Body AS PostBody,
+    pwt.CreationDate AS PostCreationDate,
+    pwt.TopTag,
+    rs.DisplayName AS Author,
+    rs.TotalBadges,
+    rs.AvgViews,
+    ps.Rank AS PostRank
+FROM 
+    PostsWithTopTags pwt
+JOIN 
+    ReputationSummary rs ON pwt.OwnerUserId = rs.UserId
+JOIN 
+    PostsRanking ps ON pwt.PostId = ps.Id
+WHERE 
+    pwt.UsageCount > 10
+ORDER BY 
+    pwt.CreationDate DESC, 
+    pwt.TopTag;

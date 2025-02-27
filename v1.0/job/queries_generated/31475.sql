@@ -1,0 +1,58 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        0 AS level,
+        ARRAY[mt.title] AS title_path
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        lt.title,
+        lt.production_year,
+        mh.level + 1,
+        mh.title_path || lt.title
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title lt ON ml.linked_movie_id = lt.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+
+SELECT 
+    mh.title AS base_movie,
+    STRING_AGG(t.title, ' -> ') AS linked_movies,
+    AVG(mt.production_year) AS avg_production_year,
+    COUNT(DISTINCT c.person_id) AS total_cast,
+    COUNT(DISTINCT k.keyword) AS total_keywords,
+    SUM(CASE WHEN io.info_type_id = 1 THEN 1 ELSE 0 END) AS total_runtime_info,
+    SUM(CASE WHEN c.role_id IS NULL THEN 1 ELSE 0 END) AS cast_without_roles
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    movie_link ml ON mh.movie_id = ml.movie_id
+LEFT JOIN 
+    aka_title t ON ml.linked_movie_id = t.id
+LEFT JOIN 
+    cast_info c ON c.movie_id = mh.movie_id
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = mh.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    movie_info io ON io.movie_id = mh.movie_id
+WHERE 
+    mh.level < 2
+GROUP BY 
+    mh.title
+ORDER BY 
+    avg_production_year DESC
+LIMIT 10;
+This SQL query constructs a recursive common table expression (CTE) to build a hierarchy of linked movies from the `aka_title` table. It then aggregates information about cast members, keywords, and runtime details while filtering the linked movies to a certain depth. The final result displays the titles of the movies, their linked counterparts, and other comparative statistics, providing insights into movie production characteristics.

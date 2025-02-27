@@ -1,0 +1,46 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        ca.city AS city,
+        ca.state AS state,
+        COUNT(DISTINCT c.customer_id) AS customer_count,
+        COUNT(DISTINCT o.order_number) AS order_count,
+        MAX(o.total_amount) AS max_order_amount,
+        MIN(o.total_amount) AS min_order_amount,
+        AVG(o.total_amount) AS avg_order_amount
+    FROM 
+        customer_address ca
+    JOIN 
+        customer c ON c.current_addr_sk = ca.address_sk
+    LEFT JOIN 
+        (
+            SELECT 
+                ws.order_number,
+                ws.ship_addr_sk,
+                SUM(ws.net_paid) AS total_amount
+            FROM 
+                web_sales ws
+            GROUP BY 
+                ws.order_number, ws.ship_addr_sk
+        ) o ON o.ship_addr_sk = ca.address_sk
+    GROUP BY 
+        ca.city, ca.state
+)
+
+SELECT 
+    city,
+    state,
+    customer_count,
+    order_count,
+    max_order_amount,
+    min_order_amount,
+    avg_order_amount,
+    CONCAT(city, ', ', state) AS full_address,
+    LENGTH(city) + LENGTH(state) AS address_length
+FROM 
+    AddressDetails
+WHERE 
+    order_count > 0
+ORDER BY 
+    customer_count DESC, avg_order_amount DESC
+LIMIT 100;

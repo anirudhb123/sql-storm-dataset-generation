@@ -1,0 +1,70 @@
+
+WITH RECURSIVE SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_paid) DESC) as sales_rank
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+TopItems AS (
+    SELECT 
+        s.ws_item_sk,
+        i.i_item_desc,
+        d.d_date,
+        sd.total_quantity,
+        sd.total_sales,
+        ROW_NUMBER() OVER (PARTITION BY d.d_date ORDER BY sd.total_sales DESC) as item_rank
+    FROM 
+        SalesData sd
+    JOIN 
+        item i ON sd.ws_item_sk = i.i_item_sk
+    JOIN 
+        date_dim d ON sd.ws_sold_date_sk = d.d_date_sk
+    WHERE 
+        sd.sales_rank <= 10
+),
+CustomerSales AS (
+    SELECT 
+        c.c_customer_sk,
+        SUM(ws.ws_net_paid) AS total_spent
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_sk
+),
+IncomeDistribution AS (
+    SELECT 
+        h.hd_income_band_sk,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cs.total_spent) AS avg_spent
+    FROM 
+        household_demographics h
+    LEFT JOIN 
+        CustomerSales cs ON h.hd_demo_sk = cs.c_customer_sk
+    LEFT JOIN 
+        customer c ON h.hd_demo_sk = c.c_current_hdemo_sk
+    GROUP BY 
+        h.hd_income_band_sk
+)
+SELECT 
+    t.i_item_desc,
+    t.total_quantity,
+    t.total_sales,
+    ic.customer_count,
+    ic.avg_spent
+FROM 
+    TopItems t
+JOIN 
+    IncomeDistribution ic ON t.ws_item_sk = ic.hd_income_band_sk
+WHERE 
+    ic.customer_count > 0
+ORDER BY 
+    t.total_sales DESC, ic.avg_spent DESC
+LIMIT 50;

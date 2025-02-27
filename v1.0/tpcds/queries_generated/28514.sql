@@ -1,0 +1,53 @@
+
+WITH RankedAddresses AS (
+    SELECT 
+        ca_address_sk,
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type, 
+               CASE WHEN ca_suite_number IS NOT NULL AND ca_suite_number <> '' 
+                    THEN CONCAT(' Suite ', ca_suite_number) 
+                    ELSE '' END) AS full_address,
+        ROW_NUMBER() OVER (PARTITION BY ca_city ORDER BY ca_address_id) AS rank
+    FROM customer_address
+),
+CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_income_band_sk,
+        ca.full_address
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN RankedAddresses ca ON c.c_current_addr_sk = ca.ca_address_sk
+    WHERE cd.cd_gender = 'F' -- Consider only female customers
+),
+SalesAnalysis AS (
+    SELECT 
+        ci.full_name,
+        ci.full_address,
+        COUNT(ws.ws_order_number) AS total_orders,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM CustomerInfo ci
+    JOIN web_sales ws ON ci.c_customer_sk = ws.ws_bill_customer_sk
+    GROUP BY ci.full_name, ci.full_address
+),
+FinalSummary AS (
+    SELECT 
+        full_name,
+        full_address,
+        total_orders,
+        total_profit,
+        RANK() OVER (ORDER BY total_profit DESC) AS profit_rank
+    FROM SalesAnalysis
+)
+
+SELECT 
+    full_name,
+    full_address,
+    total_orders,
+    total_profit,
+    profit_rank
+FROM FinalSummary
+WHERE profit_rank <= 10 -- Get top 10 customers by total profit
+ORDER BY total_profit DESC;

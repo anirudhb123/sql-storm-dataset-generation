@@ -1,0 +1,58 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, mt.title, mt.production_year, 0 AS level
+    FROM aka_title mt
+    WHERE mt.production_year >= '2000'
+
+    UNION ALL
+
+    SELECT m.id, m.title, m.production_year, mh.level + 1 
+    FROM movie_hierarchy mh
+    JOIN movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN title m ON ml.linked_movie_id = m.id
+),
+cast_info_ranked AS (
+    SELECT ci.*, 
+           ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM cast_info ci
+    WHERE ci.person_role_id IS NOT NULL
+),
+movies_with_keywords AS (
+    SELECT mt.movie_id,
+           STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    JOIN aka_title mt ON mk.movie_id = mt.id
+    GROUP BY mt.movie_id
+),
+movie_data AS (
+    SELECT mh.movie_id, 
+           mh.title AS movie_title, 
+           mh.production_year,
+           COALESCE(kw.keywords, 'No Keywords') AS keywords,
+           COALESCE(CAST(c.person_id AS VARCHAR(255)), 'No Cast') AS person_id,
+           COALESCE(CAST(c.role_id AS VARCHAR(255)), 'No Role') AS role_id,
+           CASE 
+               WHEN mh.level > 0 THEN 'Linked Movie'
+               ELSE 'Original Movie'
+           END AS movie_type
+    FROM movie_hierarchy mh
+    LEFT JOIN cast_info_ranked c ON mh.movie_id = c.movie_id
+    LEFT JOIN movies_with_keywords kw ON mh.movie_id = kw.movie_id
+)
+SELECT 
+    md.movie_title,
+    md.production_year,
+    md.keywords,
+    md.person_id,
+    md.role_id,
+    md.movie_type,
+    COUNT(ci.id) OVER(PARTITION BY md.movie_id) AS total_cast_members,
+    AVG(CASE WHEN ci.note IS NOT NULL THEN 1 ELSE NULL END) OVER(PARTITION BY md.movie_id) AS avg_cast_note_presence
+FROM movie_data md
+LEFT JOIN complete_cast cc ON md.movie_id = cc.movie_id
+LEFT JOIN cast_info ci ON ci.movie_id = md.movie_id
+WHERE md.production_year BETWEEN 2000 AND 2023 
+  AND (md.keywords LIKE '%Action%' OR md.keywords LIKE '%Drama%')
+ORDER BY md.production_year DESC, md.movie_title
+LIMIT 50;

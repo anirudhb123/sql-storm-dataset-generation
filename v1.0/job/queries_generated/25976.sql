@@ -1,0 +1,45 @@
+WITH MovieRoles AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        r.role,
+        COUNT(*) AS role_count
+    FROM cast_info c
+    JOIN role_type r ON c.role_id = r.id
+    GROUP BY c.movie_id, c.person_id, r.role
+),
+TopMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(c.id) AS total_cast
+    FROM aka_title m
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    WHERE m.production_year >= 2000
+    GROUP BY m.id
+    ORDER BY total_cast DESC
+    LIMIT 10
+),
+KeywordStats AS (
+    SELECT 
+        m.id AS movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mk
+    JOIN movie_info m ON mk.movie_id = m.movie_id
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY m.id
+)
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(mr.role, 'N/A') AS person_role,
+    COALESCE(mr.role_count, 0) AS role_count,
+    COALESCE(ks.keywords, 'None') AS keywords,
+    COUNT(DISTINCT ci.person_id) AS total_actors
+FROM TopMovies tm
+LEFT JOIN MovieRoles mr ON tm.movie_id = mr.movie_id
+LEFT JOIN KeywordStats ks ON tm.movie_id = ks.movie_id
+LEFT JOIN cast_info ci ON tm.movie_id = ci.movie_id
+GROUP BY tm.movie_id, tm.title, tm.production_year, mr.role, ks.keywords
+ORDER BY tm.production_year DESC, total_actors DESC;

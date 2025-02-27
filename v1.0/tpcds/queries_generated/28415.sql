@@ -1,0 +1,78 @@
+
+WITH Combined_Customer_Address AS (
+    SELECT 
+        ca.ca_address_id,
+        ca.ca_street_number || ' ' || ca.ca_street_name || ' ' || ca.ca_street_type || 
+        CASE 
+            WHEN ca.ca_suite_number IS NOT NULL AND ca.ca_suite_number <> '' 
+            THEN ' Suite ' || ca.ca_suite_number 
+            ELSE '' 
+        END AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country
+    FROM 
+        customer_address ca
+),
+Customer_Statistics AS (
+    SELECT 
+        cd.cd_gender,
+        cd.cd_marital_status,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_purchase_estimate) AS avg_purchase_estimate,
+        SUM(cd.cd_dep_count) AS total_dependencies
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        cd.cd_gender, cd.cd_marital_status
+),
+Sales_Statistics AS (
+    SELECT 
+        d.d_year,
+        SUM(ws.ws_net_paid) AS total_sales,
+        SUM(ws.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM 
+        web_sales ws 
+    JOIN 
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    GROUP BY 
+        d.d_year
+),
+Address_Ship_Statistics AS (
+    SELECT 
+        ca.ca_country,
+        COUNT(DISTINCT ws.ws_order_number) AS orders_count,
+        SUM(ws.ws_ext_sales_price) AS total_sales_value
+    FROM 
+        Combined_Customer_Address ca 
+    JOIN 
+        web_sales ws ON ca.ca_address_id = ws.ws_ship_addr_sk
+    GROUP BY 
+        ca.ca_country
+)
+
+SELECT 
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.customer_count,
+    cs.avg_purchase_estimate,
+    ss.total_sales,
+    ss.total_profit,
+    ss.total_orders,
+    as_count.country AS country,
+    as_count.orders_count,
+    as_count.total_sales_value
+FROM 
+    Customer_Statistics cs
+JOIN 
+    Sales_Statistics ss ON 1=1
+JOIN 
+    Address_Ship_Statistics as_count ON 1=1
+WHERE 
+    cs.customer_count > 100
+ORDER BY 
+    cs.cd_gender, cs.cd_marital_status;

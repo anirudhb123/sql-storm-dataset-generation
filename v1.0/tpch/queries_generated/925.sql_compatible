@@ -1,0 +1,46 @@
+
+WITH supplier_summary AS (
+    SELECT 
+        s.n_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.n_nationkey
+), 
+customer_orders AS (
+    SELECT 
+        o.o_orderkey,
+        c.c_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_value,
+        COUNT(l.l_orderkey) AS total_items
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey, c.c_name
+), 
+price_segments AS (
+    SELECT 
+        CASE 
+            WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) > 500 THEN 'High Value'
+            WHEN SUM(l.l_extendedprice * (1 - l.l_discount)) BETWEEN 100 AND 500 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS price_category,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY price_category
+)
+SELECT 
+    r.r_name,
+    COALESCE(ss.total_supplycost, 0) AS total_supplycost,
+    COALESCE(co.total_value, 0) AS customer_order_value,
+    ps.price_category,
+    ps.order_count
+FROM region r
+LEFT JOIN supplier_summary ss ON r.r_regionkey = ss.n_nationkey
+FULL OUTER JOIN customer_orders co ON co.o_orderkey = ss.n_nationkey
+FULL OUTER JOIN price_segments ps ON ps.price_category IS NOT NULL
+WHERE COALESCE(ss.total_supplycost, 0) > 0 OR COALESCE(co.total_value, 0) > 0
+ORDER BY r.r_name, ps.price_category DESC;

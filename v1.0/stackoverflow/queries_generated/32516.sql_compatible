@@ -1,0 +1,66 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.OwnerUserId,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+    
+    UNION ALL
+
+    SELECT 
+        p2.Id AS PostId,
+        p2.Title,
+        p2.CreationDate,
+        p2.ViewCount,
+        p2.Score,
+        p2.OwnerUserId,
+        rph.Level + 1
+    FROM 
+        Posts p2
+    INNER JOIN 
+        RecursivePostHierarchy rph ON p2.ParentId = rph.PostId
+)
+
+SELECT 
+    u.DisplayName AS UserName,
+    COUNT(DISTINCT p.Id) AS TotalPosts,
+    SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS TotalQuestions,
+    SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS TotalAnswers,
+    AVG(p.Score) AS AvgScore,
+    SUM(COALESCE(b.Class, 0)) AS TotalBadges,
+    SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounty,
+    STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+    MAX(rp.CreationDate) AS LastActivePost,
+    ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT p.Id) DESC) AS RowRank
+FROM 
+    Users u
+LEFT JOIN 
+    Posts p ON u.Id = p.OwnerUserId
+LEFT JOIN 
+    Badges b ON u.Id = b.UserId
+LEFT JOIN 
+    Votes v ON p.Id = v.PostId AND v.VoteTypeId IN (2, 1)  
+LEFT JOIN 
+    Posts rp ON p.Id = rp.Id
+LEFT JOIN   
+    (SELECT UNNEST(string_to_array(p.Tags, '><')) AS TagName FROM Posts p) t ON p.TAGS LIKE '%' || t.TagName || '%'
+LEFT JOIN
+    RecursivePostHierarchy rph ON rph.PostId = p.Id
+WHERE 
+    u.Reputation > 1000  
+    AND (p.CreationDate > '2024-10-01 12:34:56'::timestamp - INTERVAL '1 year')
+GROUP BY 
+    u.DisplayName
+HAVING 
+    COUNT(DISTINCT p.Id) > 5  
+ORDER BY 
+    TotalPosts DESC
+LIMIT 10;

@@ -1,0 +1,44 @@
+WITH RECURSIVE part_hierarchy AS (
+    SELECT p_partkey, p_name, p_mfgr, p_size, p_retailprice, 1 AS level
+    FROM part
+    WHERE p_size IS NOT NULL
+    UNION ALL
+    SELECT p.p_partkey, p.p_name, p.p_mfgr, p.p_size, p.p_retailprice, ph.level + 1
+    FROM part_hierarchy ph
+    JOIN part p ON ph.p_partkey = p.p_partkey
+    WHERE p.p_size > ph.p_size
+),
+customer_order_summary AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS total_orders, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+),
+supplier_parts AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_availqty) AS total_available, AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    p.p_name,
+    rh.level,
+    c.c_name,
+    c.total_orders,
+    cp.total_spent,
+    sp.total_available,
+    sp.avg_supply_cost
+FROM part_hierarchy p
+LEFT JOIN customer_order_summary c ON c.total_orders > 5
+LEFT JOIN supplier_parts sp ON sp.total_available > 100
+OUTER JOIN (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey
+) AS cp ON cp.revenue > 1000
+WHERE p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2 WHERE p2.p_size IS NOT NULL)
+ORDER BY p.p_name, rh.level DESC
+LIMIT 50;

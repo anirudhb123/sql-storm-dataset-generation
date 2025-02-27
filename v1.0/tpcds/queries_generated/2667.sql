@@ -1,0 +1,58 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws.ws_order_number,
+        ws.ws_quantity,
+        ws.ws_sales_price,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM 
+        web_sales ws
+    WHERE 
+        ws.ws_sold_date_sk IN (SELECT d_date_sk 
+                                FROM date_dim 
+                                WHERE d_year = 2023 AND d_moy = 10)
+),
+CustomerStatistics AS (
+    SELECT 
+        c.c_customer_sk,
+        COUNT(sr.ticket_number) AS total_returns,
+        AVG(sr.return_amt) AS avg_return_amount,
+        MAX(sr.returned_date_sk) AS last_return_date
+    FROM 
+        customer c
+    LEFT JOIN 
+        store_returns sr ON c.c_customer_sk = sr.sr_customer_sk 
+    GROUP BY 
+        c.c_customer_sk
+),
+TopWebsites AS (
+    SELECT 
+        r.web_site_sk,
+        SUM(r.ws_sales_price * r.ws_quantity) AS total_revenue
+    FROM 
+        web_sales r
+    JOIN 
+        CustomerStatistics cs ON cs.c_customer_sk = r.ws_bill_customer_sk
+    GROUP BY 
+        r.web_site_sk
+    HAVING 
+        total_revenue > 10000
+)
+SELECT 
+    w.w_warehouse_id,
+    w.w_warehouse_name,
+    tws.total_revenue,
+    cs.total_returns,
+    cs.avg_return_amount,
+    RANK() OVER (ORDER BY tws.total_revenue DESC) AS revenue_rank
+FROM 
+    warehouse w
+LEFT JOIN 
+    TopWebsites tws ON w.w_warehouse_sk = tws.web_site_sk
+LEFT JOIN 
+    CustomerStatistics cs ON cs.c_customer_sk = (SELECT c.c_customer_sk FROM customer c WHERE c.c_current_addr_sk = w.w_warehouse_sk LIMIT 1)
+WHERE 
+    cs.last_return_date IS NOT NULL
+ORDER BY 
+    revenue_rank;

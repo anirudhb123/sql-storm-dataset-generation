@@ -1,0 +1,82 @@
+WITH RecentPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.PostTypeId,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.ViewCount,
+        P.Score,
+        COALESCE(P.AcceptedAnswerId, 0) AS AcceptedAnswerId
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+),
+PostsWithComments AS (
+    SELECT 
+        RP.PostId,
+        RP.Title,
+        RP.OwnerDisplayName,
+        RP.CreationDate,
+        RP.ViewCount,
+        RP.Score,
+        COALESCE(COUNT(C.Id), 0) AS CommentCount
+    FROM 
+        RecentPosts RP
+    LEFT JOIN 
+        Comments C ON RP.PostId = C.PostId
+    GROUP BY 
+        RP.PostId, RP.Title, RP.OwnerDisplayName, RP.CreationDate, RP.ViewCount, RP.Score
+),
+TopPosts AS (
+    SELECT 
+        PWC.PostId,
+        PWC.Title,
+        PWC.OwnerDisplayName,
+        PWC.CreationDate,
+        PWC.ViewCount,
+        PWC.Score,
+        PWC.CommentCount,
+        RANK() OVER (ORDER BY PWC.Score DESC, PWC.ViewCount DESC) AS PostRank
+    FROM 
+        PostsWithComments PWC
+)
+SELECT 
+    TP.PostId,
+    TP.Title,
+    TP.OwnerDisplayName,
+    TP.CreationDate,
+    TP.ViewCount,
+    TP.Score,
+    TP.CommentCount,
+    (SELECT 
+         COUNT(*) 
+     FROM 
+         Votes V 
+     WHERE 
+         V.PostId = TP.PostId AND V.VoteTypeId IN (2, 3)) AS TotalVotes,
+    PT.Name AS PostTypeName
+FROM 
+    TopPosts TP
+LEFT JOIN 
+    PostTypes PT ON TP.PostTypeId = PT.Id
+WHERE 
+    TP.PostRank <= 10
+ORDER BY 
+    TP.PostRank
+UNION ALL
+SELECT 
+    NULL AS PostId,
+    'Total Count of Recent Posts' AS Title,
+    NULL AS OwnerDisplayName,
+    NULL AS CreationDate,
+    NULL AS ViewCount,
+    COUNT(*) AS Score,
+    NULL AS CommentCount,
+    NULL AS TotalVotes,
+    NULL AS PostTypeName
+FROM 
+    RecentPosts

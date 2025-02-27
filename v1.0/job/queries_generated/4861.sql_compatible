@@ -1,0 +1,87 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rn
+    FROM 
+        title t
+),
+
+MovieDetails AS (
+    SELECT 
+        mt.movie_id,
+        mt.company_id,
+        mt.note,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mt
+    JOIN 
+        company_type ct ON mt.company_type_id = ct.id
+),
+
+ActorTitles AS (
+    SELECT 
+        ca.movie_id,
+        ak.name AS actor_name,
+        at.title AS movie_title,
+        at.production_year,
+        COUNT(DISTINCT ca.role_id) AS roles_count
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name ak ON ca.person_id = ak.person_id
+    JOIN 
+        aka_title at ON ca.movie_id = at.movie_id
+    GROUP BY 
+        ca.movie_id, ak.name, at.title, at.production_year
+),
+
+FilteredMovies AS (
+    SELECT 
+        md.movie_id,
+        md.company_type,
+        ROW_NUMBER() OVER (PARTITION BY md.movie_id ORDER BY md.company_type) AS comp_rank
+    FROM 
+        MovieDetails md
+    WHERE 
+        md.note IS NOT NULL
+),
+
+FinalResult AS (
+    SELECT 
+        a.actor_name,
+        a.movie_title,
+        a.production_year,
+        COALESCE(fm.company_type, 'Unknown') AS company_type,
+        a.roles_count,
+        CASE 
+            WHEN a.roles_count > 2 THEN 'Lead'
+            WHEN a.roles_count = 2 THEN 'Supporting'
+            ELSE 'Cameo'
+        END AS role_type
+    FROM 
+        ActorTitles a
+    LEFT JOIN 
+        FilteredMovies fm ON a.movie_id = fm.movie_id
+)
+
+SELECT 
+    fr.actor_name,
+    fr.movie_title,
+    fr.production_year,
+    fr.company_type,
+    fr.role_type,
+    COUNT(*) OVER (PARTITION BY fr.actor_name) AS total_movies,
+    CASE 
+        WHEN fr.production_year < 2000 THEN 'Classic'
+        WHEN fr.production_year >= 2000 AND fr.production_year <= 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era_category
+FROM 
+    FinalResult fr
+WHERE 
+    fr.production_year IS NOT NULL
+ORDER BY 
+    fr.actor_name, fr.production_year DESC;

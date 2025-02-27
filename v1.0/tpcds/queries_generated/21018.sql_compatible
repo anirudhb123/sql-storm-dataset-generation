@@ -1,0 +1,62 @@
+
+WITH RankedSales AS (
+    SELECT ws.web_site_sk, 
+           ws.ws_item_sk, 
+           ws.ws_order_number, 
+           ws.ws_net_profit,
+           ROW_NUMBER() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS rnk
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE c.c_birth_year BETWEEN 1980 AND 1995
+),
+TopProfitableItems AS (
+    SELECT rs.web_site_sk, 
+           rs.ws_item_sk, 
+           rs.ws_order_number, 
+           rs.ws_net_profit
+    FROM RankedSales rs
+    WHERE rs.rnk = 1
+),
+ItemDetails AS (
+    SELECT i.i_item_sk, 
+           i.i_item_desc,
+           COALESCE(REPLACE(i.i_item_desc, ' ', '_'), 'Unknown Item') AS item_desc_formatted,
+           COALESCE(i.i_current_price, 0) AS item_price
+    FROM item i
+)
+SELECT 
+    tpi.web_site_sk, 
+    id.item_desc_formatted, 
+    id.item_price,
+    SUM(tpi.ws_net_profit) AS total_profit
+FROM TopProfitableItems tpi
+LEFT JOIN ItemDetails id ON tpi.ws_item_sk = id.i_item_sk
+JOIN date_dim dd ON tpi.ws_order_number = dd.d_date_sk 
+WHERE id.item_price > 50 AND
+      EXISTS (
+          SELECT 1
+          FROM catalog_sales cs
+          WHERE cs.cs_item_sk = tpi.ws_item_sk
+          AND cs.cs_sold_date_sk = dd.d_date_sk 
+          HAVING SUM(cs.cs_net_paid) > 1000
+      )
+GROUP BY tpi.web_site_sk, id.item_desc_formatted, id.item_price
+HAVING COUNT(*) > 1
+ORDER BY total_profit DESC 
+UNION ALL
+SELECT 
+    NULL AS web_site_sk, 
+    'Aggregate' AS item_desc_formatted, 
+    AVG(item_price) AS item_price,
+    SUM(total_profit) AS total_profit
+FROM (
+     SELECT 
+         SUM(tpi.ws_net_profit) AS total_profit,
+         id.item_price
+     FROM TopProfitableItems tpi
+     JOIN ItemDetails id ON tpi.ws_item_sk = id.i_item_sk
+     GROUP BY id.item_price
+) AS a
+WHERE item_price IS NOT NULL
+GROUP BY item_price
+ORDER BY item_price DESC;

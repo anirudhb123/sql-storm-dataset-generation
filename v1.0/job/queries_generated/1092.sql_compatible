@@ -1,0 +1,62 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_by_year
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorRoles AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        r.role AS role_name,
+        COUNT(c.id) AS role_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.movie_id, a.name, r.role
+),
+RecentlyReleased AS (
+    SELECT 
+        DISTINCT t.*
+    FROM 
+        title t
+    WHERE 
+        EXISTS (SELECT 1 FROM movie_info mi WHERE mi.movie_id = t.id AND mi.info_type_id = (SELECT id FROM info_type WHERE info = 'released') AND mi.info = 'true')
+)
+
+SELECT 
+    rt.title AS Title,
+    rt.production_year AS Production_Year,
+    ar.actor_name AS Actor_Name,
+    ar.role_name AS Role_Name,
+    ar.role_count AS Role_Count,
+    COUNT(DISTINCT ar.movie_id) OVER (PARTITION BY rt.production_year) AS Yearly_Movie_Count,
+    NULLIF(SUM(CASE WHEN k.keyword IS NOT NULL THEN 1 ELSE 0 END), 0) AS Keyword_Count
+FROM 
+    RankedTitles rt
+LEFT JOIN 
+    ActorRoles ar ON rt.title_id = ar.movie_id
+LEFT JOIN 
+    movie_keyword mk ON rt.title_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+WHERE 
+    rt.rank_by_year <= 5
+GROUP BY 
+    rt.title, 
+    rt.production_year, 
+    ar.actor_name, 
+    ar.role_name, 
+    ar.role_count
+ORDER BY 
+    rt.production_year DESC, rt.title;

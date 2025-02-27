@@ -1,0 +1,42 @@
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY o.o_orderdate DESC) as rn
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01'
+),
+NationSuppliers AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+PartSuppliers AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_availqty) AS total_availqty, AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+TotalSales AS (
+    SELECT l.l_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM lineitem l
+    GROUP BY l.l_partkey
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderstatus, o.o_totalprice, l.l_partkey, l.l_quantity, l.l_extendedprice
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+)
+
+SELECT r.r_name, 
+       COALESCE(ns.supplier_count, 0) AS supplier_count,
+       COALESCE(SUM(ts.total_revenue), 0) AS total_revenue,
+       AVG(ps.avg_supplycost) AS avg_supplycost,
+       COUNT(DISTINCT oh.o_orderkey) AS processed_orders,
+       RANK() OVER (ORDER BY COALESCE(SUM(ts.total_revenue), 0) DESC) AS revenue_rank
+FROM region r
+LEFT JOIN NationSuppliers ns ON r.r_regionkey = ns.n_nationkey
+LEFT JOIN PartSuppliers ps ON ps.ps_partkey IN (SELECT l.l_partkey FROM OrderDetails od WHERE od.o_orderstatus = 'O')
+LEFT JOIN TotalSales ts ON ts.l_partkey = ps.ps_partkey
+LEFT JOIN OrderHierarchy oh ON oh.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_orderstatus = 'O')
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT ns.n_nationkey) > 0
+ORDER BY revenue_rank;

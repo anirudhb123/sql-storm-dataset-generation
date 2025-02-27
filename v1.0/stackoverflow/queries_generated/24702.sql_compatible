@@ -1,0 +1,104 @@
+
+WITH PostStats AS (
+    SELECT 
+        p.Id AS PostId,
+        p.OwnerUserId,
+        COALESCE(p.AcceptedAnswerId, -1) AS AcceptedAnswerId,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 2) AS UpVoteCount,
+        COUNT(DISTINCT v.Id) FILTER (WHERE v.VoteTypeId = 3) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.OwnerUserId, p.AcceptedAnswerId, p.CreationDate, p.Score, p.ViewCount
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    GROUP BY 
+        u.Id
+),
+PostHistoryAnalysis AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS HistoryCount,
+        SUM(CASE WHEN ph.CreationDate < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year' THEN 1 ELSE 0 END) AS OldEdits
+    FROM 
+        PostHistory ph
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        STRING_AGG(DISTINCT prism.Comment) AS CloseReasons
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        pht.Name IN ('Post Closed', 'Post Reopened')
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+FinalSummary AS (
+    SELECT 
+        ps.PostId,
+        ps.OwnerUserId,
+        ps.AcceptedAnswerId,
+        ps.Score,
+        ps.ViewCount,
+        ub.GoldBadges,
+        ub.SilverBadges,
+        ub.BronzeBadges,
+        ph.HistoryCount,
+        ph.OldEdits,
+        cp.CloseReasons,
+        CASE 
+            WHEN ps.UserPostRank = 1 THEN 'Most Recent Post'
+            WHEN ps.UserPostRank < 5 THEN 'Recent Posts'
+            ELSE 'Older Posts'
+        END AS PostRankCategory
+    FROM 
+        PostStats ps
+    LEFT JOIN 
+        UserBadges ub ON ps.OwnerUserId = ub.UserId
+    LEFT JOIN 
+        PostHistoryAnalysis ph ON ps.PostId = ph.PostId
+    LEFT JOIN 
+        ClosedPosts cp ON ps.PostId = cp.PostId
+)
+
+SELECT 
+    fs.PostId,
+    fs.OwnerUserId,
+    fs.Score,
+    fs.ViewCount,
+    COALESCE(fs.CloseReasons, 'No closure history') AS Reasoning,
+    CONCAT('Gold: ', COALESCE(fs.GoldBadges, 0), 
+           ', Silver: ', COALESCE(fs.SilverBadges, 0), 
+           ', Bronze: ', COALESCE(fs.BronzeBadges, 0)) AS BadgeSummary,
+    fs.PostRankCategory
+FROM 
+    FinalSummary fs
+WHERE 
+    fs.Score > 5
+ORDER BY 
+    fs.Score DESC, fs.ViewCount DESC;

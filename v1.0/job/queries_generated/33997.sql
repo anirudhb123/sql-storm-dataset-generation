@@ -1,0 +1,85 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+    UNION ALL
+    SELECT
+        m2.id AS movie_id,
+        m2.title,
+        m2.production_year,
+        mh.level + 1
+    FROM
+        movie_link ml
+    JOIN
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN
+        aka_title m2 ON ml.linked_movie_id = m2.id
+    WHERE
+        m2.production_year >= 2000
+),
+TopMovies AS (
+    SELECT
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mh.level ORDER BY mh.production_year DESC) AS rn
+    FROM
+        MovieHierarchy mh
+),
+MovieData AS (
+    SELECT
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT ak.name) AS actor_names,
+        m.id AS movie_id
+    FROM
+        aka_title t
+    LEFT JOIN
+        cast_info c ON c.movie_id = t.id
+    LEFT JOIN
+        aka_name ak ON ak.person_id = c.person_id
+    GROUP BY
+        t.id
+),
+FinalResults AS (
+    SELECT
+        md.title,
+        md.production_year,
+        md.cast_count,
+        COALESCE(mh.level, 0) AS hierarchy_level,
+        CASE 
+            WHEN md.production_year BETWEEN 2000 AND 2010 THEN '2000s'
+            WHEN md.production_year > 2010 THEN 'Post 2010'
+            ELSE 'Pre 2000'
+        END AS year_category,
+        CASE 
+            WHEN md.cast_count = 0 THEN 'No Cast'
+            WHEN md.cast_count > 10 THEN 'Large Cast'
+            ELSE 'Small Cast'
+        END AS cast_size_category
+    FROM
+        MovieData md
+    LEFT JOIN
+        TopMovies mh ON md.movie_id = mh.movie_id
+    WHERE
+        md.cast_count > 0
+)
+SELECT
+    fr.title,
+    fr.production_year,
+    fr.cast_count,
+    fr.hierarchy_level,
+    fr.year_category,
+    fr.cast_size_category,
+    ARRAY_TO_STRING(fr.actor_names, ', ') AS actors
+FROM
+    FinalResults fr
+ORDER BY
+    fr.production_year DESC, fr.hierarchy_level, fr.cast_count DESC;

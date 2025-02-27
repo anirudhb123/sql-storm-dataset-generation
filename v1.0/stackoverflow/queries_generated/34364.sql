@@ -1,0 +1,74 @@
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        P.CreationDate,
+        1 AS Level
+    FROM Posts P
+    WHERE P.PostTypeId = 1 -- Start with Questions
+
+    UNION ALL
+
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.ParentId,
+        P.CreationDate,
+        Level + 1
+    FROM Posts P
+    INNER JOIN RecursivePostHierarchy RPH ON P.ParentId = RPH.PostId
+),
+
+PostStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        COUNT(CASE WHEN C.Id IS NOT NULL THEN 1 END) AS CommentCount,
+        COUNT(DISTINCT V.UserId) AS VoteCount,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS Upvotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS Downvotes,
+        SUM(CASE WHEN V.VoteTypeId = 4 THEN 1 ELSE 0 END) AS OffensiveVotes,
+        COUNT(DISTINCT RPH.Level) AS AnswerLevelCount
+    FROM Posts P
+    LEFT JOIN Comments C ON C.PostId = P.Id
+    LEFT JOIN Votes V ON V.PostId = P.Id
+    LEFT JOIN RecursivePostHierarchy RPH ON RPH.PostId = P.Id
+    WHERE P.CreationDate >= CURRENT_DATE - INTERVAL '30 days' -- Posts in last 30 days
+    GROUP BY P.Id, P.Title, P.OwnerUserId
+),
+
+TopUsers AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        SUM(P.ViewCount) AS TotalViews,
+        SUM(P.Score) AS TotalScore,
+        ROW_NUMBER() OVER (ORDER BY SUM(P.Score) DESC) AS UserRank
+    FROM Users U
+    JOIN Posts P ON U.Id = P.OwnerUserId
+    WHERE U.Reputation > 1000 -- Users with reputation greater than 1000
+    GROUP BY U.Id, U.DisplayName
+)
+
+SELECT 
+    PS.PostId,
+    PS.Title,
+    U.DisplayName AS OwnerDisplayName,
+    PS.CommentCount,
+    PS.VoteCount,
+    PS.Upvotes,
+    PS.Downvotes,
+    PS.OffensiveVotes,
+    PS.AnswerLevelCount,
+    TU.TotalViews,
+    TU.TotalScore,
+    TU.UserRank
+FROM PostStatistics PS
+JOIN Users U ON PS.OwnerUserId = U.Id
+JOIN TopUsers TU ON PS.OwnerUserId = TU.UserId
+WHERE PS.VoteCount >= 5 -- At least 5 votes
+      AND PS.CommentCount > 0 -- At least one comment
+ORDER BY PS.Upvotes DESC, PS.CommentCount DESC;
+

@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC, p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId IN (1, 2) -- Consider only Questions and Answers
+    AND 
+        p.CreationDate >= NOW() - INTERVAL '1 YEAR'
+),
+UserStats AS (
+    SELECT
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(p.Score) AS TotalScore
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 1000 -- Only include users with a reputation greater than 1000
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        us.UserId,
+        us.DisplayName,
+        us.PostCount,
+        us.QuestionCount,
+        us.AnswerCount,
+        us.TotalScore,
+        ROW_NUMBER() OVER (ORDER BY us.TotalScore DESC) AS UserRank
+    FROM 
+        UserStats us
+)
+SELECT 
+    tu.DisplayName,
+    tu.PostCount,
+    tu.QuestionCount,
+    tu.AnswerCount,
+    tu.TotalScore,
+    rp.Title,
+    rp.Score,
+    rp.CreationDate
+FROM 
+    TopUsers tu
+JOIN 
+    RankedPosts rp ON tu.UserId = rp.OwnerUserId
+WHERE 
+    tu.UserRank <= 10 -- Limit to top 10 users
+    AND rp.Rank = 1 -- Get the top post for each user
+ORDER BY 
+    tu.TotalScore DESC, 
+    rp.Score DESC;

@@ -1,0 +1,53 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderdate ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+),
+top_orders AS (
+    SELECT 
+        ro.o_orderkey,
+        ro.o_orderdate,
+        ro.o_totalprice,
+        ro.c_name,
+        ro.c_acctbal
+    FROM 
+        ranked_orders ro
+    WHERE 
+        ro.order_rank <= 10
+),
+order_details AS (
+    SELECT 
+        to.o_orderkey,
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS total_revenue,
+        COUNT(DISTINCT li.l_partkey) AS unique_parts
+    FROM 
+        top_orders to
+    JOIN 
+        lineitem li ON to.o_orderkey = li.l_orderkey
+    GROUP BY 
+        to.o_orderkey
+)
+SELECT 
+    to.o_orderkey,
+    to.o_orderdate,
+    to.c_name,
+    to.c_acctbal,
+    od.total_revenue,
+    od.unique_parts
+FROM 
+    top_orders to
+JOIN 
+    order_details od ON to.o_orderkey = od.o_orderkey
+ORDER BY 
+    od.total_revenue DESC;

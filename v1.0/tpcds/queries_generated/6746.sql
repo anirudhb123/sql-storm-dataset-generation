@@ -1,0 +1,56 @@
+
+WITH CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws.ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders,
+        AVG(ws.ws_quantity) AS avg_quantity_per_order
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        c.c_birth_year BETWEEN 1980 AND 1990
+    GROUP BY 
+        c.c_customer_id
+),
+SalesSummary AS (
+    SELECT 
+        TOTAL.total_sales,
+        CASE 
+            WHEN TOTAL.total_sales >= 10000 THEN 'High Value'
+            WHEN TOTAL.total_sales BETWEEN 5000 AND 9999 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END AS value_segment,
+        COUNT(*) AS customer_count
+    FROM 
+        CustomerSales TOTAL
+    GROUP BY 
+        CASE 
+            WHEN TOTAL.total_sales >= 10000 THEN 'High Value'
+            WHEN TOTAL.total_sales BETWEEN 5000 AND 9999 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END
+)
+SELECT 
+    ss.value_segment,
+    ss.customer_count,
+    SUM(ws.ws_ext_sales_price) AS aggregated_sales,
+    AVG(cs.total_orders) AS avg_orders_per_customer,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers
+FROM 
+    SalesSummary ss
+JOIN 
+    CustomerSales cs ON ss.value_segment = 
+        CASE 
+            WHEN cs.total_sales >= 10000 THEN 'High Value'
+            WHEN cs.total_sales BETWEEN 5000 AND 9999 THEN 'Medium Value'
+            ELSE 'Low Value'
+        END
+JOIN 
+    web_sales ws ON cs.c_customer_id = ws.ws_bill_customer_sk
+GROUP BY 
+    ss.value_segment, 
+    ss.customer_count
+ORDER BY 
+    aggregated_sales DESC;

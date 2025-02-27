@@ -1,0 +1,43 @@
+WITH RankedSales AS (
+    SELECT 
+        ws.web_site_sk,
+        ws_sold_date_sk,
+        SUM(ws_ext_sales_price) AS total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws.web_site_sk ORDER BY SUM(ws_ext_sales_price) DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        date_dim dd ON ws.ws_sold_date_sk = dd.d_date_sk
+    WHERE 
+        dd.d_year = 2000 AND dd.d_month_seq IN (1, 2, 3) 
+    GROUP BY 
+        ws.web_site_sk, ws_sold_date_sk
+),
+TopWebsites AS (
+    SELECT 
+        r.web_site_sk, 
+        r.total_sales
+    FROM 
+        RankedSales r
+    WHERE 
+        r.sales_rank <= 5
+)
+SELECT 
+    ws.web_site_name,
+    t.total_sales,
+    c.c_first_name,
+    c.c_last_name,
+    ca.ca_city,
+    ca.ca_state
+FROM 
+    TopWebsites t
+INNER JOIN 
+    web_site ws ON t.web_site_sk = ws.web_site_sk
+INNER JOIN 
+    web_sales wsSub ON ws.web_site_sk = wsSub.ws_web_site_sk
+INNER JOIN 
+    customer c ON wsSub.ws_bill_customer_sk = c.c_customer_sk
+INNER JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+ORDER BY 
+    t.total_sales DESC;

@@ -1,0 +1,106 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        P.OwnerUserId,
+        0 AS Level,
+        P.CreationDate
+    FROM 
+        Posts P
+    WHERE 
+        P.ParentId IS NULL
+
+    UNION ALL
+
+    SELECT 
+        P.Id,
+        P.Title,
+        P.OwnerUserId,
+        R.Level + 1,
+        P.CreationDate
+    FROM 
+        Posts P
+    INNER JOIN 
+        RecursivePostHierarchy R ON P.ParentId = R.PostId
+),
+PostVoteStatistics AS (
+    SELECT 
+        P.Id AS PostId,
+        COUNT(CASE WHEN V.VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN V.VoteTypeId = 3 THEN 1 END) AS Downvotes,
+        COUNT(V.Id) AS TotalVotes
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Votes V ON P.Id = V.PostId
+    GROUP BY 
+        P.Id
+),
+BadgesSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(CASE WHEN B.Class = 1 THEN 1 END) AS GoldBadges,
+        COUNT(CASE WHEN B.Class = 2 THEN 1 END) AS SilverBadges,
+        COUNT(CASE WHEN B.Class = 3 THEN 1 END) AS BronzeBadges
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+),
+FilteredPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        PH.PostId,
+        PH.Level,
+        P.ViewCount,
+        P.Score,
+        P.CreationDate,
+        V.Upvotes,
+        V.Downvotes,
+        V.TotalVotes,
+        U.DisplayName,
+        B.GoldBadges,
+        B.SilverBadges,
+        B.BronzeBadges
+    FROM 
+        Posts P
+    LEFT JOIN 
+        RecursivePostHierarchy PH ON P.Id = PH.PostId
+    LEFT JOIN 
+        PostVoteStatistics V ON P.Id = V.PostId
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        BadgesSummary B ON U.Id = B.UserId
+    WHERE 
+        P.CreationDate >= (CAST('2024-10-01 12:34:56' AS TIMESTAMP) - INTERVAL '1 year') AND 
+        (V.Upvotes - V.Downvotes) BETWEEN 10 AND 100
+)
+SELECT 
+    FP.Title,
+    FP.ViewCount,
+    FP.Score,
+    FP.Upvotes,
+    FP.Downvotes,
+    FP.TotalVotes,
+    FP.Level,
+    FP.CreationDate,
+    FP.DisplayName,
+    COALESCE(FP.GoldBadges, 0) AS GoldBadges,
+    COALESCE(FP.SilverBadges, 0) AS SilverBadges,
+    COALESCE(FP.BronzeBadges, 0) AS BronzeBadges,
+    CASE 
+        WHEN FP.Score > 10 THEN 'Highly Rated'
+        WHEN FP.Score BETWEEN 1 AND 10 THEN 'Moderately Rated'
+        ELSE 'Low Rated' 
+    END AS RatingCategory
+FROM 
+    FilteredPosts FP
+ORDER BY 
+    FP.Score DESC, 
+    FP.CreationDate DESC
+LIMIT 100;

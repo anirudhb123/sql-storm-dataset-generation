@@ -1,0 +1,62 @@
+
+WITH RECURSIVE MovieCTE AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+
+    UNION ALL
+
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        mct.depth + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.movie_id = at.id
+    JOIN 
+        MovieCTE mct ON ml.movie_id = mct.movie_id
+)
+SELECT 
+    akn.name AS actor_name,
+    mt.title AS movie_title,
+    mt.production_year,
+    COUNT(cast.id) AS total_cast,
+    AVG(CASE WHEN c.role_id IS NOT NULL THEN 1 ELSE 0 END) AS avg_role_assigned
+FROM 
+    aka_name akn
+JOIN 
+    cast_info cast ON akn.person_id = cast.person_id
+JOIN 
+    MovieCTE mt ON cast.movie_id = mt.movie_id
+LEFT JOIN 
+    role_type rt ON cast.role_id = rt.id
+WHERE 
+    akn.name IS NOT NULL 
+    AND mt.production_year BETWEEN 2000 AND 2023
+    AND rt.role IS NOT NULL
+GROUP BY 
+    akn.name, mt.title, mt.production_year
+HAVING 
+    COUNT(cast.id) > (
+        SELECT AVG(total_cast) FROM (
+            SELECT 
+                COUNT(cast.id) AS total_cast
+            FROM 
+                cast_info cast 
+            JOIN 
+                aka_name akn ON cast.person_id = akn.person_id
+            GROUP BY 
+                akn.name
+        ) AS subquery
+    )
+ORDER BY 
+    mt.production_year DESC, total_cast DESC
+LIMIT 10;

@@ -1,0 +1,67 @@
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY m.production_year DESC) AS rank_year,
+        COUNT(c.id) OVER (PARTITION BY m.id) AS cast_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+),
+CTE_Keyword_Count AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+MovieWithKeywords AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rc.cast_count,
+        k.keyword_count,
+        COALESCE(rc.cast_count, 0) + COALESCE(k.keyword_count, 0) AS total_count
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        CTE_Keyword_Count k ON rm.movie_id = k.movie_id
+    LEFT JOIN 
+        (SELECT movie_id, COUNT(DISTINCT person_id) AS cast_count FROM cast_info GROUP BY movie_id) rc 
+        ON rm.movie_id = rc.movie_id
+),
+HighRankMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_count,
+        keyword_count,
+        total_count
+    FROM 
+        MovieWithKeywords
+    WHERE 
+        rank_year <= 5 
+)
+SELECT 
+    hm.title,
+    hm.production_year,
+    hm.cast_count,
+    hm.keyword_count,
+    hm.total_count,
+    CASE 
+        WHEN hm.total_count IS NULL THEN 'No Data'
+        WHEN hm.total_count > 10 THEN 'Highly Rated'
+        ELSE 'Moderately Rated'
+    END AS rating_status
+FROM 
+    HighRankMovies hm
+ORDER BY 
+    hm.production_year DESC, 
+    hm.total_count DESC
+LIMIT 20;

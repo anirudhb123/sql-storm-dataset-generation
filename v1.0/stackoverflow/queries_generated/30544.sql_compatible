@@ -1,0 +1,56 @@
+
+WITH RECURSIVE UserVoteCounts AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COALESCE(vt.UpVotes, 0) AS TotalUpvotes,
+        COALESCE(vt.DownVotes, 0) AS TotalDownvotes,
+        COALESCE(vt.Reputation, 0) AS Reputation
+    FROM Users u
+    LEFT JOIN ( 
+        SELECT 
+            UserId, 
+            SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+            SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+            SUM(CASE WHEN VoteTypeId IN (2, 3) THEN 1 ELSE 0 END) AS TotalVotes
+        FROM Votes
+        GROUP BY UserId
+    ) vt ON u.Id = vt.UserId
+),
+RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        DENSE_RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM Posts p 
+    WHERE p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '30 days'
+),
+FilteredUserVotes AS (
+    SELECT 
+        uvc.UserId, 
+        uvc.DisplayName, 
+        uvc.TotalUpvotes, 
+        uvc.TotalDownvotes, 
+        uvc.Reputation,
+        rp.Title AS PostTitle,
+        rp.CreationDate,
+        rpv.DisplayName AS PostOwner
+    FROM UserVoteCounts uvc
+    JOIN RecentPosts rp ON uvc.UserId = rp.OwnerUserId
+    LEFT JOIN Users rpv ON rp.OwnerUserId = rpv.Id
+    WHERE uvc.TotalVotes > 10
+)
+
+SELECT 
+    fui.DisplayName AS VoterName,
+    fui.TotalUpvotes,
+    fui.TotalDownvotes,
+    COUNT(rp.PostId) AS PostCount,
+    SUM(CASE WHEN rp.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 week' THEN 1 ELSE 0 END) AS RecentPostCount,
+    STRING_AGG(rp.Title, ', ') AS RecentPostTitles
+FROM FilteredUserVotes fui
+JOIN Posts rp ON fui.UserId = rp.OwnerUserId
+GROUP BY fui.DisplayName, fui.TotalUpvotes, fui.TotalDownvotes
+ORDER BY fui.TotalUpvotes DESC, fui.TotalDownvotes ASC;

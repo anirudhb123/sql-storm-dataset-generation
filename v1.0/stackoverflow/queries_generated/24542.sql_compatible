@@ -1,0 +1,70 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS Owner,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT v.Id) AS VoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY COUNT(DISTINCT v.Id) DESC) AS Rank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    WHERE 
+        p.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 year'
+    GROUP BY 
+        p.Id, p.Title, u.DisplayName, p.PostTypeId
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        MAX(ph.CreationDate) AS LastModified,
+        STRING_AGG(DISTINCT pht.Name, ', ') AS HistoryTypes
+    FROM 
+        PostHistory ph
+    JOIN 
+        PostHistoryTypes pht ON ph.PostHistoryTypeId = pht.Id
+    WHERE 
+        ph.CreationDate >= TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 month'
+    GROUP BY 
+        ph.PostId
+),
+PostViewCounts AS (
+    SELECT 
+        PostId, 
+        SUM(ViewCount) AS TotalViewCount 
+    FROM 
+        Posts
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Owner,
+    rp.CommentCount,
+    rp.VoteCount,
+    rp.UpVoteCount,
+    rp.DownVoteCount,
+    COALESCE(rph.LastModified, 'No Recent Edits') AS LastModified,
+    COALESCE(rph.HistoryTypes, 'None') AS RecentHistory,
+    COALESCE(pvc.TotalViewCount, 0) AS TotalViews
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    RecentPostHistory rph ON rp.PostId = rph.PostId
+LEFT JOIN 
+    PostViewCounts pvc ON rp.PostId = pvc.PostId
+WHERE 
+    (rp.UpVoteCount + rp.DownVoteCount) > 0
+    AND rp.Rank <= 5
+    AND (rph.LastModified IS NULL OR rph.LastModified < TIMESTAMP '2024-10-01 12:34:56' - INTERVAL '1 week')
+ORDER BY 
+    rp.CommentCount DESC, rp.VoteCount DESC;

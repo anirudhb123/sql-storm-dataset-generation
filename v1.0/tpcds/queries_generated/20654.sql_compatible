@@ -1,0 +1,84 @@
+
+WITH item_sales AS (
+    SELECT 
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sales_quantity,
+        SUM(ws_sales_price) AS total_sales_value,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_item_sk
+),
+store_sales_summary AS (
+    SELECT 
+        ss_item_sk,
+        SUM(ss_quantity) AS total_store_quantity,
+        SUM(ss_sales_price) AS total_store_value,
+        SUM(ss_net_profit) AS total_store_net_profit
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_item_sk
+),
+catalog_sales_summary AS (
+    SELECT 
+        cs_item_sk,
+        SUM(cs_quantity) AS total_catalog_quantity,
+        SUM(cs_sales_price) AS total_catalog_value,
+        SUM(cs_net_profit) AS total_catalog_net_profit
+    FROM 
+        catalog_sales
+    GROUP BY 
+        cs_item_sk
+),
+combined_sales AS (
+    SELECT 
+        is.ws_item_sk,
+        COALESCE(is.total_sales_quantity, 0) AS total_sales_quantity,
+        COALESCE(sso.total_store_quantity, 0) AS total_store_quantity,
+        COALESCE(css.total_catalog_quantity, 0) AS total_catalog_quantity,
+        (COALESCE(is.total_sales_value, 0) + COALESCE(sso.total_store_value, 0) + COALESCE(css.total_catalog_value, 0)) AS total_sales_value,
+        (COALESCE(is.total_net_profit, 0) + COALESCE(sso.total_store_net_profit, 0) + COALESCE(css.total_catalog_net_profit, 0)) AS total_net_profit
+    FROM 
+        item_sales is
+    FULL OUTER JOIN 
+        store_sales_summary sso ON is.ws_item_sk = sso.ss_item_sk
+    FULL OUTER JOIN 
+        catalog_sales_summary css ON is.ws_item_sk = css.cs_item_sk
+),
+item_info AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        i.i_item_desc,
+        COALESCE(cs.total_sales_value, 0) AS total_sales_value,
+        CASE 
+            WHEN COALESCE(cs.total_sales_value, 0) > 10000 THEN 'High'
+            WHEN COALESCE(cs.total_sales_value, 0) > 5000 THEN 'Medium'
+            ELSE 'Low'
+        END AS sales_category 
+    FROM 
+        item i
+    LEFT JOIN 
+        combined_sales cs ON i.i_item_sk = cs.ws_item_sk
+)
+SELECT 
+    ii.i_item_id,
+    ii.i_item_desc,
+    ii.total_sales_value,
+    ii.sales_category,
+    COUNT(DISTINCT w.w_warehouse_sk) AS involved_warehouses,
+    SUM(CASE WHEN w.w_gmt_offset IS NULL THEN 1 ELSE 0 END) AS null_gmt_offset_warehouses,
+    AVG(NULLIF(ii.total_sales_value, 0)) OVER (PARTITION BY ii.sales_category) AS avg_sales_per_category
+FROM 
+    item_info ii
+LEFT JOIN 
+    inventory inv ON ii.i_item_sk = inv.inv_item_sk
+LEFT JOIN 
+    warehouse w ON inv.inv_warehouse_sk = w.w_warehouse_sk
+GROUP BY 
+    ii.i_item_id, ii.i_item_desc, ii.total_sales_value, ii.sales_category
+ORDER BY 
+    ii.sales_category, ii.total_sales_value DESC
+LIMIT 100;

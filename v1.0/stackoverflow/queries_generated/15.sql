@@ -1,0 +1,60 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        u.DisplayName AS OwnerName,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM Posts p
+    JOIN Users u ON p.OwnerUserId = u.Id
+    WHERE p.PostTypeId = 1 AND p.Score > 0
+), 
+CloseCounts AS (
+    SELECT 
+        p.Id,
+        COUNT(ph.Id) AS CloseCount
+    FROM Posts p
+    LEFT JOIN PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10
+    GROUP BY p.Id
+), 
+TopUsers AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(p.Score) AS TotalScore
+    FROM Users u
+    JOIN Posts p ON u.Id = p.OwnerUserId
+    WHERE u.Reputation > 1000
+    GROUP BY u.Id, u.DisplayName
+    HAVING COUNT(DISTINCT p.Id) > 10
+), 
+RecentActivity AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(c.Id) AS CommentCount,
+        SUM(v.VoteTypeId = 2) AS UpVoteCount
+    FROM Posts p
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY p.Id
+)
+
+SELECT 
+    rp.Title,
+    rp.OwnerName,
+    rp.Score,
+    rp.CreationDate,
+    c.CloseCount,
+    tb.TotalScore,
+    ra.CommentCount,
+    ra.UpVoteCount
+FROM RankedPosts rp
+JOIN CloseCounts c ON rp.Id = c.Id
+JOIN TopUsers tb ON tb.UserId = rp.OwnerUserId
+JOIN RecentActivity ra ON ra.PostId = rp.Id
+WHERE rp.RecentRank = 1
+  AND c.CloseCount < 5
+ORDER BY rp.Score DESC, ra.CommentCount DESC
+LIMIT 10;

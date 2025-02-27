@@ -1,0 +1,69 @@
+WITH SupplierCosts AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        partsupp ps
+    GROUP BY 
+        ps.ps_suppkey
+),
+OrderDetails AS (
+    SELECT
+        o.o_orderkey,
+        c.c_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        RANK() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS price_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1995-01-01' AND o.o_orderdate < DATE '1995-12-31'
+    GROUP BY 
+        o.o_orderkey, c.c_custkey
+),
+TopOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_shippriority,
+        od.total_price
+    FROM 
+        orders o
+    JOIN 
+        OrderDetails od ON o.o_orderkey = od.o_orderkey
+    WHERE 
+        od.price_rank <= 5
+),
+RegionData AS (
+    SELECT 
+        r.r_regionkey,
+        r.r_name,
+        COUNT(DISTINCT n.n_nationkey) AS nation_count
+    FROM 
+        region r
+    LEFT JOIN 
+        nation n ON r.r_regionkey = n.n_regionkey
+    GROUP BY 
+        r.r_regionkey, r.r_name
+)
+SELECT 
+    rd.r_name,
+    SUM(CASE WHEN to.o_orderstatus = 'O' THEN to.total_price ELSE 0 END) AS open_order_total,
+    SUM(CASE WHEN to.o_orderstatus = 'F' THEN to.total_price ELSE 0 END) AS finished_order_total,
+    MAX(sc.total_supply_cost) AS max_supplier_cost,
+    COALESCE(SUM(to.total_price), 0) AS total_order_value
+FROM 
+    RegionData rd
+FULL OUTER JOIN 
+    TopOrders to ON rd.r_regionkey = COALESCE((SELECT n.n_regionkey FROM nation n JOIN supplier s ON n.n_nationkey = s.s_nationkey WHERE s.s_suppkey IN (SELECT ps_suppkey FROM partsupp WHERE ps_partkey IN (SELECT p.p_partkey FROM part p WHERE p.p_container = 'BOX'))), NULL)
+LEFT JOIN 
+    SupplierCosts sc ON to.o_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT CASE WHEN COUNT(*) > 0 THEN MAX(n.n_nationkey) ELSE NULL END FROM nation n))
+GROUP BY 
+    rd.r_name
+HAVING 
+    SUM(to.total_price) IS NOT NULL OR COUNT(to.o_orderkey) > 0
+ORDER BY 
+    rd.r_name;

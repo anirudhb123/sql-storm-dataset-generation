@@ -1,0 +1,88 @@
+
+WITH RecursivePostHierarchy AS (
+    SELECT 
+        Id,
+        Title,
+        ParentId,
+        OwnerUserId,
+        CreationDate,
+        Score,
+        1 AS Level
+    FROM 
+        Posts
+    WHERE 
+        ParentId IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        p.Id,
+        p.Title,
+        p.ParentId,
+        p.OwnerUserId,
+        p.CreationDate,
+        p.Score,
+        r.Level + 1
+    FROM 
+        Posts p
+    INNER JOIN 
+        RecursivePostHierarchy r ON p.ParentId = r.Id
+),
+UserReputation AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(u.Reputation) AS TotalReputation,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+MostActiveUsers AS (
+    SELECT 
+        OwnerUserId AS UserId,
+        COUNT(*) AS PostCount
+    FROM 
+        Posts
+    GROUP BY 
+        OwnerUserId
+    HAVING 
+        COUNT(*) > 10
+),
+TopTags AS (
+    SELECT 
+        Tags,
+        COUNT(*) AS UsageCount
+    FROM 
+        Posts
+    GROUP BY 
+        Tags
+    ORDER BY 
+        UsageCount DESC
+    LIMIT 10
+)
+SELECT 
+    u.DisplayName,
+    r.Title AS PostTitle,
+    r.Score AS PostScore,
+    u.TotalReputation,
+    u.BadgeCount,
+    r.Level AS PostLevel,
+    tt.Tags AS TopTag
+FROM 
+    UserReputation u
+INNER JOIN 
+    RecursivePostHierarchy r ON u.UserId = r.OwnerUserId
+LEFT JOIN 
+    MostActiveUsers mau ON mau.UserId = u.UserId
+LEFT JOIN 
+    TopTags tt ON r.Tags LIKE '%' || tt.Tags || '%'
+WHERE 
+    mau.PostCount IS NOT NULL
+    AND COALESCE(r.Score, 0) > 0
+ORDER BY 
+    u.TotalReputation DESC,
+    r.Score DESC;

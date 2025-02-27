@@ -1,0 +1,59 @@
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_member_count,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names
+    FROM 
+        aka_title ak
+    JOIN 
+        title t ON ak.movie_id = t.id
+    JOIN 
+        cast_info c ON c.movie_id = t.id
+    GROUP BY 
+        t.id
+),
+
+TopRatedMovies AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        rm.cast_member_count,
+        ak.name AS key_actor_name,
+        ROW_NUMBER() OVER (ORDER BY rm.cast_member_count DESC) AS ranking
+    FROM 
+        RankedMovies rm
+    JOIN 
+        cast_info ci ON ci.movie_id = rm.movie_id
+    JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    WHERE 
+        ci.nr_order = 1  -- considering only the main actor for key actor
+)
+
+SELECT 
+    tr.movie_id,
+    tr.title,
+    tr.production_year,
+    tr.cast_member_count,
+    tr.key_actor_name,
+    STRING_AGG(DISTINCT kn.keyword, ', ') AS keywords,
+    STRING_AGG(DISTINCT co.name, ', ') AS companies
+FROM 
+    TopRatedMovies tr
+LEFT JOIN 
+    movie_keyword mk ON mk.movie_id = tr.movie_id
+LEFT JOIN 
+    keyword kn ON kn.id = mk.keyword_id
+LEFT JOIN 
+    movie_companies mc ON mc.movie_id = tr.movie_id
+LEFT JOIN 
+    company_name co ON co.id = mc.company_id
+WHERE 
+    tr.ranking <= 10  -- Limiting to top 10 movies based on cast member count
+GROUP BY 
+    tr.movie_id, tr.title, tr.production_year, tr.cast_member_count, tr.key_actor_name
+ORDER BY 
+    tr.cast_member_count DESC;

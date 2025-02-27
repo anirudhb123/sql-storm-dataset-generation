@@ -1,0 +1,99 @@
+
+WITH UserActivity AS (
+    SELECT 
+        u.Id AS UserId, 
+        u.DisplayName, 
+        u.Reputation, 
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        COALESCE(SUM(v.BountyAmount), 0) AS TotalBounty,
+        COALESCE(SUM(CASE WHEN v.Id = 2 THEN 1 ELSE 0 END), 0) AS TotalUpVotes,
+        COALESCE(SUM(CASE WHEN v.Id = 3 THEN 1 ELSE 0 END), 0) AS TotalDownVotes
+    FROM 
+        Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    GROUP BY 
+        u.Id, u.DisplayName, u.Reputation
+),
+ActiveUsers AS (
+    SELECT 
+        ua.UserId, 
+        ua.DisplayName, 
+        ua.Reputation,
+        ua.TotalPosts,
+        ua.TotalQuestions,
+        ua.TotalAnswers,
+        ua.TotalBounty,
+        ua.TotalUpVotes,
+        ua.TotalDownVotes,
+        RANK() OVER (ORDER BY ua.TotalPosts DESC) AS PostRank,
+        RANK() OVER (ORDER BY ua.TotalBounty DESC) AS BountyRank
+    FROM 
+        UserActivity ua
+    WHERE 
+        ua.TotalPosts > 0
+),
+TopUsers AS (
+    SELECT 
+        UserId, 
+        DisplayName, 
+        Reputation, 
+        TotalPosts, 
+        TotalQuestions,
+        TotalAnswers,
+        TotalBounty,
+        TotalUpVotes,
+        TotalDownVotes 
+    FROM 
+        ActiveUsers
+    WHERE 
+        PostRank <= 10 OR BountyRank <= 10
+),
+PostDetails AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        CASE 
+            WHEN p.PostTypeId = 1 THEN 'Question'
+            WHEN p.PostTypeId = 2 THEN 'Answer'
+            ELSE 'Other'
+        END AS PostType,
+        COALESCE(c.CommentCount, 0) AS CommentCount,
+        COALESCE(ph.EditCount, 0) AS EditCount,
+        p.OwnerUserId
+    FROM 
+        Posts p
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS CommentCount 
+        FROM Comments 
+        GROUP BY PostId
+    ) c ON p.Id = c.PostId
+    LEFT JOIN (
+        SELECT PostId, COUNT(*) AS EditCount 
+        FROM PostHistory 
+        WHERE PostHistoryTypeId IN (4, 5, 24) 
+        GROUP BY PostId
+    ) ph ON p.Id = ph.PostId
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    pd.Title,
+    pd.CreationDate,
+    pd.PostType,
+    pd.CommentCount,
+    pd.EditCount
+FROM 
+    TopUsers tu
+JOIN 
+    PostDetails pd ON tu.UserId = pd.OwnerUserId
+WHERE 
+    pd.CreationDate >= DATEADD(year, -1, '2024-10-01')
+ORDER BY 
+    tu.Reputation DESC,
+    pd.CreationDate DESC
+OFFSET 5 ROWS
+FETCH NEXT 10 ROWS ONLY;

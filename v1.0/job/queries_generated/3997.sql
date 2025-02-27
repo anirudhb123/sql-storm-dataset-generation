@@ -1,0 +1,49 @@
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY ct.kind_id DESC) as rank
+    FROM 
+        aka_title mt
+    JOIN 
+        movie_info mi ON mt.id = mi.movie_id
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        movie_companies mc ON mt.id = mc.movie_id
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    JOIN 
+        kind_type ct ON mt.kind_id = ct.id
+    WHERE 
+        it.info = 'director' AND 
+        k.keyword LIKE '%action%' AND 
+        cn.country_code IS NOT NULL
+),
+AggregatedData AS (
+    SELECT 
+        rm.production_year,
+        COUNT(DISTINCT rm.movie_id) AS total_movies,
+        STRING_AGG(DISTINCT rm.title, ', ') AS movie_titles
+    FROM 
+        RankedMovies rm
+    WHERE 
+        rm.rank <= 5
+    GROUP BY 
+        rm.production_year
+)
+SELECT 
+    ad.production_year,
+    ad.total_movies,
+    COALESCE(NULLIF(ad.movie_titles, ''), 'No Titles Available') AS movie_titles
+FROM 
+    AggregatedData ad
+LEFT JOIN 
+    role_type rt ON rt.role = 'Actor' 
+ORDER BY 
+    ad.production_year DESC;

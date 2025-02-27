@@ -1,0 +1,38 @@
+
+WITH HighValueSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS TotalCost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > (SELECT AVG(ps.ps_supplycost * ps.ps_availqty) FROM partsupp)
+),
+CustomerOrderCounts AS (
+    SELECT o.o_custkey, COUNT(o.o_orderkey) AS OrderCount
+    FROM orders o
+    GROUP BY o.o_custkey
+),
+NationRegions AS (
+    SELECT n.n_nationkey, r.r_name
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+),
+LoyalCustomers AS (
+    SELECT c.c_custkey, c.c_name
+    FROM customer c
+    WHERE c.c_acctbal > 10000
+    AND EXISTS (SELECT 1 FROM orders o WHERE o.o_custkey = c.c_custkey AND o.o_orderstatus = 'O')
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    COALESCE(s.TotalCost, 0) AS SupplierCost,
+    COALESCE(oc.OrderCount, 0) AS OrderCount,
+    nr.r_name AS RegionName,
+    lc.c_name AS LoyalCustomer
+FROM part p
+LEFT JOIN HighValueSuppliers s ON p.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = s.s_suppkey)
+LEFT JOIN CustomerOrderCounts oc ON oc.o_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = (SELECT MIN(o2.o_orderkey) FROM orders o2 WHERE o2.o_custkey = oc.o_custkey))
+LEFT JOIN NationRegions nr ON EXISTS (SELECT 1 FROM supplier su WHERE su.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_regionkey = nr.n_nationkey))
+LEFT JOIN LoyalCustomers lc ON lc.c_custkey = (SELECT DISTINCT ol.o_custkey FROM orders ol WHERE ol.o_orderkey = (SELECT MAX(ol2.o_orderkey) FROM orders ol2 WHERE ol2.o_custkey = lc.c_custkey))
+WHERE p.p_size IS NOT NULL AND LENGTH(p.p_comment) > 5
+ORDER BY p.p_partkey, SupplierCost DESC, OrderCount DESC;

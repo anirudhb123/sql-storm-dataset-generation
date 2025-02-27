@@ -1,0 +1,62 @@
+
+WITH ranked_orders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS sales_rank
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' 
+        AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate
+), 
+supplier_parts AS (
+    SELECT 
+        ps.ps_partkey,
+        SUM(ps.ps_availqty * s.s_acctbal) AS supplier_value
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+    HAVING 
+        SUM(ps.ps_availqty * s.s_acctbal) > 1000
+)
+SELECT 
+    p.p_name,
+    p.p_size,
+    r.r_name AS region_name,
+    COUNT(DISTINCT o.o_orderkey) AS number_of_orders,
+    AVG(ro.total_sales) AS average_order_sales,
+    COALESCE(sp.supplier_value, 0) AS total_supplier_value
+FROM 
+    part p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    orders o ON p.p_partkey = o.o_orderkey 
+LEFT JOIN 
+    ranked_orders ro ON o.o_orderkey = ro.o_orderkey
+LEFT JOIN 
+    supplier_parts sp ON p.p_partkey = sp.ps_partkey
+WHERE 
+    p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2) 
+    AND (p.p_type LIKE '%metal%' OR p.p_comment IS NOT NULL)
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_size, r.r_name
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    average_order_sales DESC;

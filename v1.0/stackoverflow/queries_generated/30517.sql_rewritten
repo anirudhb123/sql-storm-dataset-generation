@@ -1,0 +1,62 @@
+WITH RecursivePostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.UserId,
+        ph.CreationDate,
+        ph.Comment,
+        ROW_NUMBER() OVER (PARTITION BY ph.PostId ORDER BY ph.CreationDate DESC) AS HistoryRank
+    FROM PostHistory ph
+    WHERE ph.PostHistoryTypeId IN (10, 11, 12, 13)  
+),
+UserVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes
+    FROM Votes v
+    JOIN VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY v.PostId
+),
+PostMetrics AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        COALESCE(p.AnswerCount, 0) AS AnswerCount,
+        COALESCE(p.CommentCount, 0) AS CommentCount,
+        COALESCE(v.UpVotes, 0) AS TotalUpVotes,
+        COALESCE(v.DownVotes, 0) AS TotalDownVotes,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        ph.UserId AS LastUserId,
+        MAX(ph.CreationDate) AS LastActionDate
+    FROM Posts p
+    LEFT JOIN UserVotes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    LEFT JOIN RecursivePostHistory ph ON p.Id = ph.PostId AND ph.HistoryRank = 1  
+    GROUP BY p.Id, ph.UserId
+),
+FinalResults AS (
+    SELECT 
+        pm.PostId,
+        pm.Title,
+        pm.AnswerCount,
+        pm.CommentCount,
+        pm.TotalUpVotes,
+        pm.TotalDownVotes,
+        pm.TotalComments,
+        COALESCE(u.DisplayName, 'Unknown User') AS LastUserName,
+        DATEDIFF(cast('2024-10-01 12:34:56' as timestamp), pm.LastActionDate) AS DaysSinceLastAction
+    FROM PostMetrics pm
+    LEFT JOIN Users u ON pm.LastUserId = u.Id
+)
+
+SELECT 
+    *,
+    (TotalUpVotes - TotalDownVotes) AS EngagementScore,
+    CASE 
+        WHEN DaysSinceLastAction < 10 THEN 'Active'
+        WHEN DaysSinceLastAction BETWEEN 10 AND 30 THEN 'Moderate'
+        ELSE 'Inactive'
+    END AS ActivityStatus
+FROM FinalResults
+ORDER BY EngagementScore DESC, DaysSinceLastAction ASC
+LIMIT 100;

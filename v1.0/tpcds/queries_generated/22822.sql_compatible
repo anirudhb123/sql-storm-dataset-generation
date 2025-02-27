@@ -1,0 +1,78 @@
+
+WITH CustomerReturns AS (
+    SELECT 
+        sr.returned_date_sk,
+        sr.store_sk,
+        sr_item_sk,
+        SUM(sr.return_quantity) AS total_return_quantity,
+        SUM(sr.return_amt_inc_tax) AS total_return_amt_inc_tax
+    FROM 
+        store_returns sr
+    WHERE 
+        sr.returned_date_sk IS NOT NULL
+    GROUP BY 
+        sr.returned_date_sk, sr.store_sk, sr_item_sk
+),
+SalesData AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_sold_quantity,
+        SUM(ws_net_profit) AS total_net_profit
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk IS NOT NULL
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+),
+ReturnStats AS (
+    SELECT 
+        cr.returned_date_sk,
+        cs.ws_item_sk AS item_sk,
+        COALESCE(cr.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(cs.total_sold_quantity, 0) AS total_sold_quantity,
+        CASE 
+            WHEN COALESCE(cs.total_sold_quantity, 0) = 0 THEN NULL 
+            ELSE (COALESCE(cr.total_return_quantity, 0) * 100.0 / cs.total_sold_quantity) 
+        END AS return_rate
+    FROM 
+        CustomerReturns cr 
+    FULL OUTER JOIN 
+        SalesData cs 
+    ON 
+        cr.returned_date_sk = cs.ws_sold_date_sk
+    AND 
+        cr.store_sk = (SELECT s_store_sk FROM store WHERE s_store_id = 'S001')
+),
+RankedReturns AS (
+    SELECT 
+        r.returned_date_sk,
+        r.item_sk,
+        r.total_return_quantity,
+        r.total_sold_quantity,
+        r.return_rate,
+        RANK() OVER (PARTITION BY r.returned_date_sk ORDER BY r.return_rate DESC) AS rank_return_rate
+    FROM 
+        ReturnStats r
+)
+SELECT 
+    d.d_date AS sale_date,
+    COALESCE(rt.total_return_quantity, 0) AS total_return_quantity,
+    COALESCE(rt.total_sold_quantity, 0) AS total_sold_quantity,
+    rt.return_rate,
+    CASE 
+        WHEN rt.return_rate IS NULL THEN 'No Sales'
+        WHEN rt.return_rate > 10 THEN 'High Return Rate'
+        ELSE 'Normal Return Rate'
+    END AS return_rate_category
+FROM 
+    date_dim d
+LEFT JOIN 
+    RankedReturns rt ON d.d_date_sk = rt.returned_date_sk
+WHERE 
+    d.d_year = 2023
+AND 
+    (rt.return_rate IS NOT NULL OR rt.total_sold_quantity > 0)
+ORDER BY 
+    d.d_date, rt.return_rate DESC;

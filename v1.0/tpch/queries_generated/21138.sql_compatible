@@ -1,0 +1,63 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rn
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATEADD(year, -1, CURRENT_TIMESTAMP)
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey, 
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        AVG(l.l_quantity) AS avg_quantity
+    FROM 
+        supplier s
+    JOIN 
+        lineitem l ON s.s_suppkey = l.l_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+FinalStats AS (
+    SELECT 
+        ps.ps_partkey,
+        p.p_name,
+        SUM(ps.ps_availqty) AS total_available,
+        SUM(ss.total_revenue) AS total_revenue_per_part
+    FROM 
+        partsupp ps
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    LEFT JOIN 
+        SupplierStats ss ON ps.ps_suppkey = ss.s_suppkey
+    GROUP BY 
+        ps.ps_partkey, p.p_name
+)
+
+SELECT 
+    r.r_name,
+    COUNT(DISTINCT n.n_nationkey) AS nation_count,
+    AVG(fs.total_revenue_per_part) AS avg_revenue_per_part,
+    SUM(CASE WHEN fs.total_revenue_per_part IS NULL THEN 0 ELSE fs.total_revenue_per_part END) AS non_null_revenue_sum,
+    SUM(fs.total_available) AS total_availability,
+    (SELECT MAX(o.o_totalprice) 
+     FROM RankedOrders ro 
+     WHERE ro.o_orderdate = (SELECT MAX(o2.o_orderdate) FROM RankedOrders o2) 
+     AND ro.rn <= 3) AS max_recent_top_order_price
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    FinalStats fs ON n.n_nationkey = (SELECT s.s_nationkey FROM supplier s WHERE s.s_suppkey = fs.ps_partkey)  
+GROUP BY 
+    r.r_name
+ORDER BY 
+    nation_count DESC,
+    avg_revenue_per_part DESC
+LIMIT 10;

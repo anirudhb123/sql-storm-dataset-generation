@@ -1,0 +1,68 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS TotalPosts,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 1 THEN P.Id END) AS TotalQuestions,
+        COUNT(DISTINCT CASE WHEN P.PostTypeId = 2 THEN P.Id END) AS TotalAnswers,
+        COUNT(DISTINCT C.Id) AS TotalComments,
+        SUM(V.BountyAmount) AS TotalBounty
+    FROM 
+        Users U
+    LEFT JOIN 
+        Posts P ON U.Id = P.OwnerUserId
+    LEFT JOIN 
+        Comments C ON P.Id = C.PostId
+    LEFT JOIN 
+        Votes V ON U.Id = V.UserId
+    GROUP BY 
+        U.Id
+),
+RecentPosts AS (
+    SELECT 
+        P.*,
+        ROW_NUMBER() OVER (PARTITION BY P.OwnerUserId ORDER BY P.CreationDate DESC) AS rn
+    FROM 
+        Posts P
+    WHERE 
+        P.CreationDate >= NOW() - INTERVAL '30 days'
+),
+PostHistoryInfo AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.CreationDate,
+        P.Title,
+        P.Tags,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS history_rn
+    FROM 
+        PostHistory PH
+    JOIN 
+        Posts P ON PH.PostId = P.Id
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11, 12)  -- Closed, Reopened, Deleted
+)
+SELECT 
+    U.DisplayName,
+    U.Reputation,
+    COALESCE(PHInfo.Title, 'No Title') AS PostTitle,
+    COALESCE(PHInfo.Tags, 'No Tags') AS PostTags,
+    US.TotalPosts,
+    US.TotalQuestions,
+    US.TotalAnswers,
+    US.TotalComments,
+    US.TotalBounty,
+    RP.CreationDate AS RecentPostDate
+FROM 
+    UserStatistics US
+LEFT JOIN 
+    RecentPosts RP ON US.UserId = RP.OwnerUserId AND RP.rn = 1
+LEFT JOIN 
+    PostHistoryInfo PHInfo ON PHInfo.PostId = RP.Id AND PHInfo.history_rn = 1
+WHERE 
+    US.TotalPosts > 0
+ORDER BY 
+    US.Reputation DESC
+LIMIT 50;

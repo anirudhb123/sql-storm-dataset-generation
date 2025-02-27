@@ -1,0 +1,82 @@
+
+WITH RECURSIVE ActorMovies AS (
+    SELECT 
+        k.movie_id,
+        a.person_id,
+        a.name AS actor_name,
+        COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info c ON c.person_id = a.person_id
+    JOIN 
+        aka_title t ON c.movie_id = t.movie_id
+    LEFT JOIN 
+        movie_keyword k ON k.movie_id = c.movie_id
+    WHERE 
+        a.name IS NOT NULL AND a.name <> ''
+    GROUP BY 
+        k.movie_id, a.person_id, a.name
+),
+RankedMovies AS (
+    SELECT 
+        movie_id,
+        actor_name,
+        keyword_count,
+        DENSE_RANK() OVER (PARTITION BY movie_id ORDER BY keyword_count DESC) AS rank
+    FROM 
+        ActorMovies
+),
+HighKeywordMovies AS (
+    SELECT 
+        r.movie_id,
+        r.actor_name,
+        r.keyword_count
+    FROM 
+        RankedMovies r
+    WHERE 
+        r.rank = 1
+),
+GenreStatistics AS (
+    SELECT 
+        t.production_year,
+        COUNT(DISTINCT k.keyword) AS total_keywords,
+        AVG(cast_count) AS avg_cast_per_movie
+    FROM 
+        aka_title t
+    JOIN 
+        movie_keyword k ON t.id = k.movie_id
+    JOIN (
+        SELECT 
+            movie_id, 
+            COUNT(DISTINCT person_id) AS cast_count 
+        FROM 
+            cast_info 
+        GROUP BY 
+            movie_id
+    ) c ON t.id = c.movie_id
+    GROUP BY 
+        t.production_year
+)
+SELECT 
+    h.movie_id,
+    h.actor_name,
+    CASE 
+        WHEN g.total_keywords IS NULL THEN 'No Keywords Found'
+        ELSE CAST(g.total_keywords AS VARCHAR)
+    END AS total_keywords,
+    COALESCE(g.avg_cast_per_movie, 0) AS avg_cast_per_movie,
+    CASE
+        WHEN g.avg_cast_per_movie > 5 THEN 'High Cast Movie'
+        WHEN g.avg_cast_per_movie BETWEEN 3 AND 5 THEN 'Medium Cast Movie'
+        ELSE 'Low Cast Movie'
+    END AS cast_category
+FROM 
+    HighKeywordMovies h
+LEFT JOIN 
+    GenreStatistics g ON h.movie_id = g.production_year
+WHERE 
+    (h.actor_name LIKE '%John%' OR h.actor_name LIKE '%Smith%')
+    AND (h.keyword_count IS NOT NULL AND h.keyword_count = 0)
+ORDER BY 
+    h.movie_id, h.actor_name;

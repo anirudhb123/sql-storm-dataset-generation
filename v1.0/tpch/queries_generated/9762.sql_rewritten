@@ -1,0 +1,28 @@
+WITH RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_totalprice, o.o_orderdate, o.o_orderstatus,
+           ROW_NUMBER() OVER (PARTITION BY o.o_custkey ORDER BY o.o_orderdate DESC) AS rn
+    FROM orders o
+    WHERE o.o_orderdate >= '1997-01-01'
+),
+TopCustomers AS (
+    SELECT c.c_custkey, c.c_name, c.c_nationkey, SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    JOIN RankedOrders ro ON c.c_custkey = ro.o_custkey
+    GROUP BY c.c_custkey, c.c_name, c.c_nationkey
+    HAVING SUM(o_totalprice) > 5000
+),
+Nations AS (
+    SELECT n.n_nationkey, n.n_name
+    FROM nation n
+)
+SELECT tc.c_name, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue, 
+       COUNT(DISTINCT o.o_orderkey) AS order_count,
+       AVG(l.l_quantity) AS avg_quantity
+FROM TopCustomers tc
+JOIN orders o ON tc.c_custkey = o.o_custkey
+JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+JOIN Nations n ON tc.c_nationkey = n.n_nationkey
+WHERE o.o_orderstatus = 'O'
+GROUP BY tc.c_name, n.n_name
+ORDER BY revenue DESC
+LIMIT 10;

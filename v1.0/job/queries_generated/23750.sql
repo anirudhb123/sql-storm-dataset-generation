@@ -1,0 +1,73 @@
+WITH RecursiveTitleCTE AS (
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        pt.title AS parent_title,
+        pt.production_year AS parent_year
+    FROM title t
+    LEFT JOIN title pt ON t.episode_of_id = pt.id
+ 
+    UNION ALL
+    
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        pt.title AS parent_title,
+        pt.production_year AS parent_year
+    FROM title t
+    INNER JOIN RecursiveTitleCTE rct ON t.id = rct.episode_of_id
+),
+MovieWithKeywords AS (
+    SELECT 
+        m.id AS movie_id,
+        COUNT(mk.id) AS keyword_count,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    GROUP BY m.id
+),
+CastInfoWithRole AS (
+    SELECT 
+        c.movie_id,
+        c.person_id,
+        c.person_role_id,
+        r.role,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order ASC) AS role_order
+    FROM cast_info c
+    LEFT JOIN role_type r ON c.role_id = r.id
+),
+RankedMovies AS (
+    SELECT
+        rct.id AS title_id,
+        rct.title,
+        rct.production_year,
+        mwk.keyword_count,
+        mwk.keywords,
+        COUNT(ci.person_id) AS total_cast,
+        RANK() OVER (PARTITION BY mwk.keyword_count ORDER BY rct.production_year DESC) AS year_rank
+    FROM RecursiveTitleCTE rct
+    LEFT JOIN MovieWithKeywords mwk ON rct.id = mwk.movie_id
+    LEFT JOIN CastInfoWithRole ci ON rct.id = ci.movie_id 
+    GROUP BY rct.id, mwk.keyword_count, mwk.keywords
+)
+SELECT 
+    title_id,
+    title,
+    production_year,
+    keyword_count,
+    keywords,
+    total_cast,
+    year_rank,
+    CASE 
+        WHEN total_cast IS NULL THEN 'No Cast'
+        WHEN year_rank <= 10 THEN 'Top 10 Keyword Movies'
+        ELSE 'Other Movies'
+    END AS movie_category
+FROM RankedMovies
+WHERE (keyword_count > 0 AND total_cast > 0)
+   OR (production_year IS NULL AND year_rank IS NOT NULL)
+ORDER BY production_year DESC, keyword_count DESC;

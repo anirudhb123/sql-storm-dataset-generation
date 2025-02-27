@@ -1,0 +1,65 @@
+WITH PostSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        P.Title,
+        U.DisplayName AS OwnerDisplayName,
+        P.CreationDate,
+        P.Score,
+        P.ViewCount,
+        P.AnswerCount,
+        P.CommentCount,
+        COALESCE(PH.CreationDate, P.LastActivityDate) AS LastActivityDate,
+        string_agg(DISTINCT T.TagName, ', ') AS Tags
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        PostHistory PH ON P.Id = PH.PostId AND PH.PostHistoryTypeId IN (10, 11)  
+    LEFT JOIN 
+        (SELECT 
+            PostId, 
+            UNNEST(string_to_array(Tags, '><')) AS TagName
+        FROM 
+            Posts) T ON P.Id = T.PostId
+    WHERE 
+        P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 YEAR' 
+        AND P.Score >= 5 
+    GROUP BY 
+        P.Id, U.DisplayName, P.CreationDate, P.Score, P.ViewCount, P.AnswerCount, P.CommentCount, PH.CreationDate
+),
+VoteDetails AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN VoteTypeId = 2 THEN 1 END) AS Upvotes,
+        COUNT(CASE WHEN VoteTypeId = 3 THEN 1 END) AS Downvotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+),
+BadgeCounts AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Badges B ON U.Id = B.UserId
+    GROUP BY 
+        U.Id
+)
+SELECT 
+    PS.*,
+    VD.Upvotes,
+    VD.Downvotes,
+    BC.BadgeCount
+FROM 
+    PostSummary PS
+LEFT JOIN 
+    VoteDetails VD ON PS.PostId = VD.PostId
+LEFT JOIN 
+    BadgeCounts BC ON PS.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE Id = BC.UserId)
+ORDER BY 
+    PS.LastActivityDate DESC, PS.Score DESC
+LIMIT 100;

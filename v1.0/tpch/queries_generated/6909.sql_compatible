@@ -1,0 +1,48 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+),
+SupplierStats AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_value,
+        COUNT(ps.ps_partkey) AS total_parts_supplied
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    WHERE s.s_acctbal > 0
+    GROUP BY s.s_suppkey, s.s_name, s.s_nationkey
+),
+NationsWithSuppliers AS (
+    SELECT 
+        n.n_name,
+        SUM(ss.total_supply_value) AS national_supply_value,
+        COUNT(DISTINCT ss.s_suppkey) AS num_suppliers
+    FROM nation n
+    JOIN SupplierStats ss ON n.n_nationkey = ss.s_nationkey
+    GROUP BY n.n_name
+)
+SELECT 
+    r.r_name AS region_name,
+    nw.n_name AS nation_name,
+    nw.national_supply_value,
+    nw.num_suppliers,
+    ro.o_orderkey,
+    ro.o_orderdate,
+    ro.o_totalprice
+FROM region r
+JOIN nation nw ON r.r_regionkey = nw.n_regionkey
+LEFT JOIN NationsWithSuppliers nwl ON nw.n_nationkey = nwl.n_name
+LEFT JOIN RankedOrders ro ON ro.o_orderkey = (
+    SELECT orderkey FROM RankedOrders ORDER BY o_orderdate DESC LIMIT 1
+)
+WHERE nw.national_supply_value IS NOT NULL
+ORDER BY r.r_name, nw.n_name, ro.o_orderdate DESC;

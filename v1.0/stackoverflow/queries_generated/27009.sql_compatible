@@ -1,0 +1,62 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        U.DisplayName AS OwnerDisplayName,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags,
+        RANK() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users U ON p.OwnerUserId = U.Id
+    LEFT JOIN 
+        Posts a ON a.ParentId = p.Id AND a.PostTypeId = 2  
+    LEFT JOIN 
+        LATERAL STRING_TO_ARRAY(p.Tags, ', ') AS split_tags ON TRUE
+    LEFT JOIN 
+        Tags t ON TRIM(split_tags) = t.TagName
+    WHERE 
+        p.PostTypeId = 1  
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, U.DisplayName
+),
+
+RecentPosts AS (
+    SELECT 
+        p.*,
+        PH.Comment AS LastEditComment,
+        PH.CreationDate AS LastEditDate,
+        ROW_NUMBER() OVER (ORDER BY p.CreationDate DESC) AS RecentRank
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory PH ON p.Id = PH.PostId AND PH.PostHistoryTypeId IN (4, 5)  
+    WHERE 
+        p.CreationDate >= CAST('2024-10-01 12:34:56' AS timestamp) - INTERVAL '1 month'
+)
+
+SELECT 
+    R.PostId,
+    R.Title,
+    R.Body,
+    R.OwnerDisplayName,
+    R.ViewCount,
+    R.AnswerCount,
+    R.Tags,
+    COALESCE(RP.LastEditComment, 'No Edits Yet') AS LastEditComment,
+    RP.LastEditDate,
+    RP.RecentRank
+FROM 
+    RankedPosts R
+LEFT JOIN 
+    RecentPosts RP ON R.PostId = RP.Id
+WHERE 
+    R.PostRank = 1
+ORDER BY 
+    R.ViewCount DESC
+LIMIT 50;

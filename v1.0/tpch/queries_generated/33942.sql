@@ -1,0 +1,42 @@
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 10000
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+OrderDetails AS (
+    SELECT o.o_orderkey, o.o_orderdate, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= '2023-01-01' AND o.o_orderdate < '2024-01-01'
+    GROUP BY o.o_orderkey, o.o_orderdate
+),
+FilteredOrderDetails AS (
+    SELECT od.o_orderkey, od.total_revenue
+    FROM OrderDetails od
+    WHERE od.rank <= 10
+),
+Nations AS (
+    SELECT n.n_nationkey, n.n_name
+    FROM nation n
+    WHERE n.n_regionkey IN (SELECT r.r_regionkey FROM region r WHERE r.r_name LIKE 'North%')
+)
+SELECT p.p_name, 
+       COUNT(DISTINCT ps.ps_suppkey) AS num_suppliers, 
+       AVG(ps.ps_supplycost) AS avg_supply_cost,
+       COALESCE(FD.total_revenue, 0) AS total_revenue
+FROM part p
+LEFT JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN SupplierHierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+LEFT JOIN FilteredOrderDetails FD ON ps.ps_partkey = FD.o_orderkey
+WHERE p.p_size BETWEEN 1 AND 40
+  AND p.p_retailprice > (SELECT AVG(p2.p_retailprice) FROM part p2)
+  AND sh.s_nationkey IN (SELECT n.n_nationkey FROM Nations n)
+GROUP BY p.p_name
+HAVING num_suppliers > 5
+ORDER BY total_revenue DESC NULLS LAST;

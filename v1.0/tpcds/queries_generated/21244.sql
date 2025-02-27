@@ -1,0 +1,63 @@
+
+WITH ranked_sales AS (
+    SELECT 
+        ws.ws_item_sk, 
+        ws.ws_order_number, 
+        ws.ws_sales_price, 
+        ws.ws_net_profit,
+        RANK() OVER (PARTITION BY ws.ws_item_sk ORDER BY ws.ws_net_profit DESC) AS profit_rank,
+        COALESCE(ss.ss_quantity, 0) AS store_quantity,
+        COALESCE(cs.cs_quantity, 0) AS catalog_quantity
+    FROM web_sales ws
+    LEFT JOIN store_sales ss ON ws.ws_item_sk = ss.ss_item_sk AND ws.ws_order_number = ss.ss_order_number
+    LEFT JOIN catalog_sales cs ON ws.ws_item_sk = cs.cs_item_sk AND ws.ws_order_number = cs.cs_order_number
+    WHERE ws.ws_sales_price > 0
+),
+item_costs AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_current_price,
+        CASE 
+            WHEN AVG(ws.ws_net_profit) IS NULL THEN 0
+            ELSE AVG(ws.ws_net_profit)
+        END AS avg_net_profit
+    FROM item i
+    LEFT JOIN web_sales ws ON i.i_item_sk = ws.ws_item_sk
+    GROUP BY i.i_item_sk, i.i_current_price
+),
+sales_summary AS (
+    SELECT 
+        ra.ws_item_sk,
+        ra.ws_order_number,
+        ra.ws_sales_price,
+        ra.ws_net_profit,
+        it.avg_net_profit,
+        CASE 
+            WHEN ra.profit_rank = 1 THEN 'Top Performer'
+            ELSE 'Regular Performer'
+        END AS performance_category
+    FROM ranked_sales ra
+    JOIN item_costs it ON ra.ws_item_sk = it.i_item_sk
+)
+SELECT 
+    ss.ws_item_sk,
+    ss.ws_order_number,
+    ss.ws_sales_price,
+    ss.ws_net_profit,
+    ss.avg_net_profit,
+    ss.performance_category,
+    (ss.ws_net_profit - ss.avg_net_profit) AS profit_difference,
+    CASE 
+        WHEN ss.ws_net_profit IS NULL OR ss.avg_net_profit IS NULL THEN 'Insufficient Data'
+        ELSE 
+            CASE 
+                WHEN ss.ws_net_profit > ss.avg_net_profit THEN 'Above Average'
+                ELSE 'Below Average'
+            END
+    END AS relative_performance
+FROM sales_summary ss
+LEFT JOIN customer_demographics cd ON ss.ws_item_sk = cd.cd_demo_sk
+WHERE (cd.cd_gender = 'F' OR cd.cd_marital_status IS NULL)
+AND ss.ws_sales_price NOT BETWEEN 50 AND 100
+ORDER BY ss.sales_price DESC, profit_difference ASC
+LIMIT 100;

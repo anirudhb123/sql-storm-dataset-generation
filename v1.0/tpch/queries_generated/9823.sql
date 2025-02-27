@@ -1,0 +1,30 @@
+WITH SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, p.p_name, p.p_brand, p.p_type, p.p_size, ps.ps_availqty, ps.ps_supplycost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size BETWEEN 1 AND 20
+), RegionSales AS (
+    SELECT n.n_nationkey, r.r_regionkey, SUM(o.o_totalprice) AS total_sales
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN customer c ON n.n_nationkey = c.c_nationkey
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY n.n_nationkey, r.r_regionkey
+), SupplierPerformance AS (
+    SELECT sp.s_suppkey, sp.s_name, SUM(sp.ps_supplycost * sp.ps_availqty) AS total_supplycost
+    FROM SupplierParts sp
+    GROUP BY sp.s_suppkey, sp.s_name
+), RankedSuppliers AS (
+    SELECT sp.s_suppkey, sp.s_name, sp.total_supplycost, RANK() OVER (ORDER BY sp.total_supplycost DESC) AS supplier_rank
+    FROM SupplierPerformance sp
+)
+SELECT r.r_name, COUNT(DISTINCT sp.s_suppkey) AS unique_suppliers, SUM(rs.total_sales) AS total_region_sales, MAX(rs.total_sales) AS max_sales_per_nation, AVG(rp.total_supplycost) AS avg_supplycost
+FROM RegionSales rs
+JOIN nation n ON rs.n_nationkey = n.n_nationkey
+JOIN region r ON rs.r_regionkey = r.r_regionkey
+JOIN RankedSuppliers rp ON rp.s_suppkey = n.n_nationkey
+WHERE n.n_nationkey IN (SELECT DISTINCT n_nationkey FROM nation WHERE n_comment LIKE '%quality%')
+GROUP BY r.r_name
+ORDER BY total_region_sales DESC
+LIMIT 10;

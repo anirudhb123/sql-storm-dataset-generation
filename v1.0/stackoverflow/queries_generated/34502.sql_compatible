@@ -1,0 +1,79 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Score,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank,
+        COUNT(v.Id) AS VoteCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 2 
+    WHERE 
+        p.CreationDate >= CURRENT_DATE - INTERVAL '1 YEAR'
+    GROUP BY 
+        p.Id, p.Title, p.Score, p.CreationDate, p.OwnerUserId
+),
+TopPosts AS (
+    SELECT 
+        r.PostId,
+        r.Title,
+        r.Score,
+        r.CreationDate,
+        CASE 
+            WHEN r.Score >= 100 THEN 'Gold'
+            WHEN r.Score >= 50 THEN 'Silver'
+            ELSE 'Bronze'
+        END AS ScoreCategory,
+        r.PostRank,
+        r.OwnerUserId
+    FROM 
+        RankedPosts r
+    WHERE 
+        r.PostRank = 1
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        COUNT(b.Id) AS BadgeCount
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    WHERE 
+        u.Reputation > 1000
+    GROUP BY 
+        u.Id
+),
+UserPostCounts AS (
+    SELECT 
+        OwnerUserId AS UserId,
+        COUNT(*) AS UserPostCount
+    FROM 
+        Posts
+    WHERE 
+        PostTypeId = 1 
+    GROUP BY 
+        OwnerUserId
+)
+SELECT 
+    u.DisplayName,
+    tp.Title,
+    tp.Score,
+    tp.ScoreCategory,
+    up.UserPostCount,
+    ub.BadgeCount
+FROM 
+    TopPosts tp
+JOIN 
+    Users u ON tp.OwnerUserId = u.Id
+LEFT JOIN 
+    UserPostCounts up ON u.Id = up.UserId
+LEFT JOIN 
+    UserBadges ub ON u.Id = ub.UserId
+WHERE 
+    up.UserPostCount IS NOT NULL OR ub.BadgeCount IS NOT NULL
+ORDER BY 
+    tp.Score DESC;

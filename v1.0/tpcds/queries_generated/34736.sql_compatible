@@ -1,0 +1,56 @@
+
+WITH RECURSIVE item_hierarchy AS (
+    SELECT i_item_sk, i_item_id, i_item_desc, i_brand_id, i_current_price
+    FROM item
+    WHERE i_rec_start_date <= CAST('2002-10-01' AS DATE) AND (i_rec_end_date IS NULL OR i_rec_end_date > CAST('2002-10-01' AS DATE))
+    UNION ALL
+    SELECT i.i_item_sk, i.i_item_id, i.i_item_desc, i.i_brand_id, i.i_current_price
+    FROM item i
+    INNER JOIN item_hierarchy ih ON i.i_brand_id = ih.i_brand_id
+    WHERE i.i_rec_start_date <= CAST('2002-10-01' AS DATE) AND (i.i_rec_end_date IS NULL OR i.i_rec_end_date > CAST('2002-10-01' AS DATE))
+),
+sales_data AS (
+    SELECT ws.ws_item_sk, SUM(ws.ws_quantity) AS total_quantity_sold,
+           SUM(ws.ws_net_paid_inc_tax) AS total_sales
+    FROM web_sales ws
+    WHERE ws.ws_sold_date_sk IN (SELECT d_date_sk FROM date_dim WHERE d_year = 2001)
+    GROUP BY ws.ws_item_sk
+),
+cumulative_sales AS (
+    SELECT sd.ws_item_sk,
+           sd.total_quantity_sold,
+           sd.total_sales,
+           ROW_NUMBER() OVER (ORDER BY sd.total_sales DESC) AS sales_rank
+    FROM sales_data sd
+),
+customer_summary AS (
+    SELECT cd.cd_demo_sk, COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+           SUM(cd.cd_purchase_estimate) AS total_estimated_purchase
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY cd.cd_demo_sk
+),
+address_summary AS (
+    SELECT ca.ca_state, COUNT(DISTINCT c.c_customer_sk) AS num_customers,
+           COUNT(DISTINCT c.c_current_addr_sk) AS num_addresses
+    FROM customer c
+    JOIN customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+    GROUP BY ca.ca_state
+)
+SELECT ih.i_item_id, ih.i_item_desc, cs.customer_count,
+       cs.total_estimated_purchase, as.num_customers, as.num_addresses,
+       CASE
+           WHEN cs.total_estimated_purchase > 1000 THEN 'High Value'
+           WHEN cs.total_estimated_purchase BETWEEN 500 AND 1000 THEN 'Medium Value'
+           ELSE 'Low Value'
+       END AS customer_value_segment,
+       SUM(cs.total_estimated_purchase) OVER (PARTITION BY as.num_customers) AS cumulative_value_segment
+FROM item_hierarchy ih
+LEFT JOIN cumulative_sales cs ON ih.i_item_sk = cs.ws_item_sk
+LEFT JOIN customer_summary st ON cs.ws_item_sk = st.cd_demo_sk
+LEFT JOIN address_summary as ON st.customer_count = as.num_customers
+WHERE cs.total_sales IS NOT NULL
+  AND as.num_addresses > 1
+GROUP BY ih.i_item_id, ih.i_item_desc, cs.customer_count, cs.total_estimated_purchase, as.num_customers, as.num_addresses
+ORDER BY cs.total_sales DESC, ih.i_item_desc
+LIMIT 100;

@@ -1,0 +1,85 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS PostRank
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1 
+),
+UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(COALESCE(p.ViewCount, 0)) AS TotalViews
+    FROM 
+        Users u
+    LEFT JOIN 
+        Votes v ON u.Id = v.UserId
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId
+    LEFT JOIN 
+        RankedPosts rp ON u.Id = rp.OwnerUserId
+    GROUP BY 
+        u.Id, u.DisplayName
+),
+RecentPostHistory AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        PHT.Name AS PostHistoryType,
+        COUNT(*) AS HistoryCount
+    FROM 
+        PostHistory ph 
+    JOIN 
+        PostHistoryTypes PHT ON ph.PostHistoryTypeId = PHT.Id
+    WHERE 
+        ph.CreationDate >= DATEADD(day, -30, CAST('2024-10-01 12:34:56' AS timestamp))
+    GROUP BY 
+        ph.PostId, PHT.Name
+),
+TopPosts AS (
+    SELECT DISTINCT ON (rp.PostId)
+        rp.PostId,
+        rp.Title,
+        COALESCE(rh.HistoryCount, 0) AS HistoryCount,
+        us.UpVotes,
+        us.DownVotes,
+        us.TotalViews
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        RecentPostHistory rh ON rp.PostId = rh.PostId
+    JOIN 
+        UserStatistics us ON rp.OwnerUserId = us.UserId
+    WHERE 
+        rp.PostRank = 1
+    ORDER BY 
+        rp.PostId, rp.CreationDate DESC
+)
+
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.UpVotes,
+    tp.DownVotes,
+    tp.TotalViews,
+    tp.HistoryCount,
+    CASE 
+        WHEN tp.HistoryCount > 0 THEN 'Active' 
+        ELSE 'Inactive' 
+    END AS PostActivity
+FROM 
+    TopPosts tp
+WHERE 
+    tp.UpVotes - tp.DownVotes > 0
+ORDER BY 
+    tp.TotalViews DESC, tp.UpVotes DESC;

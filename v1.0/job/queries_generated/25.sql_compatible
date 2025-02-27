@@ -1,0 +1,46 @@
+
+WITH MovieDetails AS (
+    SELECT m.id AS movie_id,
+           m.title,
+           m.production_year,
+           COALESCE(STRING_AGG(k.keyword, ', '), 'No Keywords') AS keywords,
+           ROW_NUMBER() OVER (PARTITION BY m.id ORDER BY c.nr_order) AS role_order
+    FROM aka_title m
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    GROUP BY m.id, m.title, m.production_year
+),
+ActorDetails AS (
+    SELECT a.id AS actor_id,
+           a.name,
+           a.person_id,
+           COUNT(DISTINCT ci.movie_id) AS movie_count
+    FROM aka_name a
+    JOIN cast_info ci ON a.person_id = ci.person_id
+    GROUP BY a.id, a.name, a.person_id
+),
+TopActors AS (
+    SELECT actor_id, 
+           name,
+           movie_count,
+           RANK() OVER (ORDER BY movie_count DESC) AS rank
+    FROM ActorDetails
+    WHERE movie_count > 5
+)
+SELECT md.movie_id,
+       md.title,
+       md.production_year,
+       STRING_AGG(DISTINCT ta.name, ', ') AS top_actors,
+       md.keywords,
+       CASE 
+           WHEN md.production_year IS NULL THEN 'Unknown Year'
+           ELSE CAST(md.production_year AS TEXT)
+       END AS production_year_text
+FROM MovieDetails md
+LEFT JOIN TopActors ta ON ta.actor_id IN (
+    SELECT c.person_id FROM cast_info c WHERE c.movie_id = md.movie_id
+)
+GROUP BY md.movie_id, md.title, md.production_year, md.keywords
+HAVING COUNT(DISTINCT ta.actor_id) > 0
+ORDER BY md.production_year DESC, md.title ASC;

@@ -1,0 +1,65 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        ws_sales_price,
+        ws_quantity,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY ws_sold_date_sk DESC) AS rn
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN (SELECT MIN(d_date_sk) FROM date_dim WHERE d_year = 2023) 
+        AND (SELECT MAX(d_date_sk) FROM date_dim WHERE d_year = 2023)
+),
+CustomerDemographics AS (
+    SELECT 
+        cd_demo_sk,
+        cd_gender,
+        cd_marital_status,
+        cd_income_band_sk,
+        COUNT(c_customer_sk) AS customer_count
+    FROM 
+        customer
+    JOIN 
+        customer_demographics ON c_current_cdemo_sk = cd_demo_sk 
+    GROUP BY 
+        cd_demo_sk, cd_gender, cd_marital_status, cd_income_band_sk
+),
+ItemSales AS (
+    SELECT 
+        i_item_id,
+        i_item_desc,
+        SUM(ws_quantity) AS total_sales,
+        SUM(ws_sales_price) AS total_sales_price
+    FROM 
+        web_sales
+    JOIN 
+        item ON ws_item_sk = i_item_sk
+    GROUP BY 
+        i_item_id, i_item_desc
+)
+SELECT 
+    ca_state,
+    cd_gender,
+    COUNT(DISTINCT c.c_customer_id) AS unique_customers,
+    SUM(r.total_sales_price) AS total_sales_value,
+    AVG(r.total_sales) AS avg_sales_per_item,
+    COUNT(DISTINCT CASE WHEN r.rn = 1 THEN r.ws_item_sk END) AS unique_items_sold
+FROM 
+    customer c
+JOIN 
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+LEFT JOIN 
+    ItemSales r ON c.c_customer_sk = r.ws_bill_customer_sk
+INNER JOIN 
+    CustomerDemographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+WHERE 
+    ca.ca_state IS NOT NULL
+    AND (cd_income_band_sk IS NULL OR cd_income_band_sk IN (1, 2, 3))
+GROUP BY 
+    ca_state, cd_gender
+HAVING 
+    COUNT(DISTINCT c.c_customer_id) > 10
+ORDER BY 
+    ca_state, cd_gender;

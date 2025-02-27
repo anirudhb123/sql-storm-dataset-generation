@@ -1,0 +1,52 @@
+
+WITH RECURSIVE CustomerReturns AS (
+    SELECT 
+        wr_returning_customer_sk AS customer_id, 
+        SUM(wr_return_quantity) AS total_returns,
+        COUNT(DISTINCT wr_order_number) AS return_count
+    FROM web_returns
+    GROUP BY wr_returning_customer_sk
+    UNION ALL
+    SELECT 
+        sr_returning_customer_sk AS customer_id,
+        SUM(sr_return_quantity) AS total_returns,
+        COUNT(DISTINCT sr_ticket_number) AS return_count
+    FROM store_returns
+    GROUP BY sr_returning_customer_sk
+),
+CustomerDemographics AS (
+    SELECT 
+        c.c_customer_sk,
+        COALESCE(cd.cd_gender, 'U') AS gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        cd.cd_education_status
+    FROM customer AS c
+    LEFT JOIN customer_demographics AS cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+TopReturners AS (
+    SELECT 
+        cr.customer_id,
+        SUM(cr.total_returns) AS total_returned,
+        SUM(cr.return_count) AS number_of_returns
+    FROM CustomerReturns AS cr
+    GROUP BY cr.customer_id
+    ORDER BY total_returned DESC
+    LIMIT 10
+)
+SELECT 
+    cd.c_customer_sk AS customer_sk,
+    cd.gender,
+    cd.cd_marital_status,
+    cd.cd_purchase_estimate,
+    cd.cd_education_status,
+    COALESCE(tr.total_returned, 0) AS total_returned,
+    COALESCE(tr.number_of_returns, 0) AS number_of_returns
+FROM CustomerDemographics AS cd
+LEFT JOIN TopReturners AS tr ON cd.c_customer_sk = tr.customer_id
+WHERE cd.cd_purchase_estimate > (
+    SELECT AVG(cd_purchase_estimate) 
+    FROM customer_demographics
+)
+AND cd.gender IS NOT NULL
+ORDER BY total_returned DESC;

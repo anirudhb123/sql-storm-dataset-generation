@@ -1,0 +1,94 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    LEFT JOIN
+        movie_link ml ON mt.id = ml.movie_id
+    WHERE 
+        mt.production_year > 2000 -- Focus on movies from 2001 onwards
+    UNION ALL
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ml.linked_movie_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        aka_title mt ON mh.linked_movie_id = mt.id
+    LEFT JOIN 
+        movie_link ml ON mt.id = ml.movie_id
+),
+CastRoles AS (
+    SELECT 
+        ci.movie_id,
+        rt.role,
+        COUNT(ci.person_id) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+    GROUP BY 
+        ci.movie_id, rt.role
+),
+MovieSummary AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        COALESCE(cr.role, 'Unknown') AS role,
+        SUM(cs.role_count) AS total_roles,
+        STRING_AGG(DISTINCT a.name, ', ') AS actors
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        CastRoles cr ON m.id = cr.movie_id
+    LEFT JOIN 
+        cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    GROUP BY 
+        m.id, m.title, cr.role
+),
+MovieAnalytics AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(SUM(m.k.role_count), 0) AS total_roles,
+        COUNT(DISTINCT ci.person_id) AS unique_actors,
+        ROW_NUMBER() OVER (PARTITION BY mh.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS role_rank
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        CastRoles m ON mh.movie_id = m.movie_id
+    LEFT JOIN 
+        cast_info ci ON mh.movie_id = ci.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year
+)
+SELECT 
+    ma.movie_id,
+    ma.title,
+    ma.production_year,
+    ma.total_roles,
+    ma.unique_actors,
+    ma.role_rank
+FROM 
+    MovieAnalytics ma
+WHERE 
+    ma.role_rank <= 3
+ORDER BY 
+    ma.production_year DESC, ma.total_roles DESC;
+
+This elaborate SQL query executes the following functionalities:
+1. It uses a recursive Common Table Expression (CTE) `MovieHierarchy` to build a hierarchy of movies linked together in a specified manner.
+2. A second CTE `CastRoles` calculates total roles associated with each movie.
+3. The `MovieSummary` CTE aggregates the results, producing summaries for each movie including roles and actors.
+4. Finally, the `MovieAnalytics` CTE generates analytics for movies that include the total number of roles and unique actors.
+5. The query then selects the top 3 movies based on the role ranking and orders the results by production year and total roles.

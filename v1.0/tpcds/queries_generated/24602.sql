@@ -1,0 +1,79 @@
+
+WITH RankedSales AS (
+    SELECT 
+        ws.bill_customer_sk,
+        ws.ship_customer_sk,
+        ws.item_sk,
+        ws.sold_date_sk,
+        ws_quantity,
+        ws_sales_price,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws.bill_customer_sk ORDER BY ws_net_profit DESC) AS sales_rank
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.bill_customer_sk = c.c_customer_sk
+    WHERE 
+        c.c_first_shipto_date_sk IS NOT NULL
+),
+CustomerStats AS (
+    SELECT 
+        c.c_customer_id,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        SUM(rs.ws_quantity) AS total_quantity,
+        AVG(rs.ws_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT rs.sold_date_sk) AS unique_days,
+        CASE 
+            WHEN AVG(rs.ws_net_profit) IS NULL THEN 'No Profit'
+            WHEN AVG(rs.ws_net_profit) > 0 THEN 'Profitable'
+            ELSE 'Loss'
+        END AS profitability_status
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        RankedSales rs ON c.c_customer_sk = rs.bill_customer_sk AND rs.sales_rank <= 10
+    GROUP BY 
+        c.c_customer_id, cd.cd_gender, cd.cd_marital_status
+),
+QuantileIncome AS (
+    SELECT 
+        ib.ib_income_band_sk,
+        ib_lower_bound,
+        ib_upper_bound,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY total_quantity) OVER () AS median_quantity,
+        COUNT(DISTINCT hd.hd_demo_sk) AS household_count
+    FROM 
+        household_demographics hd
+    JOIN 
+        income_band ib ON hd.hd_income_band_sk = ib.ib_income_band_sk 
+    GROUP BY 
+        ib.ib_income_band_sk, ib_lower_bound, ib_upper_bound
+)
+SELECT 
+    cs.c_customer_id,
+    cs.cd_gender,
+    cs.cd_marital_status,
+    cs.total_quantity,
+    cs.avg_sales_price,
+    cs.unique_days,
+    cs.profitability_status,
+    qi.ib_lower_bound,
+    qi.ib_upper_bound,
+    qi.household_count,
+    CASE 
+        WHEN cs.total_quantity > qi.median_quantity THEN 'Above Median'
+        ELSE 'Below Median'
+    END AS quantity_position,
+    COALESCE(NULLIF(cs.total_quantity, 0), 'Unknown') AS safe_quantity
+FROM 
+    CustomerStats cs
+JOIN 
+    QuantileIncome qi ON cs.total_quantity BETWEEN qi.ib_lower_bound AND qi.ib_upper_bound
+WHERE 
+    cs.profitability_status = 'Profitable'
+ORDER BY 
+    cs.total_quantity DESC, cs.c_customer_id
+FETCH FIRST 100 ROWS ONLY;

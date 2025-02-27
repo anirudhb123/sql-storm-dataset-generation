@@ -1,0 +1,63 @@
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.PostTypeId,
+        p.AcceptedAnswerId,
+        COALESCE(SUM(v.VoteTypeId = 2)::int, 0) AS Upvotes,
+        COALESCE(SUM(v.VoteTypeId = 3)::int, 0) AS Downvotes,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.PostTypeId, p.AcceptedAnswerId
+), 
+ClosedPosts AS (
+    SELECT 
+        ph.PostId,
+        ph.CreationDate,
+        ph.Comment AS CloseReason,
+        ROW_NUMBER() OVER (ORDER BY ph.CreationDate DESC) AS rn
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId = 10 
+),
+UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(b.Id) AS BadgeCount,
+        SUM(u.UpVotes) AS TotalUpvotes,
+        SUM(u.DownVotes) AS TotalDownvotes
+    FROM 
+        Users u
+    LEFT JOIN 
+        Badges b ON u.Id = b.UserId 
+    GROUP BY 
+        u.Id, u.DisplayName
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.CreationDate,
+    rp.Upvotes,
+    rp.Downvotes,
+    cp.CloseReason,
+    us.DisplayName,
+    us.BadgeCount,
+    us.TotalUpvotes - us.TotalDownvotes AS NetReputation
+FROM 
+    RecentPosts rp
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId AND cp.rn = 1
+JOIN 
+    UserStats us ON rp.OwnerUserId = us.UserId
+WHERE 
+    rp.rn <= 5
+ORDER BY 
+    rp.CreationDate DESC, 
+    us.NetReputation ASC NULLS LAST;

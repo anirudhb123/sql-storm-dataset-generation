@@ -1,0 +1,52 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_acctbal > (SELECT AVG(s_acctbal) FROM supplier) 
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+HighValueOrders AS (
+    SELECT o_orderkey, o_custkey, o_totalprice, o_orderdate, 
+           ROW_NUMBER() OVER(PARTITION BY o_custkey ORDER BY o_totalprice DESC) as order_rank
+    FROM orders
+    WHERE o_totalprice > 5000
+),
+OrderLineDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM lineitem l
+    WHERE l.l_shipdate < DATE '1998-10-01' - INTERVAL '10' DAY
+    GROUP BY l.l_orderkey
+),
+CustomerWithOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(ho.o_orderkey) AS total_orders
+    FROM customer c
+    LEFT JOIN HighValueOrders ho ON c.c_custkey = ho.o_custkey
+    GROUP BY c.c_custkey, c.c_name 
+    HAVING COUNT(ho.o_orderkey) > 0
+)
+SELECT 
+    p.p_name,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    AVG(sh.s_acctbal) AS avg_supplier_balance,
+    SUM(ol.revenue) AS total_revenue
+FROM 
+    part p
+JOIN
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+JOIN 
+    OrderLineDetails ol ON ol.l_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey IN (SELECT c.c_custkey FROM CustomerWithOrders cwo WHERE cwo.total_orders > 1))
+GROUP BY 
+    p.p_name, sh.s_acctbal
+HAVING 
+    COUNT(DISTINCT ps.ps_suppkey) > 3
+ORDER BY 
+    total_revenue DESC
+LIMIT 10;

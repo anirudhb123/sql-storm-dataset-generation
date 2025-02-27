@@ -1,0 +1,61 @@
+
+WITH RankedSales AS (
+    SELECT
+        ws_bill_customer_sk,
+        ws_ship_date_sk,
+        ws_item_sk,
+        ws_quantity,
+        ws_net_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_bill_customer_sk ORDER BY ws_net_profit DESC) AS rnk
+    FROM
+        web_sales
+    WHERE
+        ws_ship_date_sk BETWEEN (SELECT MAX(d_date_sk) FROM date_dim) - 30 AND (SELECT MAX(d_date_sk) FROM date_dim)
+),
+TopCustomers AS (
+    SELECT
+        rc.ws_bill_customer_sk,
+        SUM(rc.ws_net_profit) AS total_profit,
+        COUNT(DISTINCT rc.ws_item_sk) AS total_items,
+        RANK() OVER (ORDER BY SUM(rc.ws_net_profit) DESC) AS customer_rank
+    FROM
+        RankedSales rc
+    WHERE
+        rc.rnk <= 5
+    GROUP BY
+        rc.ws_bill_customer_sk
+)
+SELECT
+    c.c_customer_id,
+    ca.ca_city,
+    ca.ca_state,
+    tc.total_profit,
+    tc.total_items,
+    (SELECT COUNT(*) FROM store_sales ss WHERE ss.ss_customer_sk = tc.ws_bill_customer_sk) AS total_store_purchases,
+    (SELECT COUNT(*) FROM catalog_sales cs WHERE cs.cs_customer_sk = tc.ws_bill_customer_sk) AS total_catalog_purchases,
+    (SELECT COUNT(*) FROM web_sales ws WHERE ws.ws_bill_customer_sk = tc.ws_bill_customer_sk) AS total_web_purchases
+FROM
+    TopCustomers tc
+JOIN
+    customer c ON tc.ws_bill_customer_sk = c.c_customer_sk
+JOIN
+    customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+WHERE
+    tc.total_profit IS NOT NULL
+ORDER BY
+    tc.total_profit DESC
+LIMIT 10
+UNION ALL
+SELECT
+    'N/A' AS c_customer_id,
+    'Aggregate' AS ca_city,
+    'N/A' AS ca_state,
+    SUM(tc.total_profit) AS total_profit,
+    SUM(tc.total_items) AS total_items,
+    NULL AS total_store_purchases,
+    NULL AS total_catalog_purchases,
+    NULL AS total_web_purchases
+FROM
+    TopCustomers tc
+WHERE
+    tc.customer_rank <= 10;

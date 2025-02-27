@@ -1,0 +1,83 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.ViewCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.Score DESC) AS UserRank,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount,
+        STRING_AGG(t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        UNNEST(STRING_TO_ARRAY(p.Tags, '>')) AS tagId ON TRUE
+    LEFT JOIN 
+        Tags t ON t.TagName = tagId
+    WHERE 
+        p.CreationDate >= '2022-01-01'
+        AND p.Score > 0
+    GROUP BY 
+        p.Id, u.DisplayName
+), 
+UserBadges AS (
+    SELECT 
+        b.UserId,
+        COUNT(b.Id) FILTER (WHERE b.Class = 1) AS GoldCount,
+        COUNT(b.Id) FILTER (WHERE b.Class = 2) AS SilverCount,
+        COUNT(b.Id) FILTER (WHERE b.Class = 3) AS BronzeCount
+    FROM 
+        Badges b
+    GROUP BY 
+        b.UserId
+), 
+ClosedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        COUNT(ph.Id) AS CloseCount
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON ph.PostId = p.Id 
+    WHERE 
+        ph.PostHistoryTypeId = 10
+    GROUP BY 
+        p.Id
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score,
+    rp.ViewCount,
+    rp.UserRank,
+    COALESCE(ub.GoldCount, 0) AS GoldBadges,
+    COALESCE(ub.SilverCount, 0) AS SilverBadges,
+    COALESCE(ub.BronzeCount, 0) AS BronzeBadges,
+    COALESCE(cp.CloseCount, 0) AS ClosedCount,
+    CASE
+        WHEN rp.CommentCount > 0 THEN 'Has Comments'
+        ELSE 'No Comments'
+    END AS CommentStatus,
+    CASE 
+        WHEN rp.ViewCount IS NULL THEN 'Unknown Views'
+        ELSE 'Views Counted'
+    END AS ViewStatus
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserBadges ub ON rp.OwnerDisplayName = (SELECT DisplayName FROM Users WHERE id = ub.UserId)
+LEFT JOIN 
+    ClosedPosts cp ON rp.PostId = cp.PostId
+WHERE 
+    rp.UserRank <= 3
+ORDER BY 
+    rp.Score DESC, 
+    rp.CreationDate ASC
+LIMIT 100;

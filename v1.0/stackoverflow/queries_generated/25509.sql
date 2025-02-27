@@ -1,0 +1,64 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        pt.Name AS PostType,
+        ROW_NUMBER() OVER (PARTITION BY pt.Name ORDER BY p.CreationDate DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    WHERE 
+        p.CreationDate >= NOW() - INTERVAL '1 year'
+),
+CombinedTags AS (
+    SELECT 
+        PostId,
+        STRING_AGG(TRIM(BOTH '<>' FROM UNNEST(string_to_array(SUBSTRING(Tags, 2, LENGTH(Tags)-2), '><'))), ', ') AS Tags
+    FROM 
+        Posts
+    GROUP BY 
+        PostId
+),
+PostVotes AS (
+    SELECT 
+        PostId,
+        COUNT(CASE WHEN vt.Name = 'UpMod' THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN vt.Name = 'DownMod' THEN 1 END) AS DownVotes
+    FROM 
+        Votes v
+    JOIN 
+        VoteTypes vt ON v.VoteTypeId = vt.Id
+    GROUP BY 
+        PostId
+)
+SELECT 
+    rp.PostId,
+    rp.Title,
+    rp.Body,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Author,
+    rp.PostType,
+    ct.Tags,
+    COALESCE(pv.UpVotes, 0) AS UpVotes,
+    COALESCE(pv.DownVotes, 0) AS DownVotes,
+    rp.Rank
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    CombinedTags ct ON rp.PostId = ct.PostId
+LEFT JOIN 
+    PostVotes pv ON rp.PostId = pv.PostId
+WHERE 
+    rp.Rank <= 5
+ORDER BY 
+    rp.PostType, rp.ViewCount DESC;
+
+This SQL query benchmarks string processing by processing post-related information (titles, bodies, view counts, and tags) after aggregating the tags associated with each post. It includes a ranking mechanism based on post creation dates and collects vote counts per post. It filters to return the top 5 recent posts for each post type, ordered by view counts.

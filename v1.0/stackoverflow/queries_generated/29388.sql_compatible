@@ -1,0 +1,62 @@
+
+WITH TagStatistics AS (
+    SELECT 
+        t.TagName,
+        COUNT(DISTINCT p.Id) AS PostCount,
+        SUM(CASE WHEN p.AcceptedAnswerId IS NOT NULL THEN 1 ELSE 0 END) AS AcceptedAnswersCount,
+        AVG(u.Reputation) AS AverageUserReputation,
+        STRING_AGG(DISTINCT u.DisplayName, ', ') AS TopUsers,
+        COUNT(DISTINCT b.Id) AS BadgeCount
+    FROM 
+        Tags t
+    JOIN 
+        Posts p ON p.Tags LIKE '%' || t.TagName || '%'
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Badges b ON b.UserId = u.Id
+    GROUP BY 
+        t.TagName
+),
+ClosedPostStatistics AS (
+    SELECT 
+        p.Tags,
+        COUNT(ph.Id) AS CloseCount,
+        COUNT(DISTINCT p.Id) AS ClosedPostCount,
+        MAX(p.LastActivityDate) AS LastClosedActivityDate
+    FROM 
+        Posts p
+    JOIN 
+        PostHistory ph ON p.Id = ph.PostId AND ph.PostHistoryTypeId = 10 
+    GROUP BY 
+        p.Tags
+),
+FinalStatistics AS (
+    SELECT 
+        ts.TagName,
+        ts.PostCount,
+        ts.AcceptedAnswersCount,
+        ts.AverageUserReputation,
+        ts.TopUsers,
+        cs.CloseCount,
+        cs.ClosedPostCount,
+        cs.LastClosedActivityDate
+    FROM 
+        TagStatistics ts
+    LEFT JOIN 
+        ClosedPostStatistics cs ON ts.TagName = cs.Tags
+)
+SELECT 
+    fs.TagName,
+    fs.PostCount,
+    fs.AcceptedAnswersCount,
+    fs.AverageUserReputation,
+    fs.TopUsers,
+    fs.CloseCount,
+    fs.ClosedPostCount,
+    fs.LastClosedActivityDate
+FROM 
+    FinalStatistics fs
+ORDER BY 
+    fs.PostCount DESC,
+    fs.AcceptedAnswersCount DESC;

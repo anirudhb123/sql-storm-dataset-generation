@@ -1,0 +1,72 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(ci.person_id) AS cast_count,
+        RANK() OVER (PARTITION BY at.production_year ORDER BY COUNT(ci.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.id = ci.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+ActorMovies AS (
+    SELECT 
+        ak.name AS actor_name,
+        at.title AS movie_title,
+        ak.person_id,
+        ak.id AS aka_id,
+        at.production_year
+    FROM 
+        aka_name ak
+    INNER JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    INNER JOIN 
+        aka_title at ON ci.movie_id = at.id
+),
+HighCastMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        CAST(rank AS INTEGER) AS movie_rank
+    FROM 
+        RankedMovies
+    WHERE 
+        rank <= 3 
+),
+MovieKeywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(mk.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mt
+    JOIN 
+        keyword mk ON mt.keyword_id = mk.id
+    GROUP BY 
+        mt.movie_id
+)
+SELECT 
+    at.title,
+    at.production_year,
+    COALESCE(ak.actor_name, 'Unknown Actor') AS actor_name,
+    COALESCE(mk.keywords, 'No keywords') AS movie_keywords,
+    CASE 
+        WHEN at.production_year < 2000 THEN 'Classic'
+        WHEN at.production_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era,
+    ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY ak.actor_name DESC) AS actor_order
+FROM 
+    aka_title at
+LEFT JOIN 
+    ActorMovies ak ON at.title = ak.movie_title
+LEFT JOIN 
+    MovieKeywords mk ON at.id = mk.movie_id
+WHERE 
+    at.production_year IN (SELECT DISTINCT production_year FROM HighCastMovies)
+    AND (ak.actor_name IS NOT NULL OR at.production_year >= 2015) 
+ORDER BY 
+    at.production_year DESC,
+    actor_order;

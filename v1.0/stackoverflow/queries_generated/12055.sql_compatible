@@ -1,0 +1,35 @@
+
+WITH UserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.Reputation,
+        COUNT(DISTINCT P.Id) AS PostCount,
+        SUM(CASE WHEN P.PostTypeId = 1 THEN 1 ELSE 0 END) AS QuestionCount,
+        SUM(CASE WHEN P.PostTypeId = 2 THEN 1 ELSE 0 END) AS AnswerCount,
+        SUM(CASE WHEN P.Score IS NOT NULL THEN P.Score ELSE 0 END) AS TotalScore,
+        AVG(COALESCE(P.ViewCount, 0)) AS AvgViewCount
+    FROM Users U
+    LEFT JOIN Posts P ON U.Id = P.OwnerUserId
+    GROUP BY U.Id, U.Reputation
+),
+PostHistoryStats AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS HistoryCount,
+        MAX(PH.CreationDate) AS LastHistoryDate
+    FROM PostHistory PH
+    GROUP BY PH.PostId
+)
+SELECT 
+    U.UserId,
+    U.Reputation,
+    U.PostCount,
+    U.QuestionCount,
+    U.AnswerCount,
+    U.TotalScore,
+    U.AvgViewCount,
+    COALESCE(PH.HistoryCount, 0) AS PostHistoryCount,
+    PH.LastHistoryDate
+FROM UserStats U
+LEFT JOIN PostHistoryStats PH ON U.PostCount > 0 AND PH.PostId IN (SELECT P.Id FROM Posts P WHERE P.OwnerUserId = U.UserId)
+ORDER BY U.Reputation DESC, U.PostCount DESC;

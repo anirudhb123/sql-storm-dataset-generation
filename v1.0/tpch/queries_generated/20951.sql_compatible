@@ -1,0 +1,64 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rnk
+    FROM orders o
+    WHERE o.o_orderstatus IN ('O', 'F', 'P')
+),
+CustomerSummary AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent,
+        AVG(o.o_totalprice) AS avg_order_value
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+),
+SupplierAvailability AS (
+    SELECT 
+        ps.ps_partkey,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        SUM(ps.ps_availqty) AS total_available
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+CombinedData AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        COALESCE(sa.supplier_count, 0) AS supplier_count,
+        COALESCE(sa.total_available, 0) AS total_available,
+        cs.total_orders,
+        cs.total_spent,
+        cs.avg_order_value
+    FROM part p
+    LEFT JOIN SupplierAvailability sa ON p.p_partkey = sa.ps_partkey
+    LEFT JOIN CustomerSummary cs ON cs.total_orders > 0 AND cs.total_orders <= (SELECT COUNT(*) FROM orders) / 2
+)
+SELECT 
+    c.c_custkey AS cust_key,
+    CASE 
+        WHEN c.total_spent > 10000 THEN 'High Roller' 
+        WHEN c.total_spent BETWEEN 5000 AND 10000 THEN 'Mid Tier' 
+        ELSE 'Low Tier' 
+    END AS customer_tier,
+    d.p_name,
+    d.supplier_count,
+    d.total_available,
+    CASE 
+        WHEN d.total_available IS NULL THEN 'No Supply' 
+        ELSE 'Supply Available' 
+    END AS supply_status
+FROM CombinedData d
+JOIN CustomerSummary c ON c.total_orders > 0
+WHERE d.supplier_count > 3
+  AND d.total_available > (SELECT AVG(total_available) FROM SupplierAvailability) 
+  AND d.p_name LIKE '%' || (SELECT p_name FROM part ORDER BY RANDOM() LIMIT 1) || '%'
+ORDER BY c.total_spent DESC, d.p_name ASC
+LIMIT 100 OFFSET 10;

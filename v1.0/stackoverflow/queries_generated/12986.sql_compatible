@@ -1,0 +1,67 @@
+
+WITH UserStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.Reputation,
+        COUNT(DISTINCT p.Id) AS TotalPosts,
+        COUNT(DISTINCT c.Id) AS TotalComments,
+        SUM(CASE WHEN p.Score > 0 THEN 1 ELSE 0 END) AS PositivePosts,
+        SUM(CASE WHEN p.ViewCount > 100 THEN 1 ELSE 0 END) AS PopularPosts
+    FROM 
+        Users u
+    LEFT JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN 
+        Comments c ON u.Id = c.UserId
+    GROUP BY 
+        u.Id, u.Reputation
+),
+PostDetails AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        pt.Name AS PostType,
+        u.DisplayName AS OwnerDisplayName
+    FROM 
+        Posts p
+    JOIN 
+        PostTypes pt ON p.PostTypeId = pt.Id
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+),
+VoteCounts AS (
+    SELECT 
+        PostId,
+        SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes
+    GROUP BY 
+        PostId
+)
+
+SELECT 
+    us.UserId,
+    us.Reputation,
+    us.TotalPosts,
+    us.TotalComments,
+    us.PositivePosts,
+    us.PopularPosts,
+    pd.PostId,
+    pd.Title,
+    pd.CreationDate,
+    pd.ViewCount,
+    pd.PostType,
+    pd.OwnerDisplayName,
+    COALESCE(vc.UpVotes, 0) AS UpVotes,
+    COALESCE(vc.DownVotes, 0) AS DownVotes
+FROM 
+    UserStats us
+LEFT JOIN 
+    PostDetails pd ON us.UserId = pd.OwnerDisplayName
+LEFT JOIN 
+    VoteCounts vc ON pd.PostId = vc.PostId
+ORDER BY 
+    us.Reputation DESC, us.TotalPosts DESC;

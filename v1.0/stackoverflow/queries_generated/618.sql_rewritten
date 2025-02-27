@@ -1,0 +1,62 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Tags,
+        p.ViewCount,
+        p.Score,
+        ROW_NUMBER() OVER(PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM 
+        Posts p
+    WHERE 
+        p.CreationDate >= cast('2024-10-01' as date) - INTERVAL '1 year'
+        AND p.Score > 0
+        AND p.PostTypeId = 1
+),
+UserVotes AS (
+    SELECT 
+        v.PostId,
+        COUNT(CASE WHEN v.VoteTypeId = 2 THEN 1 END) AS UpVotes,
+        COUNT(CASE WHEN v.VoteTypeId = 3 THEN 1 END) AS DownVotes,
+        SUM(COALESCE(v.BountyAmount, 0)) AS TotalBounties
+    FROM 
+        Votes v
+    GROUP BY 
+        v.PostId
+),
+PostsWithMaxViews AS (
+    SELECT 
+        PostId,
+        MAX(ViewCount) AS MaxViewCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        UserVotes uv ON rp.PostId = uv.PostId
+    GROUP BY 
+        rp.PostId
+)
+SELECT 
+    rp.Title,
+    rp.CreationDate,
+    uv.UpVotes,
+    uv.DownVotes,
+    pm.MaxViewCount,
+    COALESCE(uv.TotalBounties, 0) AS TotalBounties,
+    CASE 
+        WHEN uv.DownVotes > uv.UpVotes THEN 'Negative'
+        WHEN uv.UpVotes > uv.DownVotes THEN 'Positive'
+        ELSE 'Neutral'
+    END AS VoteSentiment
+FROM 
+    RankedPosts rp
+LEFT JOIN 
+    UserVotes uv ON rp.PostId = uv.PostId
+LEFT JOIN 
+    PostsWithMaxViews pm ON rp.PostId = pm.PostId
+WHERE 
+    rp.rn = 1
+ORDER BY 
+    pm.MaxViewCount DESC,
+    rp.Title ASC
+LIMIT 10;

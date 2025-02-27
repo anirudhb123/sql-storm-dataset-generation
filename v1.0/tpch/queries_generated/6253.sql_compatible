@@ -1,0 +1,35 @@
+
+WITH SupplierParts AS (
+    SELECT s.s_suppkey, s.s_name, ps.ps_partkey, p.p_name, ps.ps_availqty, ps.ps_supplycost 
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+), 
+HighValueCustomers AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent 
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o.o_orderstatus = 'O'
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 100000
+), 
+RecentShipments AS (
+    SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_quantity, l.l_extendedprice, l.l_shipdate 
+    FROM lineitem l
+    WHERE l.l_shipdate >= DATE '1998-10-01' - INTERVAL '30 days'
+)
+SELECT 
+    r.r_name AS region,
+    np.n_name AS nation,
+    sp.s_name AS supplier_name,
+    sp.p_name AS part_name,
+    SUM(hvc.total_spent) AS customer_spend,
+    SUM(rsh.l_extendedprice) AS total_revenue,
+    COUNT(DISTINCT hvc.c_custkey) AS customer_count
+FROM region r
+JOIN nation np ON r.r_regionkey = np.n_regionkey
+JOIN SupplierParts sp ON np.n_nationkey = sp.s_nationkey
+JOIN HighValueCustomers hvc ON sp.s_suppkey = hvc.c_custkey
+JOIN RecentShipments rsh ON sp.ps_partkey = rsh.l_partkey AND sp.s_suppkey = rsh.l_suppkey
+GROUP BY r.r_name, np.n_name, sp.s_name, sp.p_name
+ORDER BY total_revenue DESC, customer_spend DESC;

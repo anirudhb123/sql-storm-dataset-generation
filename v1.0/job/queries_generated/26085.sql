@@ -1,0 +1,51 @@
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(c.id) AS cast_count,
+        ARRAY_AGG(DISTINCT ak.name) AS aka_names,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM title m
+    LEFT JOIN cast_info c ON m.id = c.movie_id
+    LEFT JOIN aka_title ak ON m.id = ak.movie_id
+    LEFT JOIN movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN keyword k ON mk.keyword_id = k.id
+    WHERE m.production_year >= 2000
+    GROUP BY m.id
+),
+ranked_cast AS (
+    SELECT 
+        c.person_id,
+        p.name,
+        ARRAY_AGG(DISTINCT r.role) AS roles
+    FROM cast_info c
+    JOIN name p ON c.person_id = p.id
+    JOIN role_type r ON c.role_id = r.id
+    GROUP BY c.person_id, p.name
+),
+most_prolific_cast AS (
+    SELECT 
+        rc.person_id,
+        rc.name,
+        COUNT(DISTINCT rc.movie_id) AS movie_count
+    FROM ranked_movies rm
+    JOIN cast_info c ON rm.movie_id = c.movie_id
+    JOIN ranked_cast rc ON c.person_id = rc.person_id
+    GROUP BY rc.person_id, rc.name
+    ORDER BY movie_count DESC
+    LIMIT 10
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    rm.cast_count,
+    array_to_string(rm.aka_names, ', ') AS aka_names,
+    array_to_string(rm.keywords, ', ') AS keywords,
+    mc.name AS most_prolific_cast_name,
+    mc.movie_count
+FROM ranked_movies rm
+JOIN most_prolific_cast mc ON rm.movie_id IN (
+    SELECT movie_id FROM cast_info WHERE person_id = mc.person_id
+)
+ORDER BY rm.production_year DESC, rm.cast_count DESC;

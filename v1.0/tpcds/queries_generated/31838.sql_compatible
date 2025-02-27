@@ -1,0 +1,70 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        ws_sold_date_sk + 1,
+        ws_item_sk,
+        (SELECT SUM(total_quantity) FROM SalesCTE WHERE ws_item_sk = SalesCTE.ws_item_sk AND ws_sold_date_sk = SalesCTE.ws_sold_date_sk) + SUM(ws_quantity),
+        (SELECT SUM(total_sales) FROM SalesCTE WHERE ws_item_sk = SalesCTE.ws_item_sk AND ws_sold_date_sk = SalesCTE.ws_sold_date_sk) + SUM(ws_ext_sales_price)
+    FROM 
+        SalesCTE
+    WHERE 
+        ws_sold_date_sk + 1 <= (SELECT MAX(d_date_sk) FROM date_dim)
+),
+FilteredSales AS (
+    SELECT 
+        ws_item_sk,
+        total_quantity,
+        total_sales,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY total_sales DESC) AS sales_rank
+    FROM 
+        SalesCTE
+),
+CustomerReturns AS (
+    SELECT 
+        wr_item_sk,
+        SUM(wr_return_quantity) AS total_return_quantity,
+        SUM(wr_return_amt) AS total_return_amt
+    FROM 
+        web_returns
+    GROUP BY 
+        wr_item_sk
+),
+FinalReport AS (
+    SELECT 
+        fs.ws_item_sk,
+        fs.total_quantity,
+        fs.total_sales,
+        COALESCE(cr.total_return_quantity, 0) AS total_return_quantity,
+        COALESCE(cr.total_return_amt, 0) AS total_return_amt,
+        (fs.total_sales - COALESCE(cr.total_return_amt, 0)) AS net_sales,
+        (fs.total_quantity - COALESCE(cr.total_return_quantity, 0)) AS net_quantity
+    FROM 
+        FilteredSales fs
+    LEFT JOIN 
+        CustomerReturns cr ON fs.ws_item_sk = cr.wr_item_sk
+)
+SELECT 
+    fr.ws_item_sk,
+    fr.total_quantity,
+    fr.total_sales,
+    fr.total_return_quantity,
+    fr.total_return_amt,
+    fr.net_sales,
+    fr.net_quantity
+FROM 
+    FinalReport fr
+WHERE 
+    fr.net_sales > 500 AND fr.net_quantity > 10
+ORDER BY 
+    fr.net_sales DESC, fr.net_quantity ASC
+FETCH FIRST 10 ROWS ONLY;

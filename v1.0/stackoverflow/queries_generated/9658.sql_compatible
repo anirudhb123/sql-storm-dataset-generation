@@ -1,0 +1,75 @@
+
+WITH RecentPosts AS (
+    SELECT 
+        p.Id AS PostId, 
+        p.Title, 
+        p.CreationDate, 
+        p.Score,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.OwnerUserId,
+        u.DisplayName AS OwnerDisplayName,
+        u.Reputation,
+        p.Tags
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.CreationDate >= DATE '2024-10-01' - INTERVAL '30 days'
+),
+TopTags AS (
+    SELECT 
+        TRIM(tag) AS TagName
+    FROM 
+        RecentPosts,
+        UNNEST(string_to_array(SUBSTRING(Tags FROM 2 FOR LENGTH(Tags) - 2), '>')) AS tag
+),
+TagSummary AS (
+    SELECT 
+        TagName, 
+        COUNT(*) AS TagCount 
+    FROM 
+        TopTags 
+    GROUP BY 
+        TagName
+    ORDER BY 
+        TagCount DESC 
+    LIMIT 5
+),
+PostStats AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        rp.ViewCount,
+        rp.OwnerDisplayName,
+        rp.Reputation,
+        COUNT(c.Id) AS CommentCount
+    FROM 
+        RecentPosts rp
+    LEFT JOIN 
+        Comments c ON rp.PostId = c.PostId
+    GROUP BY 
+        rp.PostId, rp.Title, rp.CreationDate, rp.Score, rp.ViewCount, rp.OwnerDisplayName, rp.Reputation
+)
+SELECT 
+    ps.PostId,
+    ps.Title,
+    ps.CreationDate,
+    ps.Score,
+    ps.ViewCount,
+    ps.CommentCount,
+    ps.OwnerDisplayName,
+    ps.Reputation,
+    ts.TagName,
+    ts.TagCount
+FROM 
+    PostStats ps
+JOIN 
+    TagSummary ts ON (ts.TagName = ANY(string_to_array(SUBSTRING(ps.Tags FROM 2 FOR LENGTH(ps.Tags) - 2), '>')))
+ORDER BY 
+    ps.Score DESC, 
+    ps.ViewCount DESC;

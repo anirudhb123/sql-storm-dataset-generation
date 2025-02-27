@@ -1,0 +1,63 @@
+
+WITH sales_summary AS (
+    SELECT 
+        s.s_store_sk,
+        s.s_store_name,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_sales_price) AS total_sales,
+        AVG(ws.ws_net_profit) AS avg_net_profit,
+        COUNT(DISTINCT ws.ws_order_number) AS total_orders
+    FROM
+        store s
+    JOIN
+        web_sales ws ON s.s_store_sk = ws.ws_ship_addr_sk
+    JOIN
+        customer_demographics cd ON ws.ws_bill_cdemo_sk = cd.cd_demo_sk
+    JOIN
+        date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE
+        d.d_year = 2023 AND
+        cd.cd_gender = 'F' AND
+        cd.cd_marital_status = 'M'
+    GROUP BY
+        s.s_store_sk,
+        s.s_store_name
+),
+store_location AS (
+    SELECT 
+        ca.city,
+        ca.state,
+        s.s_store_sk,
+        s.s_store_name
+    FROM
+        customer_address ca
+    JOIN
+        store s ON ca.ca_address_sk = s.s_addr_sk
+),
+complete_summary AS (
+    SELECT 
+        sl.city,
+        sl.state,
+        ss.s_store_name,
+        ss.total_quantity,
+        ss.total_sales,
+        ss.avg_net_profit,
+        ss.total_orders
+    FROM
+        sales_summary ss
+    JOIN
+        store_location sl ON ss.s_store_sk = sl.s_store_sk
+)
+SELECT 
+    city,
+    state,
+    s_store_name,
+    total_quantity,
+    total_sales,
+    avg_net_profit,
+    total_orders
+FROM 
+    complete_summary
+ORDER BY 
+    total_sales DESC
+LIMIT 10;

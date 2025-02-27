@@ -1,0 +1,86 @@
+WITH UserStatistics AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.Views,
+        (SELECT COUNT(*) FROM Badges B WHERE B.UserId = U.Id) AS BadgeCount,
+        COALESCE(SUM(V.BountyAmount), 0) AS TotalBountyAmount
+    FROM 
+        Users U
+    LEFT JOIN 
+        Votes V ON V.UserId = U.Id
+    GROUP BY 
+        U.Id, U.DisplayName, U.Reputation, U.CreationDate, U.Views
+), TopPosts AS (
+    SELECT 
+        P.Id AS PostId,
+        P.OwnerUserId,
+        P.Score,
+        P.ViewCount,
+        P.Title,
+        COUNT(C.Id) AS CommentCount,
+        ROW_NUMBER() OVER(PARTITION BY P.OwnerUserId ORDER BY P.Score DESC) AS UserRank
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments C ON C.PostId = P.Id
+    WHERE 
+        P.PostTypeId = 1 
+    GROUP BY 
+        P.Id, P.OwnerUserId, P.Score, P.ViewCount, P.Title
+), FilteredPosts AS (
+    SELECT 
+        T.UserId,
+        P.Title,
+        T.PostId,
+        P.Score,
+        P.ViewCount,
+        U.Reputation,
+        P.CommentCount,
+        U.BadgeCount,
+        U.TotalBountyAmount,
+        CASE 
+            WHEN P.QuestionId IS NULL THEN 'None' 
+            ELSE (SELECT COALESCE(STRING_AGG(HT.Name, ', '), 'N/A') 
+                  FROM PostHistory H 
+                  JOIN PostHistoryTypes HT ON H.PostHistoryTypeId = HT.Id 
+                  WHERE H.PostId = P.Id) 
+        END AS HistoryTypes
+    FROM 
+        TopPosts T
+    JOIN 
+        UserStatistics U ON T.OwnerUserId = U.UserId
+    LEFT JOIN 
+        Posts P ON T.PostId = P.Id
+    WHERE 
+        U.Reputation > 1000 AND 
+        U.BadgeCount > 5 
+)
+SELECT 
+    FP.UserId,
+    FP.Title,
+    FP.Score,
+    FP.ViewCount,
+    FP.Reputation,
+    FP.BadgeCount,
+    FP.TotalBountyAmount,
+    CASE 
+        WHEN FP.CommentCount > 5 THEN 'Many Comments' 
+        ELSE 'Few Comments' 
+    END AS CommentCategory,
+    NULLIF(FP.HistoryTypes, 'None') AS SignificantHistoryEvents
+FROM 
+    FilteredPosts FP
+WHERE 
+    EXISTS (
+        SELECT 1 
+        FROM Votes V 
+        WHERE V.PostId = FP.PostId AND 
+              (V.VoteTypeId = 1 OR V.VoteTypeId = 2) 
+    )
+ORDER BY 
+    FP.Reputation DESC, 
+    FP.Score DESC
+OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;

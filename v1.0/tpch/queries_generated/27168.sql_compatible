@@ -1,0 +1,33 @@
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    CONCAT(s.s_name, ' ', s.s_address, ' ', s.s_phone) AS supplier_details,
+    SUM(ps.ps_availqty) AS total_available_quantity,
+    MAX(l.l_tax) AS max_tax,
+    AVG(l.l_extendedprice) AS avg_extended_price,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    STRING_AGG(DISTINCT c.c_mktsegment, ', ' ORDER BY c.c_mktsegment) AS market_segments,
+    ROW_NUMBER() OVER (PARTITION BY p.p_partkey ORDER BY o.o_orderdate DESC) AS order_rank
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_size IN (10, 20, 30)
+    AND o.o_orderstatus = 'O'
+    AND s.s_acctbal > 1000.00
+GROUP BY 
+    p.p_partkey, p.p_name, s.s_name, s.s_address, s.s_phone
+HAVING 
+    total_available_quantity > 50
+ORDER BY 
+    total_orders DESC, avg_extended_price DESC;

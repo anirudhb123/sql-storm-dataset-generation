@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS Author,
+        u.Reputation,
+        p.CreationDate,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.CreationDate DESC) AS TagRank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1
+        AND p.Tags IS NOT NULL
+),
+PopularTags AS (
+    SELECT 
+        Tags,
+        COUNT(*) AS PostCount
+    FROM 
+        RankedPosts
+    WHERE 
+        TagRank <= 5
+    GROUP BY 
+        Tags
+    HAVING 
+        COUNT(*) > 10
+),
+HighlightedPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.Body,
+        rp.Author,
+        rp.Reputation,
+        rp.CreationDate,
+        rp.Tags
+    FROM 
+        RankedPosts rp
+    JOIN 
+        PopularTags pt ON rp.Tags = pt.Tags
+)
+SELECT 
+    hp.PostId,
+    hp.Title,
+    hp.Body,
+    hp.Author,
+    hp.Reputation,
+    FORMAT(hp.CreationDate, 'DD Mon YYYY HH24:MI:SS') AS FormattedCreationDate,
+    pt.PostCount
+FROM 
+    HighlightedPosts hp
+JOIN 
+    PopularTags pt ON hp.Tags = pt.Tags
+ORDER BY 
+    pt.PostCount DESC, hp.CreationDate DESC
+FETCH FIRST 10 ROWS ONLY;

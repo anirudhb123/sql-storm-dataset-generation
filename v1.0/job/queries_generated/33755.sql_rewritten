@@ -1,0 +1,88 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        0 AS level
+    FROM 
+        aka_title m
+    WHERE 
+        m.kind_id = (SELECT id FROM kind_type WHERE kind = 'movie')
+    
+    UNION ALL
+    
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    JOIN 
+        aka_title m ON ml.linked_movie_id = m.id
+    WHERE 
+        mh.level < 3 
+),
+movie_info_combined AS (
+    SELECT 
+        m.movie_id,
+        STRING_AGG(DISTINCT mi.info, ', ') AS movie_information
+    FROM 
+        movie_info mi
+    JOIN 
+        movie_hierarchy mh ON mi.movie_id = mh.movie_id
+    GROUP BY 
+        m.movie_id
+),
+actor_roles AS (
+    SELECT 
+        a.name AS actor_name,
+        r.role,
+        COUNT(*) AS role_count
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        a.name, r.role
+    HAVING 
+        COUNT(*) > 1 
+),
+movie_keywords AS (
+    SELECT 
+        m.title,
+        STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+    FROM 
+        aka_title m
+    JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.title
+)
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    COALESCE(mic.movie_information, 'No Info Available') AS movie_info,
+    ak.actor_name,
+    ak.role,
+    ak.role_count,
+    mk.keywords
+FROM 
+    movie_hierarchy mh
+LEFT JOIN 
+    movie_info_combined mic ON mh.movie_id = mic.movie_id
+LEFT JOIN 
+    actor_roles ak ON ak.role_count > 1 AND ak.actor_name IS NOT NULL
+LEFT JOIN 
+    movie_keywords mk ON mh.title = mk.title
+ORDER BY 
+    mh.production_year DESC, mh.title;

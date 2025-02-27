@@ -1,0 +1,66 @@
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.ViewCount,
+        p.Score,
+        p.Tags,
+        ARRAY_LENGTH(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><'), 1) AS TagCount,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS UserPostRank
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 
+),
+UserReputation AS (
+    SELECT
+        u.Id AS UserId,
+        u.Reputation,
+        u.DisplayName,
+        COALESCE(SUM(b.Class = 1), 0) AS GoldBadges,
+        COALESCE(SUM(b.Class = 2), 0) AS SilverBadges,
+        COALESCE(SUM(b.Class = 3), 0) AS BronzeBadges
+    FROM
+        Users u
+    LEFT JOIN
+        Badges b ON u.Id = b.UserId
+    GROUP BY
+        u.Id, u.DisplayName, u.Reputation
+),
+PopularTags AS (
+    SELECT
+        unnest(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS Tag,
+        COUNT(*) AS TagCount
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1 
+    GROUP BY
+        Tag
+    ORDER BY
+        TagCount DESC
+    LIMIT 10
+)
+SELECT
+    up.DisplayName,
+    up.Reputation,
+    up.GoldBadges,
+    up.SilverBadges,
+    up.BronzeBadges,
+    rp.Title,
+    rp.CreationDate,
+    rp.ViewCount,
+    rp.Score,
+    rp.TagCount,
+    pt.Tag AS PopularTag
+FROM
+    RankedPosts rp
+JOIN
+    UserReputation up ON rp.OwnerUserId = up.UserId
+JOIN
+    PopularTags pt ON rp.Tags LIKE '%' || pt.Tag || '%'
+WHERE
+    rp.UserPostRank = 1 
+ORDER BY
+    up.Reputation DESC, rp.ViewCount DESC;

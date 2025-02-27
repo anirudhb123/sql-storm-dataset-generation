@@ -1,0 +1,100 @@
+
+WITH RECURSIVE Inventory_CTE AS (
+    SELECT 
+        inv_date_sk, 
+        inv_item_sk, 
+        inv_warehouse_sk, 
+        inv_quantity_on_hand, 
+        0 AS level
+    FROM inventory 
+    WHERE inv_quantity_on_hand > 0
+
+    UNION ALL
+
+    SELECT 
+        i.inv_date_sk, 
+        i.inv_item_sk, 
+        i.inv_warehouse_sk, 
+        i.inv_quantity_on_hand, 
+        ic.level + 1 
+    FROM inventory i
+    JOIN Inventory_CTE ic ON i.inv_item_sk = ic.inv_item_sk 
+    WHERE i.inv_quantity_on_hand > ic.inv_quantity_on_hand
+    AND ic.level < 5
+),
+Sales_Summary AS (
+    SELECT 
+        c.c_customer_id, 
+        SUM(ws.ws_sales_price) AS total_sales, 
+        SUM(ws.ws_quantity) AS total_quantity,
+        COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    WHERE ws.ws_sold_date_sk BETWEEN 1000 AND 2000
+    GROUP BY c.c_customer_id
+),
+Demographics_Summary AS (
+    SELECT 
+        cd.cd_gender,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cd.cd_dep_count) AS avg_dep_count
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender IS NOT NULL
+    GROUP BY cd.cd_gender
+),
+Return_Reason AS (
+    SELECT 
+        sr.sr_reason_sk,
+        r.r_reason_desc,
+        SUM(sr.sr_return_quantity) AS total_returned
+    FROM store_returns sr
+    JOIN reason r ON sr.sr_reason_sk = r.r_reason_sk
+    GROUP BY sr.sr_reason_sk, r.r_reason_desc
+),
+Aggregated_Data AS (
+    SELECT 
+        di.d_year,
+        SUM(ss.ss_net_profit) AS total_net_profit,
+        AVG(ss.ss_ext_sales_price) AS avg_sales_price,
+        COUNT(DISTINCT ss.ss_ticket_number) AS total_transactions,
+        SUM(ir.inv_quantity_on_hand) AS total_inventory
+    FROM store_sales ss
+    JOIN date_dim di ON ss.ss_sold_date_sk = di.d_date_sk
+    JOIN Inventory_CTE ir ON ir.inv_item_sk = ss.ss_item_sk
+    GROUP BY di.d_year
+)
+
+SELECT 
+    a.d_year,
+    a.total_net_profit,
+    a.avg_sales_price,
+    a.total_transactions,
+    a.total_inventory,
+    ds.gender_summary,
+    rr.total_returned
+FROM Aggregated_Data a
+LEFT JOIN (
+    SELECT 
+        'Male' AS gender_summary, 
+        SUM(customer_count) AS male_count 
+    FROM Demographics_Summary
+    WHERE cd_gender = 'M'
+    GROUP BY gender_summary
+    UNION ALL
+    SELECT 
+        'Female' AS gender_summary, 
+        SUM(customer_count) AS female_count 
+    FROM Demographics_Summary 
+    WHERE cd_gender = 'F'
+    GROUP BY gender_summary
+) ds ON ds.gender_summary IN ('Male', 'Female')
+FULL OUTER JOIN (
+    SELECT 
+        r.r_reason_desc AS reason_summary,
+        SUM(total_returned) AS total_returns
+    FROM Return_Reason r
+    GROUP BY r.r_reason_desc
+) rr ON TRUE
+WHERE a.total_net_profit IS NOT NULL
+ORDER BY a.d_year, a.total_net_profit DESC;

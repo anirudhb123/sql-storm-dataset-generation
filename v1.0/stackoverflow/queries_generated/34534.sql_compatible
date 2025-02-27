@@ -1,0 +1,116 @@
+
+WITH RecursiveUserStats AS (
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        1 AS Level
+    FROM 
+        Users U
+    WHERE 
+        U.Reputation >= 1000
+    
+    UNION ALL
+    
+    SELECT 
+        U.Id AS UserId,
+        U.DisplayName,
+        U.Reputation,
+        U.CreationDate,
+        U.LastAccessDate,
+        U.Views,
+        U.UpVotes,
+        U.DownVotes,
+        R.Level + 1
+    FROM 
+        Users U
+    INNER JOIN 
+        RecursiveUserStats R ON U.Id = R.UserId
+    WHERE 
+        U.Reputation BETWEEN R.Reputation - 100 AND R.Reputation + 100
+),
+
+PostHistoryCTE AS (
+    SELECT 
+        PH.PostId,
+        PH.PostHistoryTypeId,
+        PH.UserId,
+        PH.CreationDate,
+        PH.Comment,
+        ROW_NUMBER() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS RowNum
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (10, 11, 12, 13, 14)
+),
+
+PostStats AS (
+    SELECT
+        P.Id AS PostId,
+        P.Title,
+        COUNT(COM.Id) AS CommentCount,
+        COALESCE(V.UpVoteCount, 0) AS UpVoteCount,
+        COALESCE(V.DownVoteCount, 0) AS DownVoteCount,
+        COALESCE(PT.Name, 'unknown') AS PostType,
+        P.CreationDate,
+        PHC.NewestCloseDate
+    FROM 
+        Posts P
+    LEFT JOIN 
+        Comments COM ON P.Id = COM.PostId
+    LEFT JOIN 
+        (
+            SELECT 
+                PostId,
+                SUM(CASE WHEN VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVoteCount,
+                SUM(CASE WHEN VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVoteCount
+            FROM 
+                Votes
+            GROUP BY 
+                PostId
+        ) V ON P.Id = V.PostId
+    LEFT JOIN 
+        (SELECT PostId, MAX(CreationDate) AS NewestCloseDate 
+         FROM PostHistoryCTE 
+         WHERE PostHistoryTypeId = 10 
+         GROUP BY PostId) PHC ON P.Id = PHC.PostId
+    LEFT JOIN 
+        PostTypes PT ON P.PostTypeId = PT.Id
+    WHERE 
+        P.CreationDate > DATEADD('year', -1, DATE '2024-10-01')
+    GROUP BY 
+        P.Id, P.Title, V.UpVoteCount, V.DownVoteCount, PT.Name, P.CreationDate, PHC.NewestCloseDate
+)
+
+SELECT 
+    U.UserId,
+    U.DisplayName,
+    U.Reputation,
+    U.Views,
+    P.PostId,
+    P.Title,
+    P.CommentCount,
+    P.UpVoteCount,
+    P.DownVoteCount,
+    P.PostType,
+    P.CreationDate,
+    P.NewestCloseDate,
+    R.Level
+FROM 
+    RecursiveUserStats R
+INNER JOIN 
+    PostStats P ON R.UserId = P.UserId
+INNER JOIN 
+    Users U ON P.UserId = U.Id
+WHERE 
+    P.CommentCount > 0
+    AND P.NewestCloseDate IS NOT NULL
+    AND R.Level <= 3
+ORDER BY 
+    U.Reputation DESC, P.CreationDate DESC
+LIMIT 100;

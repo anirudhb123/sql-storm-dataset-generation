@@ -1,0 +1,57 @@
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        COUNT(DISTINCT ci.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY COUNT(DISTINCT ci.person_id) DESC) AS rank
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        cast_info ci ON at.movie_id = ci.movie_id
+    GROUP BY 
+        at.title, at.production_year
+),
+TitlesWithKeywords AS (
+    SELECT 
+        at.id AS movie_id,
+        array_agg(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title at
+    LEFT JOIN 
+        movie_keyword mk ON at.movie_id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        at.id
+),
+FilteredMovies AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        rw.keywords,
+        rm.cast_count
+    FROM 
+        RankedMovies rm
+    JOIN 
+        TitlesWithKeywords rw ON rm.movie_id = rw.movie_id
+    WHERE 
+        rm.rank <= 5 AND (rm.cast_count IS NOT NULL)
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.cast_count,
+    CASE 
+        WHEN fm.keywords IS NULL THEN 'No keywords available'
+        ELSE STRING_AGG(fm.keywords, ', ')
+    END AS keyword_list
+FROM 
+    FilteredMovies fm
+LEFT JOIN 
+    movie_info mi ON fm.movie_id = mi.movie_id
+WHERE 
+    mi.info_type_id = (SELECT id FROM info_type WHERE info = 'Release Date')
+GROUP BY 
+    fm.title, fm.production_year, fm.cast_count
+ORDER BY 
+    fm.production_year DESC, fm.cast_count DESC;

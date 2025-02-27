@@ -1,0 +1,47 @@
+WITH TagCounts AS (
+    SELECT 
+        tag.TagName,
+        COUNT(*) AS PostCount,
+        ARRAY_AGG(DISTINCT p.Title) AS PostTitles,
+        SUM(p.ViewCount) AS TotalViews
+    FROM Tags tag
+    LEFT JOIN Posts p ON p.Tags LIKE '%' || tag.TagName || '%'
+    GROUP BY tag.TagName
+),
+HighViewPosts AS (
+    SELECT 
+        ph.PostId,
+        COUNT(*) AS HistoryCount
+    FROM PostHistory ph
+    JOIN Posts p ON p.Id = ph.PostId
+    WHERE p.ViewCount > 1000
+    GROUP BY ph.PostId
+),
+UserBadges AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(DISTINCT b.Id) AS BadgeCount,
+        SUM(CASE WHEN b.Class = 1 THEN 1 ELSE 0 END) AS GoldBadges,
+        SUM(CASE WHEN b.Class = 2 THEN 1 ELSE 0 END) AS SilverBadges,
+        SUM(CASE WHEN b.Class = 3 THEN 1 ELSE 0 END) AS BronzeBadges
+    FROM Users u
+    LEFT JOIN Badges b ON u.Id = b.UserId
+    GROUP BY u.Id, u.DisplayName
+)
+SELECT 
+    tc.TagName,
+    tc.PostCount,
+    tc.PostTitles,
+    tc.TotalViews,
+    u.DisplayName AS TopUser,
+    ub.BadgeCount,
+    ub.GoldBadges,
+    ub.SilverBadges,
+    ub.BronzeBadges
+FROM TagCounts tc
+JOIN HighViewPosts hvp ON hvp.PostId IN (SELECT unnest(tc.PostTitles))
+JOIN UserBadges ub ON ub.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = ANY(tc.PostTitles) LIMIT 1)
+JOIN Users u ON u.Id = ub.UserId
+ORDER BY tc.TotalViews DESC, tc.PostCount DESC
+LIMIT 10;

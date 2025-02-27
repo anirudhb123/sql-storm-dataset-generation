@@ -1,0 +1,65 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        u.DisplayName AS Author,
+        COUNT(DISTINCT c.Id) AS CommentCount,
+        COUNT(DISTINCT a.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.ViewCount DESC) AS RankByTag
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND a.PostTypeId = 2
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id, p.Title, p.Body, p.CreationDate, p.ViewCount, u.DisplayName
+),
+
+FilteredPosts AS (
+    SELECT 
+        rp.*,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS TagsList
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostsTags pt ON rp.PostId = pt.PostId 
+    LEFT JOIN 
+        Tags t ON pt.TagId = t.Id
+    WHERE 
+        rp.RankByTag <= 5 
+    GROUP BY 
+        rp.PostId, rp.Title, rp.Body, rp.CreationDate, rp.ViewCount, rp.Author, rp.CommentCount, rp.AnswerCount
+)
+
+SELECT 
+    fp.PostId,
+    fp.Title,
+    fp.Body,
+    fp.CreationDate,
+    fp.ViewCount,
+    fp.Author,
+    fp.CommentCount,
+    fp.AnswerCount,
+    fp.TagsList,
+    COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+    COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+    COALESCE(COUNT(DISTINCT b.Id), 0) AS BadgeCount
+FROM 
+    FilteredPosts fp
+LEFT JOIN 
+    Votes v ON fp.PostId = v.PostId
+LEFT JOIN 
+    Badges b ON b.UserId = (SELECT OwnerUserId FROM Posts WHERE Id = fp.PostId)
+GROUP BY 
+    fp.PostId, fp.Title, fp.Body, fp.CreationDate, fp.ViewCount, fp.Author, fp.CommentCount, fp.AnswerCount, fp.TagsList
+ORDER BY 
+    fp.ViewCount DESC, fp.CreationDate DESC
+LIMIT 50;

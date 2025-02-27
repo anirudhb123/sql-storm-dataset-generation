@@ -1,0 +1,64 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_orderdate DESC) AS rn,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) OVER (PARTITION BY o.o_orderkey) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        AVG(ro.total_revenue) AS avg_order_value
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        RankedOrders ro ON o.o_orderkey = ro.o_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+SupplierPartDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_availqty) AS total_available_quantity,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+)
+SELECT 
+    c.c_custkey AS cas_total_spender,
+    c.c_name,
+    CASE 
+        WHEN c.total_spent > 1000 THEN 'High Value Customer'
+        WHEN c.total_spent BETWEEN 500 AND 1000 THEN 'Medium Value Customer'
+        ELSE 'Low Value Customer'
+    END AS customer_segment,
+    sp.s_name AS supplier,
+    sp.total_available_quantity,
+    sp.avg_supply_cost,
+    ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY sp.avg_supply_cost DESC) AS supplier_rank
+FROM 
+    CustomerOrderSummary c
+LEFT JOIN 
+    SupplierPartDetails sp ON c.order_count > 0
+WHERE 
+    c.total_spent IS NOT NULL
+    AND sp.total_available_quantity IS NOT NULL
+ORDER BY 
+    c.total_spent DESC, 
+    supplier_rank;

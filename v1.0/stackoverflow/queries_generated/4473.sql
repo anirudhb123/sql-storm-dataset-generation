@@ -1,0 +1,46 @@
+WITH UserStatistics AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        u.Reputation,
+        COALESCE(SUM(v.VoteTypeId = 2), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3), 0) AS DownVotes,
+        COALESCE(COUNT(DISTINCT p.Id), 0) AS PostCount,
+        COALESCE(COUNT(DISTINCT c.Id), 0) AS CommentCount
+    FROM Users u
+    LEFT JOIN Posts p ON u.Id = p.OwnerUserId
+    LEFT JOIN Votes v ON p.Id = v.PostId
+    LEFT JOIN Comments c ON p.Id = c.PostId
+    GROUP BY u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        Reputation,
+        UpVotes,
+        DownVotes,
+        PostCount,
+        CommentCount,
+        RANK() OVER (ORDER BY Reputation DESC) AS RankReputation
+    FROM UserStatistics
+)
+SELECT 
+    tu.DisplayName,
+    tu.Reputation,
+    tu.UpVotes,
+    tu.DownVotes,
+    tu.PostCount,
+    tu.CommentCount,
+    (CASE 
+        WHEN tu.UpVotes + tu.DownVotes > 0 
+        THEN ROUND(100.0 * tu.UpVotes / NULLIF(tu.UpVotes + tu.DownVotes, 0), 2)
+        ELSE 0 
+     END) AS UpvotePercentage,
+    (SELECT STRING_AGG(DISTINCT t.TagName, ', ') 
+     FROM Posts p 
+     JOIN unnest(string_to_array(p.Tags, '<>')) AS t ON t = p.Tags 
+     WHERE p.OwnerUserId = tu.UserId) AS AssociatedTags
+FROM TopUsers tu
+WHERE tu.RankReputation <= 10
+ORDER BY tu.RankReputation;

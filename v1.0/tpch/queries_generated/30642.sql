@@ -1,0 +1,44 @@
+WITH RECURSIVE TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+    HAVING SUM(ps.ps_supplycost * ps.ps_availqty) > 100000
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_orderdate, o.o_totalprice, 
+           ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS rn,
+           c.c_nationkey
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+),
+LineItemDetails AS (
+    SELECT l.l_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales, 
+           COUNT(DISTINCT l.l_partkey) AS part_count
+    FROM lineitem l
+    GROUP BY l.l_orderkey
+),
+FinalSummary AS (
+    SELECT os.o_orderkey, os.o_orderdate, os.o_totalprice, 
+           ld.total_sales, ld.part_count, ts.s_name
+    FROM OrderSummary os
+    LEFT JOIN LineItemDetails ld ON os.o_orderkey = ld.l_orderkey
+    LEFT JOIN TopSuppliers ts ON ts.s_suppkey IN (
+        SELECT ps.ps_suppkey 
+        FROM partsupp ps 
+        WHERE ps.ps_partkey IN (
+            SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey
+        )
+    )
+)
+SELECT r.r_name, COUNT(fs.o_orderkey) AS total_orders, 
+       AVG(fs.total_sales) AS avg_sales, 
+       SUM(fs.part_count) AS total_parts
+FROM FinalSummary fs
+JOIN nation n ON fs.s_nationkey = n.n_nationkey
+JOIN region r ON n.n_regionkey = r.r_regionkey
+WHERE fs.o_orderdate >= '2023-01-01' 
+      AND fs.o_orderdate < '2023-12-31'
+GROUP BY r.r_name
+ORDER BY total_orders DESC, avg_sales DESC
+LIMIT 10;

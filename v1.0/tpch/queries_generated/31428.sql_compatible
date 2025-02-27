@@ -1,0 +1,66 @@
+
+WITH RECURSIVE CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderstatus,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY c.c_custkey ORDER BY o.o_orderdate DESC) AS order_rank
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+),
+
+OrderDetails AS (
+    SELECT 
+        co.c_custkey,
+        co.c_name,
+        COUNT(DISTINCT co.o_orderkey) AS order_count,
+        SUM(co.o_totalprice) AS total_spent,
+        SUM(CASE WHEN li.l_returnflag = 'R' THEN li.l_quantity ELSE 0 END) AS total_returns,
+        AVG(co.o_totalprice) OVER (PARTITION BY co.c_custkey) AS avg_order_value
+    FROM 
+        CustomerOrders co
+    LEFT JOIN 
+        lineitem li ON co.o_orderkey = li.l_orderkey
+    WHERE 
+        co.o_orderstatus = 'O'
+    GROUP BY 
+        co.c_custkey, co.c_name
+)
+
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    od.c_name,
+    od.order_count,
+    od.total_spent,
+    od.total_returns,
+    ROUND(od.total_spent / NULLIF(od.order_count, 0), 2) AS avg_spent_per_order,
+    CASE 
+        WHEN od.total_spent > 1000 THEN 'High'
+        WHEN od.total_spent BETWEEN 500 AND 1000 THEN 'Medium'
+        ELSE 'Low'
+    END AS spending_category
+FROM 
+    OrderDetails od
+JOIN 
+    supplier s ON s.s_acctbal >= 5000
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+WHERE 
+    od.total_spent IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM orders o 
+        WHERE o.o_orderkey = od.o_orderkey 
+        AND o.o_orderstatus = 'F'
+    )
+ORDER BY 
+    od.total_spent DESC;

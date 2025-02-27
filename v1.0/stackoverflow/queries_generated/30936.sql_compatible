@@ -1,0 +1,61 @@
+
+WITH RankedPosts AS (
+    SELECT
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.Score,
+        p.OwnerUserId,
+        ROW_NUMBER() OVER (PARTITION BY p.OwnerUserId ORDER BY p.CreationDate DESC) AS rn
+    FROM
+        Posts p
+    WHERE
+        p.PostTypeId = 1  
+),
+PostAnalytics AS (
+    SELECT
+        rp.PostId,
+        rp.Title,
+        rp.CreationDate,
+        rp.Score,
+        COALESCE(u.DisplayName, 'Anonymous') AS Author,
+        (SELECT COUNT(*) FROM Comments c WHERE c.PostId = rp.PostId) AS CommentCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 2) AS UpVoteCount,
+        (SELECT COUNT(*) FROM Votes v WHERE v.PostId = rp.PostId AND v.VoteTypeId = 3) AS DownVoteCount,
+        (SELECT COUNT(*) FROM PostHistory ph WHERE ph.PostId = rp.PostId AND ph.PostHistoryTypeId = 10) AS CloseCount
+    FROM
+        RankedPosts rp
+    LEFT JOIN Users u ON rp.OwnerUserId = u.Id
+)
+SELECT
+    pa.PostId,
+    pa.Title,
+    pa.CreationDate,
+    pa.Score,
+    pa.Author,
+    pa.CommentCount,
+    pa.UpVoteCount,
+    pa.DownVoteCount,
+    pa.CloseCount,
+    CASE
+        WHEN pa.CloseCount > 0 THEN 'Closed'
+        WHEN pa.Score > 20 THEN 'Popular'
+        ELSE 'Normal'
+    END AS PostStatus,
+    STRING_AGG(t.TagName, ', ') AS Tags
+FROM
+    PostAnalytics pa
+LEFT JOIN Posts p ON pa.PostId = p.Id
+LEFT JOIN LATERAL (
+    SELECT
+        t.TagName
+    FROM
+        UNNEST(SPLIT(p.Tags, '<>')) AS t(TagName)
+) AS t ON true
+WHERE
+    pa.rn = 1  
+GROUP BY
+    pa.PostId, pa.Title, pa.CreationDate, pa.Score, pa.Author, pa.CommentCount, pa.UpVoteCount, pa.DownVoteCount, pa.CloseCount
+ORDER BY
+    pa.Score DESC, pa.CreationDate
+LIMIT 100;

@@ -1,0 +1,69 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.title AS movie_title,
+        mt.production_year,
+        mt.kind_id,
+        RANK() OVER (PARTITION BY mt.kind_id ORDER BY mt.production_year DESC) AS rank_within_kind
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+), 
+
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+CastDetails AS (
+    SELECT 
+        ci.movie_id,
+        COUNT(DISTINCT ci.person_id) AS total_cast,
+        SUM(CASE 
+                WHEN r.role = 'Director' THEN 1 
+                ELSE 0 
+            END) AS director_count
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type r ON ci.role_id = r.id
+    GROUP BY 
+        ci.movie_id
+)
+
+SELECT 
+    rm.movie_title,
+    rm.production_year,
+    ct.kind AS movie_kind,
+    COALESCE(mk.keywords, 'No Keywords') AS movie_keywords,
+    cd.total_cast,
+    cd.director_count,
+    CASE 
+        WHEN cd.total_cast > 10 THEN 'Large Cast' 
+        ELSE 'Small Cast' 
+    END AS cast_size,
+    CASE 
+        WHEN rm.rank_within_kind = 1 THEN 'Latest in Kind' 
+        ELSE 'Not Latest in Kind' 
+    END AS movie_rank
+FROM 
+    RankedMovies rm
+JOIN 
+    kind_type ct ON rm.kind_id = ct.id
+LEFT JOIN 
+    MovieKeywords mk ON rm.id = mk.movie_id
+LEFT JOIN 
+    CastDetails cd ON rm.id = cd.movie_id
+WHERE 
+    rm.production_year >= 2000
+ORDER BY 
+    rm.production_year DESC, 
+    rm.movie_title ASC;

@@ -1,0 +1,77 @@
+WITH RecursiveMovieData AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ARRAY_AGG(DISTINCT c.name) AS cast_names,
+        COUNT(DISTINCT cm.company_id) AS production_company_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS row_num
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        aka_name c ON ci.person_id = c.person_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cp ON mc.company_id = cp.id
+    WHERE 
+        t.production_year IS NOT NULL 
+        AND t.title IS NOT NULL
+    GROUP BY 
+        t.id
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        cast_names,
+        production_company_count
+    FROM 
+        RecursiveMovieData 
+    WHERE 
+        production_company_count > 2
+),
+DiverseCast AS (
+    SELECT
+        movie_id,
+        COUNT(DISTINCT UNNEST(cast_names)) AS unique_cast_count,
+        STRING_AGG(DISTINCT UNNEST(cast_names), ', ') AS all_cast_names
+    FROM 
+        FilteredMovies
+    GROUP BY 
+        movie_id
+),
+FinalBenchmarkedData AS (
+    SELECT
+        f.title,
+        f.production_year,
+        f.production_company_count,
+        dc.unique_cast_count,
+        dc.all_cast_names
+    FROM 
+        FilteredMovies f
+    JOIN 
+        DiverseCast dc ON f.movie_id = dc.movie_id
+)
+SELECT 
+    f.*,
+    (CASE 
+        WHEN unique_cast_count > 10 THEN 'High diversity'
+        WHEN unique_cast_count > 5 THEN 'Medium diversity'
+        ELSE 'Low diversity'
+     END) AS cast_diversity,
+    (SELECT COUNT(*) FROM title WHERE production_year < 1990) AS pre_1990_movie_count,
+    COALESCE((SELECT AVG(production_year) FROM title WHERE production_year IS NOT NULL), -1) AS avg_production_year 
+FROM 
+    FinalBenchmarkedData f
+ORDER BY 
+    production_year DESC, 
+    title ASC
+LIMIT 50;
+
+-- This query generates insights on movies with diverse casts and multiple production companies, 
+-- while simultaneously performing performance benchmarking metrics through CTEs, window functions,
+-- and sub-queries with NULL logic handling.

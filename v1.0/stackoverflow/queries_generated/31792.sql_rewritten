@@ -1,0 +1,74 @@
+WITH RECURSIVE UserReputation AS (
+    SELECT 
+        U.Id AS UserId, 
+        U.Reputation, 
+        U.DisplayName,
+        0 AS Level
+    FROM Users U
+    WHERE U.Reputation > 1000
+    
+    UNION ALL
+
+    SELECT 
+        U.Id, 
+        U.Reputation, 
+        U.DisplayName,
+        UR.Level + 1
+    FROM Users U
+    JOIN UserReputation UR ON U.Reputation > UR.Reputation
+    WHERE UR.Level < 3
+),
+PostVoteSummary AS (
+    SELECT 
+        P.Id AS PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes,
+        COUNT(V.Id) AS TotalVotes,
+        P.OwnerUserId,
+        (SELECT U.DisplayName FROM Users U WHERE U.Id = P.OwnerUserId) AS OwnerDisplayName
+    FROM Posts P
+    LEFT JOIN Votes V ON P.Id = V.PostId
+    WHERE P.CreationDate >= cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '30 days'
+    GROUP BY P.Id, P.OwnerUserId
+),
+PostHistorySummary AS (
+    SELECT 
+        PH.PostId,
+        COUNT(PH.Id) AS EditCount,
+        MAX(PH.CreationDate) AS LastEditDate,
+        STRING_AGG(DISTINCT PHT.Name, ', ') AS EditTypes
+    FROM PostHistory PH
+    JOIN PostHistoryTypes PHT ON PH.PostHistoryTypeId = PHT.Id
+    GROUP BY PH.PostId
+),
+UserBadgeSummary AS (
+    SELECT 
+        U.Id AS UserId,
+        COUNT(B.Id) AS BadgeCount,
+        STRING_AGG(B.Name, ', ') AS BadgeNames
+    FROM Users U
+    LEFT JOIN Badges B ON U.Id = B.UserId
+    GROUP BY U.Id
+)
+
+SELECT 
+    UR.UserId,
+    UR.DisplayName,
+    UR.Reputation,
+    UPS.UpVotes,
+    UPS.DownVotes,
+    UPS.TotalVotes,
+    PHS.EditCount,
+    PHS.LastEditDate,
+    UBS.BadgeCount,
+    UBS.BadgeNames
+FROM UserReputation UR
+LEFT JOIN PostVoteSummary UPS ON UR.UserId = UPS.OwnerUserId
+LEFT JOIN PostHistorySummary PHS ON PHS.PostId IN (
+    SELECT Id FROM Posts WHERE OwnerUserId = UR.UserId
+)
+LEFT JOIN UserBadgeSummary UBS ON UR.UserId = UBS.UserId
+WHERE 
+    (UPS.UpVotes > 10 OR UPS.DownVotes IS NULL)
+    AND UBS.BadgeCount > 1
+ORDER BY UR.Reputation DESC, UR.DisplayName ASC;

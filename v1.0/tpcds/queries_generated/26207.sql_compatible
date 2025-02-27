@@ -1,0 +1,56 @@
+
+WITH CustomerInfo AS (
+    SELECT 
+        c.c_customer_sk,
+        CONCAT(c.c_salutation, ' ', c.c_first_name, ' ', c.c_last_name) AS full_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ca.ca_city,
+        ca.ca_state,
+        cd.cd_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+AveragePurchase AS (
+    SELECT 
+        ci.ca_city,
+        ci.ca_state,
+        AVG(ci.cd_purchase_estimate) AS avg_purchase
+    FROM 
+        CustomerInfo ci
+    GROUP BY 
+        ci.ca_city, ci.ca_state
+),
+CityAnalysis AS (
+    SELECT 
+        ci.full_name,
+        ci.ca_city,
+        ci.ca_state,
+        ci.cd_gender,
+        ci.cd_marital_status,
+        a.avg_purchase
+    FROM 
+        CustomerInfo ci
+    JOIN 
+        AveragePurchase a ON ci.ca_city = a.ca_city AND ci.ca_state = a.ca_state
+    WHERE 
+        ci.cd_purchase_estimate > a.avg_purchase
+)
+SELECT 
+    ca.ca_city AS location,
+    COUNT(*) AS count_customers,
+    STRING_AGG(ci.full_name, ', ') AS customer_names,
+    AVG(a.avg_purchase) AS avg_purchase_estimate
+FROM 
+    CityAnalysis ci
+JOIN 
+    customer_address ca ON ci.ca_city = ca.ca_city AND ci.ca_state = ca.ca_state
+GROUP BY 
+    ca.ca_city, ci.ca_state
+ORDER BY 
+    count_customers DESC;

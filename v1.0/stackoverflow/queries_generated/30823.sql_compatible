@@ -1,0 +1,66 @@
+
+WITH RecursivePostCTE AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.OwnerUserId,
+        p.CreationDate,
+        0 AS Level
+    FROM 
+        Posts p
+    WHERE 
+        p.PostTypeId = 1  
+
+    UNION ALL
+
+    SELECT 
+        a.Id AS PostId,
+        a.Title,
+        a.OwnerUserId,
+        a.CreationDate,
+        rp.Level + 1
+    FROM 
+        Posts a
+    INNER JOIN 
+        RecursivePostCTE rp ON rp.PostId = a.ParentId
+    WHERE 
+        a.PostTypeId = 2  
+)
+SELECT 
+    p.Title AS QuestionTitle,
+    u.DisplayName AS UserDisplayName,
+    COUNT(a.Id) AS AnswerCount,
+    AVG(v.BountyAmount) AS AverageBounty,
+    STRING_AGG(t.TagName, ', ') AS Tags,
+    MAX(COALESCE(c.Score, 0)) AS HighestCommentScore,
+    DATE_TRUNC('month', p.CreationDate) AS Month,
+    ROW_NUMBER() OVER (PARTITION BY DATE_TRUNC('month', p.CreationDate) ORDER BY p.CreationDate DESC) AS MonthRank
+FROM 
+    RecursivePostCTE p
+LEFT JOIN 
+    Users u ON p.OwnerUserId = u.Id
+LEFT JOIN 
+    Posts a ON a.ParentId = p.PostId  
+LEFT JOIN 
+    Votes v ON v.PostId = p.PostId AND v.VoteTypeId IN (8, 9)  
+LEFT JOIN 
+    Comments c ON c.PostId = p.PostId  
+LEFT JOIN 
+    ( 
+        SELECT 
+            t.TagName,
+            t.ExcerptPostId 
+        FROM 
+            Tags t 
+    ) t ON t.ExcerptPostId = p.PostId
+WHERE 
+    u.Reputation IS NOT NULL
+GROUP BY 
+    p.Title, 
+    u.DisplayName, 
+    DATE_TRUNC('month', p.CreationDate)
+HAVING 
+    COUNT(a.Id) > 0  
+ORDER BY 
+    Month DESC, 
+    AverageBounty DESC;

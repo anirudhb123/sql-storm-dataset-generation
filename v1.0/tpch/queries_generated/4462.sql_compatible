@@ -1,0 +1,76 @@
+
+WITH SupplierSummary AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        SUM(ps.ps_availqty) AS total_avail_qty, 
+        AVG(ps.ps_supplycost) AS avg_supply_cost,
+        COUNT(DISTINCT p.p_partkey) AS part_count
+    FROM 
+        supplier s 
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey 
+    LEFT JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey, 
+        c.c_name, 
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c 
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        ss.total_avail_qty,
+        ss.avg_supply_cost,
+        RANK() OVER (ORDER BY ss.total_avail_qty DESC) AS supplier_rank
+    FROM 
+        SupplierSummary ss
+    JOIN 
+        supplier s ON ss.s_suppkey = s.s_suppkey
+    WHERE 
+        ss.total_avail_qty > 0
+),
+OrderLineArea AS (
+    SELECT 
+        l.l_orderkey,
+        l.l_partkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY l.l_orderkey ORDER BY l.l_linenumber) AS line_number
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey, l.l_partkey
+)
+SELECT 
+    c.c_name AS customer_name,
+    co.total_orders,
+    co.total_spent,
+    COUNT(DISTINCT ra.supplier_rank) AS supplier_rank_count,
+    SUM(ola.revenue) AS total_revenue,
+    SUM(CASE WHEN ola.line_number = 1 THEN ola.revenue ELSE 0 END) AS first_line_revenue
+FROM 
+    CustomerOrders co 
+JOIN 
+    OrderLineArea ola ON co.total_orders > 0
+JOIN 
+    RankedSuppliers ra ON ra.total_avail_qty > 100
+WHERE 
+    co.total_spent > (SELECT AVG(total_spent) FROM CustomerOrders)
+GROUP BY 
+    c.c_name, co.total_orders, co.total_spent
+HAVING 
+    COUNT(DISTINCT ra.s_suppkey) > 2
+ORDER BY 
+    total_revenue DESC, customer_name;

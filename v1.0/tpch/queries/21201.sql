@@ -1,0 +1,56 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rnk
+    FROM 
+        orders o
+), SupplierRevenue AS (
+    SELECT 
+        ps.ps_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    JOIN 
+        partsupp ps ON l.l_partkey = ps.ps_partkey
+    GROUP BY ps.ps_suppkey
+), TopSuppliers AS (
+    SELECT 
+        sr.ps_suppkey,
+        sr.total_revenue,
+        RANK() OVER (ORDER BY sr.total_revenue DESC) AS rev_rank
+    FROM 
+        SupplierRevenue sr
+)
+SELECT 
+    o.o_orderstatus AS order_status,
+    COALESCE(ts.ps_suppkey, -1) AS supplier_key,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    SUM(o.o_totalprice) AS total_order_value,
+    MAX(o.o_orderdate) AS latest_order_date,
+    MIN(o.o_orderdate) AS earliest_order_date,
+    CASE 
+        WHEN SUM(o.o_totalprice) > 100000 THEN 'High Value'
+        ELSE 'Low Value'
+    END AS value_category,
+    STRING_AGG(DISTINCT n.n_name, ', ') AS nations_served
+FROM 
+    RankedOrders o
+LEFT JOIN 
+    TopSuppliers ts ON ts.rev_rank <= 5
+LEFT JOIN 
+    supplier s ON ts.ps_suppkey = s.s_suppkey
+LEFT JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+WHERE 
+    (o.o_orderstatus = 'O' OR o.o_orderstatus IS NULL)
+    AND (o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31' OR o.o_orderdate IS NULL)
+GROUP BY 
+    o.o_orderstatus, ts.ps_suppkey
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 10
+ORDER BY 
+    order_count DESC, total_order_value DESC;

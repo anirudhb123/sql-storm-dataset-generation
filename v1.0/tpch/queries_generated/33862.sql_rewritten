@@ -1,0 +1,45 @@
+WITH RECURSIVE TotalRevenue AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderstatus = 'F'
+    GROUP BY o.o_orderkey
+    UNION ALL
+    SELECT o.o_orderkey, revenue + COALESCE(NULLIF(ps.ps_supplycost, 0), 0) as revenue
+    FROM orders o
+    JOIN partsupp ps ON o.o_orderkey = ps.ps_partkey
+    WHERE o.o_orderkey IN (
+        SELECT o_orderkey
+        FROM orders
+        WHERE o_orderdate < cast('1998-10-01' as date) - INTERVAL '1 YEAR'
+    )
+),
+SupplierRank AS (
+    SELECT s.s_suppkey, s.s_name, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supplycost,
+           ROW_NUMBER() OVER (ORDER BY SUM(ps.ps_supplycost * ps.ps_availqty) DESC) AS rank
+    FROM supplier s
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY s.s_suppkey, s.s_name
+),
+NationsWithSuppliers AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+)
+SELECT
+    r.r_name AS region,
+    n.n_name AS nation,
+    COALESCE(s.total_supplycost, 0) AS total_supplycost,
+    COALESCE(n.supplier_count, 0) AS total_suppliers,
+    TRUNCATE(SUM(tr.revenue), 2) AS total_revenue,
+    CASE
+        WHEN SUM(tr.revenue) IS NULL THEN 'No Revenue'
+        ELSE 'Revenue Exists'
+    END AS revenue_status
+FROM region r
+LEFT JOIN nationsWithSuppliers n ON r.r_regionkey = n.n_nationkey
+LEFT JOIN SupplierRank s ON n.supplier_count = s.rank
+LEFT JOIN TotalRevenue tr ON s.s_suppkey = tr.o_orderkey
+GROUP BY r.r_name, n.n_name, s.total_supplycost, n.supplier_count
+ORDER BY total_revenue DESC, region, nation;

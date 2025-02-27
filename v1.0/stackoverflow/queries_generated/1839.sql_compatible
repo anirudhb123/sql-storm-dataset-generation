@@ -1,0 +1,69 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        P.Id,
+        P.Title,
+        P.CreationDate,
+        P.Score,
+        U.DisplayName AS OwnerName,
+        COUNT(A.Id) AS AnswerCount,
+        ROW_NUMBER() OVER (PARTITION BY U.Id ORDER BY P.Score DESC) AS UserPostRank
+    FROM 
+        Posts P
+    JOIN 
+        Users U ON P.OwnerUserId = U.Id
+    LEFT JOIN 
+        Posts A ON P.Id = A.ParentId
+    WHERE 
+        P.PostTypeId = 1 
+        AND P.CreationDate >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    GROUP BY 
+        P.Id, P.Title, P.CreationDate, P.Score, U.DisplayName
+),
+AggregatedVotes AS (
+    SELECT 
+        PV.PostId,
+        SUM(CASE WHEN V.VoteTypeId = 2 THEN 1 ELSE 0 END) AS UpVotes,
+        SUM(CASE WHEN V.VoteTypeId = 3 THEN 1 ELSE 0 END) AS DownVotes
+    FROM 
+        Votes V
+    JOIN 
+        Posts PV ON V.PostId = PV.Id
+    GROUP BY 
+        PV.PostId
+),
+PostHistoryDetails AS (
+    SELECT 
+        PH.PostId,
+        PH.UserDisplayName,
+        PH.Text,
+        PH.CreationDate AS EditDate,
+        PH.Comment,
+        RANK() OVER (PARTITION BY PH.PostId ORDER BY PH.CreationDate DESC) AS EditRank
+    FROM 
+        PostHistory PH
+    WHERE 
+        PH.PostHistoryTypeId IN (4, 5, 6) 
+)
+SELECT 
+    RP.Title,
+    RP.OwnerName,
+    RP.CreationDate,
+    RP.Score,
+    COALESCE(AV.UpVotes, 0) AS UpVotes,
+    COALESCE(AV.DownVotes, 0) AS DownVotes,
+    PH.UserDisplayName AS LastEditorName,
+    PH.EditDate,
+    PH.Text AS LastEditText,
+    PH.Comment AS EditComment,
+    RP.AnswerCount
+FROM 
+    RankedPosts RP
+LEFT JOIN 
+    AggregatedVotes AV ON RP.Id = AV.PostId
+LEFT JOIN 
+    PostHistoryDetails PH ON RP.Id = PH.PostId AND PH.EditRank = 1
+WHERE 
+    RP.UserPostRank <= 5
+ORDER BY 
+    RP.Score DESC, RP.CreationDate DESC;

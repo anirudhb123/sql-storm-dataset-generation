@@ -1,0 +1,39 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) OVER (PARTITION BY m.id) AS total_cast,
+        AVG(CASE WHEN p.info_type_id = 1 THEN 1 ELSE 0 END) OVER (PARTITION BY m.id) AS has_bio 
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        complete_cast cc ON m.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        person_info p ON c.person_id = p.person_id
+)
+
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.total_cast,
+    COALESCE(MAX(b.name), 'No Biographical Info') AS biographical_info,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords
+FROM 
+    ranked_movies r
+LEFT JOIN 
+    movie_keyword mk ON r.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+LEFT JOIN 
+    aka_name b ON b.person_id IN (SELECT person_id FROM cast_info WHERE movie_id = r.movie_id)
+WHERE 
+    r.production_year >= 2000
+GROUP BY 
+    r.movie_id, r.title, r.production_year, r.total_cast
+ORDER BY 
+    r.production_year DESC, r.total_cast DESC;

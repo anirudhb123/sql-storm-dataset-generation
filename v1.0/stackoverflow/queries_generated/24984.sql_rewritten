@@ -1,0 +1,79 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.OwnerUserId,
+        p.PostTypeId,
+        ROW_NUMBER() OVER (PARTITION BY p.PostTypeId ORDER BY p.Score DESC) as PostRank,
+        COALESCE(SUM(v.BountyAmount) OVER (PARTITION BY p.Id), 0) AS TotalBounty,
+        COUNT(c.Id) OVER (PARTITION BY p.Id) AS CommentCount
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId AND v.VoteTypeId = 8  
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    WHERE 
+        p.CreationDate > cast('2024-10-01 12:34:56' as timestamp) - INTERVAL '1 year'
+        AND (p.Score > 10 OR p.CommentCount > 5)
+),
+PostTags AS (
+    SELECT 
+        p.Id AS PostId,
+        string_agg(trim(unnest(string_to_array(substring(p.Tags, 2, length(p.Tags) - 2), '><'))), ', ') AS Tags
+    FROM 
+        Posts p
+    GROUP BY 
+        p.Id
+),
+PostHistoryStats AS (
+    SELECT 
+        ph.PostId,
+        ph.PostHistoryTypeId,
+        COUNT(*) AS EditCount
+    FROM 
+        PostHistory ph
+    WHERE 
+        ph.PostHistoryTypeId IN (4, 5, 6) 
+    GROUP BY 
+        ph.PostId, ph.PostHistoryTypeId
+),
+FinalRanking AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.TotalBounty,
+        pt.Tags,
+        COALESCE(SUM(CASE WHEN phs.PostHistoryTypeId = 4 THEN phs.EditCount ELSE 0 END), 0) AS TitleEditCount,
+        COALESCE(SUM(CASE WHEN phs.PostHistoryTypeId = 5 THEN phs.EditCount ELSE 0 END), 0) AS BodyEditCount,
+        COALESCE(SUM(CASE WHEN phs.PostHistoryTypeId = 6 THEN phs.EditCount ELSE 0 END), 0) AS TagEditCount,
+        rp.PostRank,
+        rp.CreationDate
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        PostTags pt ON rp.PostId = pt.PostId
+    LEFT JOIN 
+        PostHistoryStats phs ON rp.PostId = phs.PostId
+    WHERE 
+        rp.PostRank <= 10
+    GROUP BY 
+        rp.PostId, rp.Title, rp.TotalBounty, pt.Tags, rp.PostRank, rp.CreationDate
+)
+SELECT 
+    p.*,
+    CASE 
+        WHEN p.TotalBounty > 50 THEN 'High Bounty'
+        WHEN p.TotalBounty BETWEEN 20 AND 50 THEN 'Medium Bounty'
+        ELSE 'Low Bounty' 
+    END AS BountyCategory,
+    CASE 
+        WHEN p.TagEditCount > 0 THEN 'Edited Tags'
+        ELSE 'Unedited Tags'
+    END AS TagEditStatus
+FROM 
+    FinalRanking p
+ORDER BY 
+    p.TotalBounty DESC, p.CreationDate ASC
+LIMIT 100;

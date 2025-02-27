@@ -1,0 +1,73 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_education_status,
+        ROW_NUMBER() OVER (PARTITION BY cd.cd_gender ORDER BY c.c_birth_year DESC) AS rn
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+),
+FormattedAddresses AS (
+    SELECT 
+        ca.ca_address_sk,
+        CONCAT_WS(' ', ca.ca_street_number, ca.ca_street_name, ca.ca_street_type, COALESCE(ca.ca_suite_number, '')) AS full_address,
+        ca.ca_city,
+        ca.ca_state,
+        ca.ca_zip,
+        ca.ca_country
+    FROM 
+        customer_address ca
+),
+SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        SUM(ws.ws_quantity) AS total_sold,
+        SUM(ws.ws_net_profit) AS total_profit
+    FROM 
+        web_sales ws
+    GROUP BY 
+        ws.ws_item_sk
+),
+PromotionsSummary AS (
+    SELECT 
+        p.p_promo_id,
+        COUNT(DISTINCT p.p_item_sk) AS items_promo'd,
+        SUM(p.p_cost) AS total_promo_cost
+    FROM 
+        promotion p
+    WHERE 
+        p.p_start_date_sk >= 20200101
+    GROUP BY 
+        p.p_promo_id
+)
+SELECT 
+    rc.c_first_name,
+    rc.c_last_name,
+    rc.cd_gender,
+    rc.cd_marital_status,
+    fa.full_address,
+    fa.ca_city,
+    fa.ca_state,
+    fa.ca_zip,
+    sd.total_sold,
+    sd.total_profit,
+    ps.items_promo'd,
+    ps.total_promo_cost
+FROM 
+    RankedCustomers rc
+JOIN 
+    FormattedAddresses fa ON rc.c_customer_sk = fa.ca_address_sk
+LEFT JOIN 
+    SalesData sd ON sd.ws_item_sk = rc.c_customer_sk
+LEFT JOIN 
+    PromotionsSummary ps ON ps.p_promo_id = sd.ws_item_sk
+WHERE 
+    rc.rn = 1
+ORDER BY 
+    rc.c_last_name, rc.c_first_name;

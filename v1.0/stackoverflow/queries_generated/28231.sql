@@ -1,0 +1,81 @@
+WITH UserPostStats AS (
+    SELECT 
+        u.Id AS UserId,
+        u.DisplayName,
+        COUNT(p.Id) AS TotalPosts,
+        COUNT(CASE WHEN p.PostTypeId = 1 THEN 1 END) AS TotalQuestions,
+        COUNT(CASE WHEN p.PostTypeId = 2 THEN 1 END) AS TotalAnswers,
+        SUM(p.Score) AS TotalScore,
+        AVG(EXTRACT(EPOCH FROM (p.LastActivityDate - p.CreationDate))) AS AvgPostLifetime
+    FROM 
+        Users u
+    JOIN 
+        Posts p ON u.Id = p.OwnerUserId
+    WHERE 
+        u.Reputation > 100
+    GROUP BY 
+        u.Id
+),
+TopUsers AS (
+    SELECT 
+        UserId,
+        DisplayName,
+        TotalPosts,
+        TotalQuestions,
+        TotalAnswers,
+        TotalScore,
+        AvgPostLifetime,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank,
+        RANK() OVER (ORDER BY TotalPosts DESC) AS PostRank
+    FROM 
+        UserPostStats
+),
+UserBadges AS (
+    SELECT 
+        ub.UserId,
+        COUNT(b.Id) AS TotalBadges,
+        MAX(b.Class) AS HighestBadgeClass
+    FROM 
+        Badges b
+    JOIN 
+        Users ub ON b.UserId = ub.Id
+    WHERE 
+        ub.Reputation > 100
+    GROUP BY 
+        ub.UserId
+),
+FinalResults AS (
+    SELECT 
+        u.DisplayName,
+        u.TotalPosts,
+        u.TotalQuestions,
+        u.TotalAnswers,
+        u.TotalScore,
+        u.AvgPostLifetime,
+        COALESCE(b.TotalBadges, 0) AS TotalBadges,
+        COALESCE(b.HighestBadgeClass, 0) AS HighestBadgeClass,
+        u.ScoreRank,
+        u.PostRank
+    FROM 
+        TopUsers u
+    LEFT JOIN 
+        UserBadges b ON u.UserId = b.UserId
+)
+SELECT 
+    DisplayName,
+    TotalPosts,
+    TotalQuestions,
+    TotalAnswers,
+    TotalScore,
+    ROUND(AvgPostLifetime / 3600, 2) AS AvgPostLifetimeInHours, -- converting seconds to hours
+    TotalBadges,
+    HighestBadgeClass,
+    ScoreRank,
+    PostRank
+FROM 
+    FinalResults
+WHERE 
+    ScoreRank <= 10 OR PostRank <= 10
+ORDER BY 
+    TotalScore DESC, TotalPosts DESC;
+This query provides a detailed benchmarking of users based on their post activity and badge acquisition, emphasizing users with high engagement and accolades. It aggregates user data, ranks them, and filters to showcase only the top performers, providing insights into their post lifetimes and overall contributions.

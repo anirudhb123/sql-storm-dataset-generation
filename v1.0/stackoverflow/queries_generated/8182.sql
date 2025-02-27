@@ -1,0 +1,55 @@
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.CreationDate,
+        p.LastActivityDate,
+        p.ViewCount,
+        p.Score,
+        COUNT(a.Id) AS AnswerCount,
+        COUNT(c.Id) AS CommentCount,
+        ROW_NUMBER() OVER (PARTITION BY tt.TagName ORDER BY p.LastActivityDate DESC) AS TagRank
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Posts a ON p.Id = a.ParentId AND p.PostTypeId = 1
+    LEFT JOIN 
+        Comments c ON p.Id = c.PostId
+    JOIN 
+        (SELECT UNNEST(string_to_array(Tags, '<>')) AS TagName FROM Posts) tt ON tt.TagName IS NOT NULL
+    WHERE 
+        p.PostTypeId = 1
+    GROUP BY 
+        p.Id, p.Title, p.CreationDate, p.LastActivityDate, p.ViewCount, p.Score
+),
+TopPosts AS (
+    SELECT 
+        rp.PostId,
+        rp.Title,
+        rp.LastActivityDate,
+        rp.ViewCount,
+        rp.Score,
+        COUNT(DISTINCT bh.UserId) AS BadgeCount
+    FROM 
+        RankedPosts rp
+    LEFT JOIN 
+        Badges bh ON bh.UserId IN (
+            SELECT DISTINCT OwnerUserId FROM Posts WHERE Posts.Id = rp.PostId
+        )
+    WHERE 
+        rp.TagRank <= 3
+    GROUP BY 
+        rp.PostId, rp.Title, rp.LastActivityDate, rp.ViewCount, rp.Score
+)
+SELECT 
+    tp.PostId,
+    tp.Title,
+    tp.LastActivityDate,
+    tp.ViewCount,
+    tp.Score,
+    tp.BadgeCount
+FROM 
+    TopPosts tp
+ORDER BY 
+    tp.Score DESC, tp.ViewCount DESC
+LIMIT 20;

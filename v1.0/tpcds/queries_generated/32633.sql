@@ -1,0 +1,84 @@
+
+WITH RECURSIVE sales_summary AS (
+    SELECT 
+        ws_ship_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_ship_date_sk
+    UNION ALL
+    SELECT 
+        ss_sold_date_sk,
+        SUM(ss_quantity),
+        SUM(ss_ext_sales_price)
+    FROM 
+        store_sales
+    GROUP BY 
+        ss_sold_date_sk
+),
+customer_info AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cd.cd_marital_status,
+        cd.cd_purchase_estimate,
+        ca.ca_country
+    FROM 
+        customer c
+    LEFT JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    LEFT JOIN 
+        customer_address ca ON c.c_current_addr_sk = ca.ca_address_sk
+),
+promotions AS (
+    SELECT 
+        p.p_promo_sk,
+        p.p_promo_id,
+        SUM(ws_ext_sales_price) AS total_sales_from_promo
+    FROM 
+        web_sales ws
+    JOIN 
+        promotion p ON ws.ws_promo_sk = p.p_promo_sk
+    GROUP BY 
+        p.p_promo_sk, p.p_promo_id
+),
+date_summary AS (
+    SELECT 
+        d.d_year,
+        d.d_month_seq,
+        d.d_week_seq,
+        SUM(CASE WHEN ws.ws_ship_date_sk IS NOT NULL THEN ws.ws_ext_sales_price ELSE 0 END) AS total_web_sales,
+        SUM(CASE WHEN ss.ss_sold_date_sk IS NOT NULL THEN ss.ss_ext_sales_price ELSE 0 END) AS total_store_sales
+    FROM 
+        date_dim d
+    LEFT JOIN 
+        web_sales ws ON d.d_date_sk = ws.ws_ship_date_sk
+    LEFT JOIN 
+        store_sales ss ON d.d_date_sk = ss.ss_sold_date_sk
+    GROUP BY 
+        d.d_year, d.d_month_seq, d.d_week_seq
+)
+SELECT 
+    di.d_year,
+    di.d_month_seq,
+    di.d_week_seq,
+    COALESCE(total_web_sales, 0) AS total_web_sales,
+    COALESCE(total_store_sales, 0) AS total_store_sales,
+    SUM(ps.total_sales_from_promo) AS total_sales_promotional,
+    COUNT(DISTINCT ci.c_customer_sk) AS customer_count,
+    COUNT(DISTINCT CASE WHEN ci.cd_gender = 'F' THEN ci.c_customer_sk END) AS female_customers,
+    COUNT(DISTINCT CASE WHEN ci.cd_gender = 'M' THEN ci.c_customer_sk END) AS male_customers
+FROM 
+    date_summary di
+LEFT JOIN 
+    promotions ps ON di.d_year = (SELECT MAX(d_year) - 1 FROM date_dim)
+LEFT JOIN 
+    customer_info ci ON ci.ca_country = 'USA' 
+GROUP BY 
+    di.d_year, di.d_month_seq, di.d_week_seq
+ORDER BY 
+    di.d_year DESC, di.d_month_seq DESC, di.d_week_seq DESC;

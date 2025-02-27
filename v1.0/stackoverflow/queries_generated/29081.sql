@@ -1,0 +1,77 @@
+WITH ProcessedPosts AS (
+    SELECT 
+        p.Id AS PostId,
+        p.Title,
+        p.Body,
+        p.CreationDate,
+        p.ViewCount,
+        p.AnswerCount,
+        p.CommentCount,
+        p.ViewCount * 1.0 / NULLIF(p.AnswerCount, 0) AS ViewsPerAnswer,
+        COALESCE(SUM(v.VoteTypeId = 2) OVER (PARTITION BY p.Id), 0) AS UpVotes,
+        COALESCE(SUM(v.VoteTypeId = 3) OVER (PARTITION BY p.Id), 0) AS DownVotes,
+        COALESCE(SUM(v.VoteTypeId = 10) OVER (PARTITION BY p.Id), 0) AS DeletionVotes,
+        STRING_AGG(DISTINCT t.TagName, ', ') AS Tags
+    FROM 
+        Posts p
+    LEFT JOIN 
+        Votes v ON p.Id = v.PostId
+    LEFT JOIN 
+        UNNEST(string_to_array(substring(p.Tags, 2, length(p.Tags)-2), '><')) AS tag(tag_name) ON TRUE
+    JOIN 
+        Tags t ON t.TagName = tag.tag_name
+    WHERE 
+        p.PostTypeId = 1 
+    GROUP BY 
+        p.Id
+),
+
+EnhancedPostMetrics AS (
+    SELECT 
+        pp.PostId,
+        pp.Title,
+        pp.CreationDate,
+        pp.ViewCount,
+        pp.AnswerCount,
+        pp.CommentCount,
+        pp.ViewsPerAnswer,
+        pp.UpVotes,
+        pp.DownVotes,
+        pp.DeletionVotes,
+        pp.Tags,
+        CASE 
+            WHEN pp.ViewCount > 1000 THEN 'Hot'
+            WHEN pp.ViewCount BETWEEN 500 AND 1000 THEN 'Warm'
+            ELSE 'Cold'
+        END AS EngagementLevel,
+        DATE_PART('year', NOW()) - DATE_PART('year', pp.CreationDate) AS AgeInYears
+    FROM 
+        ProcessedPosts pp
+)
+
+SELECT 
+    epm.PostId,
+    epm.Title,
+    epm.CreationDate,
+    epm.ViewCount,
+    epm.AnswerCount,
+    epm.CommentCount,
+    epm.ViewsPerAnswer,
+    epm.UpVotes,
+    epm.DownVotes,
+    epm.DeletionVotes,
+    epm.Tags,
+    epm.EngagementLevel,
+    epm.AgeInYears,
+    CASE 
+        WHEN epm.AnswerCount > 5 THEN 'High response'
+        WHEN epm.AnswerCount BETWEEN 1 AND 5 THEN 'Moderate response'
+        ELSE 'No responses'
+    END AS ResponseRate
+FROM 
+    EnhancedPostMetrics epm
+WHERE 
+    epm.ViewsPerAnswer > 20
+ORDER BY 
+    epm.ViewCount DESC
+LIMIT 50;

@@ -1,0 +1,61 @@
+
+WITH TagCounts AS (
+    SELECT 
+        Tags.TagName,
+        COUNT(DISTINCT Posts.Id) AS PostCount,
+        SUM(Posts.ViewCount) AS TotalViews,
+        AVG(Posts.Score) AS AverageScore
+    FROM 
+        Tags
+    JOIN 
+        Posts ON Tags.Id = ANY(string_to_array(SUBSTRING(Posts.Tags FROM 2 FOR LENGTH(Posts.Tags) - 2), '><')::text[])
+    WHERE 
+        Posts.CreationDate >= '2022-01-01'
+    GROUP BY 
+        Tags.TagName
+),
+TopTags AS (
+    SELECT 
+        TagName,
+        PostCount,
+        TotalViews,
+        AverageScore,
+        RANK() OVER (ORDER BY PostCount DESC) AS PopularityRank
+    FROM 
+        TagCounts
+    WHERE 
+        PostCount > 5
+),
+UserStatistics AS (
+    SELECT 
+        Users.DisplayName,
+        SUM(COALESCE(Votes.CreationDate, 0)) AS TotalVotes,
+        COUNT(DISTINCT Posts.Id) AS PostsCreated,
+        COUNT(DISTINCT Comments.Id) AS CommentsMade
+    FROM 
+        Users
+    LEFT JOIN 
+        Posts ON Users.Id = Posts.OwnerUserId
+    LEFT JOIN 
+        Comments ON Users.Id = Comments.UserId
+    LEFT JOIN 
+        Votes ON Posts.Id = Votes.PostId
+    GROUP BY 
+        Users.DisplayName
+)
+SELECT 
+    tt.TagName,
+    tt.PostCount,
+    tt.TotalViews,
+    tt.AverageScore,
+    us.DisplayName AS TopUser,
+    us.PostsCreated,
+    us.CommentsMade
+FROM 
+    TopTags tt
+JOIN 
+    UserStatistics us ON tt.PostCount = us.PostsCreated
+WHERE 
+    tt.PopularityRank <= 10
+ORDER BY 
+    tt.PopularityRank, us.TotalVotes DESC;

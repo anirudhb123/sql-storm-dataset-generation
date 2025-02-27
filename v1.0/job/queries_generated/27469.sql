@@ -1,0 +1,56 @@
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        cnr.role AS actor_role,
+        STRING_AGG(DISTINCT kw.keyword, ', ') AS keywords,
+        COALESCE(cn.name, 'Unknown Company') AS production_company
+    FROM 
+        aka_title t
+    JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        movie_keyword mw ON t.id = mw.movie_id
+    LEFT JOIN 
+        keyword kw ON mw.keyword_id = kw.id
+    JOIN 
+        role_type cnr ON ci.role_id = cnr.id
+    WHERE 
+        t.production_year >= 2000 
+        AND a.name IS NOT NULL 
+    GROUP BY 
+        t.title, t.production_year, a.name, cn.name
+),
+RankedMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        actor_name,
+        actor_role,
+        keywords,
+        production_company,
+        ROW_NUMBER() OVER (PARTITION BY production_year ORDER BY COUNT(actor_name) DESC) AS actor_rank
+    FROM 
+        MovieDetails
+)
+SELECT 
+    movie_title,
+    production_year,
+    actor_name,
+    actor_role,
+    keywords,
+    production_company,
+    actor_rank
+FROM 
+    RankedMovies
+WHERE 
+    actor_rank <= 5
+ORDER BY 
+    production_year DESC, actor_rank;

@@ -1,0 +1,4 @@
+SELECT min(t.title) AS american_vhs_movie
+FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info AS mi, title AS t
+WHERE t.id = mi.movie_id AND t.id = mc.movie_id AND mc.movie_id = mi.movie_id AND ct.id = mc.company_type_id AND it.id = mi.info_type_id
+AND t.title LIKE '%12%' AND t.season_nr = 6 AND mi.info > 'All of the 6 directors made a "bargain" with the much revered spirit house at Chulalongkorn University in Bangkok to run laps around the entire campus for each 1 million Baht the film would make at the box office . It went on to gross up to 100 million and the directors stayed true to their oaths. They ran the laps, a few at a time though, as the campus is over 100 acres.';

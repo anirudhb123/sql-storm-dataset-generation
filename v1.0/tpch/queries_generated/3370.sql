@@ -1,0 +1,60 @@
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), 
+OrderSummary AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '2023-01-01' 
+        AND o.o_orderdate < '2024-01-01'
+    GROUP BY 
+        o.o_orderkey
+)
+SELECT 
+    ps.ps_partkey,
+    p.p_name,
+    COALESCE(s.s_name, 'Unknown Supplier') AS supplier_name,
+    COALESCE(r.r_name, 'Unknown Region') AS region,
+    os.total_revenue,
+    CASE 
+        WHEN os.total_revenue IS NULL THEN 0 
+        ELSE os.total_revenue END AS revenue_non_null,
+    COUNT(DISTINCT cs.c_custkey) AS customer_count
+FROM 
+    partsupp ps
+LEFT JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+LEFT JOIN 
+    RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey AND s.rank = 1
+LEFT JOIN 
+    supplier sup ON ps.ps_suppkey = sup.s_suppkey
+LEFT JOIN 
+    nation n ON sup.s_nationkey = n.n_nationkey
+LEFT JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+LEFT JOIN 
+    OrderSummary os ON p.p_partkey = os.o_orderkey
+LEFT JOIN 
+    customer cs ON cs.c_nationkey = n.n_nationkey
+WHERE 
+    p.p_retailprice > 100.00
+    OR (p.p_comment LIKE '%special%')
+GROUP BY 
+    ps.ps_partkey, p.p_name, supplier_name, region, os.total_revenue
+HAVING 
+    SUM(ps.ps_availqty) > 0
+ORDER BY 
+    revenue_non_null DESC, supplier_name ASC;

@@ -1,0 +1,54 @@
+WITH movie_earnings AS (
+    SELECT 
+        mc.movie_id,
+        SUM(CASE WHEN mc.company_id IS NOT NULL THEN 1 ELSE 0 END) AS total_companies,
+        COUNT(DISTINCT mk.keyword) AS total_keywords
+    FROM movie_companies mc
+    LEFT JOIN movie_keyword mk ON mc.movie_id = mk.movie_id
+    GROUP BY mc.movie_id
+),
+ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM title t
+    WHERE t.production_year IS NOT NULL
+),
+actor_role_info AS (
+    SELECT 
+        ci.movie_id,
+        ak.name AS actor_name,
+        rt.role,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_rank
+    FROM cast_info ci
+    INNER JOIN aka_name ak ON ci.person_id = ak.person_id
+    INNER JOIN role_type rt ON ci.role_id = rt.id
+),
+title_keywords AS (
+    SELECT 
+        mt.movie_id,
+        STRING_AGG(k.keyword, ', ') AS keywords
+    FROM movie_keyword mt
+    JOIN keyword k ON mt.keyword_id = k.id
+    GROUP BY mt.movie_id
+)
+SELECT
+    rt.title,
+    rt.production_year,
+    ae.actor_name,
+    ae.role,
+    me.total_companies,
+    me.total_keywords,
+    tk.keywords,
+    CASE 
+        WHEN me.total_keywords > 0 THEN 'Has Keywords'
+        ELSE 'No Keywords'
+    END AS keywords_status
+FROM ranked_titles rt
+LEFT JOIN actor_role_info ae ON rt.title_id = ae.movie_id
+LEFT JOIN movie_earnings me ON rt.title_id = me.movie_id
+LEFT JOIN title_keywords tk ON rt.title_id = tk.movie_id
+WHERE rt.title_rank <= 5  
+ORDER BY rt.production_year DESC, me.total_companies ASC, ae.role_rank;

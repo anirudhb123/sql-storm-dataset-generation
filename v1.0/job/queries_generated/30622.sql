@@ -1,0 +1,56 @@
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        0 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000   -- Filter for recent movies
+        AND mt.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('movie', 'tv series'))
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        MovieHierarchy mh
+    JOIN 
+        movie_link ml ON mh.movie_id = ml.movie_id
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    WHERE 
+        mh.level < 5  -- Limit the recursion to 5 levels deep
+)
+
+SELECT 
+    p.name AS actor_name,
+    m.title AS movie_title,
+    m.production_year,
+    COUNT(DISTINCT kc.id) AS total_keywords,
+    AVG(CASE WHEN ci.nr_order IS NOT NULL THEN ci.nr_order ELSE 0 END) AS avg_cast_order,
+    STRING_AGG(DISTINCT k.keyword, ', ') AS keywords_list,
+    MAX(CASE WHEN m.production_year = 2022 THEN 'Latest Release' ELSE 'Previous Release' END) AS release_tag
+FROM 
+    MovieHierarchy m
+JOIN 
+    cast_info ci ON m.movie_id = ci.movie_id
+JOIN 
+    aka_name p ON ci.person_id = p.person_id
+LEFT JOIN 
+    movie_keyword mk ON m.movie_id = mk.movie_id
+LEFT JOIN 
+    keyword k ON mk.keyword_id = k.id
+GROUP BY 
+    p.name, m.title, m.production_year
+HAVING 
+    COUNT(DISTINCT ci.person_id) > 1   -- Only consider movies with more than one actor
+ORDER BY 
+    m.production_year DESC,
+    total_keywords DESC;

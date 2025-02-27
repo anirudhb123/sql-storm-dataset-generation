@@ -1,0 +1,58 @@
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        COALESCE(NULLIF(ca.name, ''), 'Unknown') AS cast_name,
+        COALESCE(mc.company_name, 'Independent') AS company_name,
+        1 AS level
+    FROM title m
+    LEFT JOIN cast_info ci ON m.id = ci.movie_id
+    LEFT JOIN aka_name ca ON ci.person_id = ca.person_id
+    LEFT JOIN movie_companies mc ON mc.movie_id = m.id
+    WHERE m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(NULLIF(ca.name, ''), 'Unknown') AS cast_name,
+        COALESCE(mc.company_name, 'Independent') AS company_name,
+        mh.level + 1
+    FROM movie_hierarchy mh
+    JOIN cast_info ci ON mh.movie_id = ci.movie_id
+    LEFT JOIN aka_name ca ON ci.person_id = ca.person_id
+    LEFT JOIN movie_companies mc ON mc.movie_id = mh.movie_id
+    WHERE mh.level < 5
+),
+ranked_movies AS (
+    SELECT 
+        mh.*,
+        RANK() OVER (PARTITION BY production_year ORDER BY level DESC, title ASC) AS rank
+    FROM movie_hierarchy mh
+)
+
+SELECT 
+    r.movie_id,
+    r.title,
+    r.production_year,
+    r.cast_name,
+    r.company_name,
+    (SELECT COUNT(*) FROM cast_info ci WHERE ci.movie_id = r.movie_id) AS total_cast_count,
+    (SELECT STRING_AGG(DISTINCT k.keyword, ', ') 
+        FROM movie_keyword mk 
+        JOIN keyword k ON mk.keyword_id = k.id 
+        WHERE mk.movie_id = r.movie_id) AS keywords,
+    CASE 
+        WHEN r.rank = 1 THEN 'Top'
+        WHEN r.rank <= 5 THEN 'Top 5'
+        ELSE 'Below Top 5'
+    END AS rank_category
+FROM ranked_movies r
+WHERE r.rank <= 10 
+AND r.production_year IS NOT NULL
+ORDER BY r.production_year DESC, r.rank;
+
+This query creates a recursive common table expression (CTE) to build a hierarchy of movies based on their casts and company associations while filtering for movies produced from 2000 onwards. It ranks movies by production year and title and includes additional details like total cast count and keywords associated with each movie. Finally, it categorizes ranks and retrieves the top entries for analysis.

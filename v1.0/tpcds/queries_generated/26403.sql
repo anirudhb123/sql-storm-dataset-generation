@@ -1,0 +1,68 @@
+
+WITH AddressDetails AS (
+    SELECT 
+        CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type) AS full_address,
+        ca_city,
+        ca_state,
+        ca_zip
+    FROM 
+        customer_address
+),
+DemographicDetails AS (
+    SELECT 
+        cd_gender,
+        cd_marital_status,
+        cd_education_status,
+        cd_purchase_estimate
+    FROM 
+        customer_demographics
+    WHERE 
+        cd_purchase_estimate > 5000
+),
+CustomerDetails AS (
+    SELECT 
+        CONCAT(c_first_name, ' ', c_last_name) AS full_name,
+        c_email_address,
+        ca_address_sk
+    FROM 
+        customer
+    JOIN 
+        customer_address ON customer.c_current_addr_sk = customer_address.ca_address_sk
+),
+OrderDetails AS (
+    SELECT 
+        ws_order_number,
+        ws_ship_date_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_paid) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_order_number,
+        ws_ship_date_sk
+)
+SELECT 
+    d.full_name,
+    d.c_email_address,
+    a.full_address,
+    a.ca_city,
+    a.ca_state,
+    a.ca_zip,
+    od.total_quantity,
+    od.total_sales,
+    dm.cd_gender,
+    dm.cd_marital_status,
+    dm.cd_education_status
+FROM 
+    CustomerDetails d
+JOIN 
+    AddressDetails a ON d.ca_address_sk = a.ca_address_sk
+JOIN 
+    DemographicDetails dm ON d.c_email_address IS NOT NULL
+JOIN 
+    OrderDetails od ON od.ws_order_number = d.c_customer_id
+WHERE 
+    a.ca_state = 'NY'
+ORDER BY 
+    od.total_sales DESC
+LIMIT 100;
