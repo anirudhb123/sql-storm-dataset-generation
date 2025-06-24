@@ -1,6 +1,7 @@
 # SQLStorm: Taking Database Benchmarking into the LLM Era
 
 SQLStorm is an LLM-generated analytical benchmark for database systems.
+Check out the paper under [https://db.in.tum.de/~schmidt/papers/sqlstorm.pdf](https://db.in.tum.de/~schmidt/papers/sqlstorm.pdf).
 
 Contact Tobias Schmidt (tobias.schmidt@in.tum.de) if you have any questions.
 
