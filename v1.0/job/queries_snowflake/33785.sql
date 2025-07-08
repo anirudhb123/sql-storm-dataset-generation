@@ -1,0 +1,71 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level
+    FROM
+        aka_title m
+    WHERE
+        m.production_year >= 2000
+
+    UNION ALL
+
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        mh.production_year,
+        mh.level + 1
+    FROM
+        aka_title m
+    JOIN 
+        movie_link ml ON m.id = ml.linked_movie_id
+    JOIN 
+        movie_hierarchy mh ON ml.movie_id = mh.movie_id
+    WHERE
+        mh.level < 3
+),
+cast_with_role AS (
+    SELECT
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        rt.role AS role_type
+    FROM
+        cast_info c
+    JOIN
+        role_type rt ON c.role_id = rt.id
+    GROUP BY
+        c.movie_id, rt.role
+),
+movie_details AS (
+    SELECT
+        mv.title,
+        mv.production_year,
+        cc.total_cast,
+        ROW_NUMBER() OVER (PARTITION BY mv.production_year ORDER BY cc.total_cast DESC) AS rank,
+        CASE
+            WHEN cc.role_type IS NULL THEN 'Unknown Role'
+            ELSE cc.role_type
+        END AS role_type
+    FROM
+        movie_hierarchy mv
+    LEFT JOIN
+        cast_with_role cc ON mv.movie_id = cc.movie_id
+)
+SELECT
+    md.title,
+    md.production_year,
+    COALESCE(md.total_cast, 0) AS total_cast,
+    md.role_type,
+    CASE
+        WHEN md.rank IS NULL THEN 'No Cast'
+        ELSE CAST(md.rank AS VARCHAR)
+    END AS cast_rank
+FROM
+    movie_details md
+WHERE
+    md.production_year > 2010
+ORDER BY
+    md.production_year DESC, md.total_cast DESC
+LIMIT 50;

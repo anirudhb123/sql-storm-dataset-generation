@@ -1,0 +1,58 @@
+
+WITH RankedTitles AS (
+    SELECT
+        a.id AS aka_id,
+        a.name AS aka_name,
+        t.title AS movie_title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY a.person_id ORDER BY t.production_year DESC) AS title_rank
+    FROM
+        aka_name a
+    JOIN
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN
+        aka_title t ON ci.movie_id = t.movie_id
+),
+FilteredTitles AS (
+    SELECT 
+        aka_id,
+        aka_name,
+        movie_title,
+        production_year
+    FROM
+        RankedTitles
+    WHERE
+        title_rank <= 3
+),
+MovieDetails AS (
+    SELECT 
+        ft.aka_name,
+        COUNT(mk.movie_id) AS movie_count,
+        LISTAGG(DISTINCT ft.movie_title, '; ') WITHIN GROUP (ORDER BY ft.movie_title) AS movie_list,
+        LISTAGG(DISTINCT CONCAT(ft.movie_title, ' (', ft.production_year, ')'), '; ') WITHIN GROUP (ORDER BY ft.movie_title) AS detailed_movie_list
+    FROM 
+        FilteredTitles ft 
+    LEFT JOIN 
+        movie_keyword mk ON ft.movie_title = (SELECT title FROM aka_title WHERE id = mk.movie_id LIMIT 1)
+    LEFT JOIN 
+        movie_info mi ON mi.movie_id = mk.movie_id
+    GROUP BY 
+        ft.aka_name
+)
+SELECT 
+    md.aka_name,
+    md.movie_count,
+    md.movie_list,
+    md.detailed_movie_list,
+    COUNT(DISTINCT ci.role_id) AS unique_roles,
+    LISTAGG(DISTINCT rt.role, ', ') WITHIN GROUP (ORDER BY rt.role) AS roles_played
+FROM 
+    MovieDetails md
+LEFT JOIN 
+    cast_info ci ON ci.person_id = (SELECT person_id FROM aka_name WHERE name = md.aka_name LIMIT 1)
+LEFT JOIN 
+    role_type rt ON ci.role_id = rt.id
+GROUP BY 
+    md.aka_name, md.movie_count, md.movie_list, md.detailed_movie_list
+ORDER BY 
+    md.movie_count DESC;

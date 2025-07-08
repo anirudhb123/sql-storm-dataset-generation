@@ -1,0 +1,61 @@
+
+WITH RECURSIVE OrderHierarchy AS (
+    SELECT o_orderkey, o_custkey, o_orderdate, o_totalprice, 1 AS level
+    FROM orders
+    WHERE o_orderstatus = 'F' 
+      AND o_orderdate >= '1995-01-01'
+    
+    UNION ALL
+    
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, oh.level + 1
+    FROM orders o
+    JOIN OrderHierarchy oh ON o.o_custkey = oh.o_custkey
+    WHERE o.o_orderdate > oh.o_orderdate
+),
+SupplierPayments AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * l.l_quantity) AS total_cost
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '1995-01-01'
+    GROUP BY ps.ps_partkey
+),
+TopSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, SUM(sp.total_cost) AS supplier_total
+    FROM supplier s
+    LEFT JOIN SupplierPayments sp ON s.s_suppkey = sp.ps_partkey
+    WHERE s.s_acctbal IS NOT NULL
+    GROUP BY s.s_suppkey, s.s_name
+    ORDER BY supplier_total DESC
+    LIMIT 10
+),
+CustomerRanking AS (
+    SELECT c.c_custkey, c.c_name, SUM(o.o_totalprice) AS total_spent,
+           RANK() OVER (ORDER BY SUM(o.o_totalprice) DESC) AS cust_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_mktsegment = 'Retail'
+    GROUP BY c.c_custkey, c.c_name
+),
+FilteredLineItems AS (
+    SELECT l.l_orderkey, l.l_partkey,
+           COUNT(CASE WHEN l.l_discount > 0.1 THEN 1 END) AS discount_count,
+           AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_price_after_discount
+    FROM lineitem l
+    WHERE l.l_shipmode IN ('AIR', 'SEA')
+    GROUP BY l.l_orderkey, l.l_partkey
+)
+SELECT 
+    oh.o_orderkey,
+    oh.o_orderdate,
+    oh.o_totalprice,
+    cs.c_name AS customer_name,
+    ts.s_name AS supplier_name,
+    fl.discount_count,
+    fl.avg_price_after_discount,
+    COALESCE(ts.supplier_total, 0) AS total_supplier_cost
+FROM OrderHierarchy oh
+JOIN CustomerRanking cs ON oh.o_custkey = cs.c_custkey
+LEFT JOIN FilteredLineItems fl ON oh.o_orderkey = fl.l_orderkey
+LEFT JOIN TopSuppliers ts ON fl.l_partkey = ts.s_suppkey
+WHERE (oh.o_totalprice > (SELECT AVG(o.o_totalprice) FROM orders o WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1997-01-01'))
+  AND (fl.discount_count > 0 OR fl.avg_price_after_discount IS NOT NULL);

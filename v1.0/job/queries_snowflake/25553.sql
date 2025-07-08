@@ -1,0 +1,59 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        LISTAGG(aka.name, ', ') WITHIN GROUP (ORDER BY aka.name) AS aka_names,
+        LISTAGG(DISTINCT k.keyword, ', ') WITHIN GROUP (ORDER BY k.keyword) AS keywords,
+        LISTAGG(DISTINCT c.kind, ', ') WITHIN GROUP (ORDER BY c.kind) AS company_types,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        aka_name aka ON t.id = aka.id 
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        movie_companies mc ON t.id = mc.movie_id
+    LEFT JOIN 
+        company_type c ON mc.company_type_id = c.id
+    LEFT JOIN 
+        cast_info ci ON t.id = ci.movie_id
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+FilteredMovies AS (
+    SELECT 
+        movie_id,
+        title,
+        production_year,
+        aka_names,
+        keywords,
+        company_types,
+        cast_count
+    FROM 
+        MovieDetails
+    WHERE 
+        production_year >= 2000 
+        AND cast_count > 5
+)
+
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.aka_names,
+    fm.keywords,
+    fm.company_types,
+    fm.cast_count,
+    CONCAT('This movie titled "', fm.title, '" was released in ', fm.production_year, 
+           '. It features ', fm.cast_count, ' cast members, includes the following AKA names: ', 
+           fm.aka_names, ' and has the following keywords: ', fm.keywords, 
+           '. The companies involved include: ', fm.company_types) AS movie_description
+FROM 
+    FilteredMovies fm
+ORDER BY 
+    fm.production_year DESC, 
+    fm.cast_count DESC;

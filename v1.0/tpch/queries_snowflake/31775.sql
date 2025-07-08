@@ -1,0 +1,50 @@
+
+WITH RECURSIVE SupplierCTE AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, 
+           1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 5000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 
+           s.s_acctbal + c.s_acctbal,
+           c.level + 1
+    FROM supplier s
+    INNER JOIN SupplierCTE c ON s.s_nationkey = c.s_nationkey
+    WHERE s.s_acctbal < c.s_acctbal AND c.level < 5
+),
+PartSupplier AS (
+    SELECT ps.ps_partkey, SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost
+    FROM partsupp ps
+    GROUP BY ps.ps_partkey
+),
+OrderSummary AS (
+    SELECT o.o_orderkey, o.o_totalprice, 
+           RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order
+    FROM orders o
+    WHERE o.o_orderdate > '1997-01-01'
+),
+NationRegion AS (
+    SELECT n.n_nationkey, r.r_regionkey, 
+           COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM nation n
+    LEFT JOIN region r ON n.n_regionkey = r.r_regionkey
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, r.r_regionkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_brand,
+    COALESCE(ps.total_cost, 0) AS total_supply_cost,
+    COALESCE(ns.supplier_count, 0) AS total_suppliers,
+    CASE 
+        WHEN os.rank_order IS NOT NULL THEN os.o_totalprice 
+        ELSE NULL 
+    END AS max_order_price,
+    s.s_name AS rich_supplier
+FROM part p
+LEFT JOIN PartSupplier ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN NationRegion ns ON ns.n_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+LEFT JOIN OrderSummary os ON os.o_orderkey = (SELECT MIN(o.o_orderkey) FROM orders o WHERE o.o_orderstatus = 'O')
+LEFT JOIN SupplierCTE s ON s.s_suppkey = (SELECT MAX(s2.s_suppkey) FROM supplier s2 WHERE s2.s_acctbal > 10000)
+ORDER BY p.p_partkey;

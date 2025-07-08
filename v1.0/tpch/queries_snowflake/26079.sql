@@ -1,0 +1,24 @@
+
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    LISTAGG(DISTINCT s.s_name, ', ') WITHIN GROUP (ORDER BY s.s_name) AS supplier_names,
+    RANK() OVER (PARTITION BY p.p_brand ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS revenue_rank
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+WHERE 
+    l.l_shipdate BETWEEN '1996-01-01' AND '1996-12-31'
+GROUP BY 
+    p.p_name, p.p_brand, p.p_partkey
+HAVING 
+    COUNT(DISTINCT ps.ps_suppkey) > 1
+ORDER BY 
+    p.p_brand, total_revenue DESC;

@@ -1,0 +1,75 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC, t.title) AS title_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+), 
+person_roles AS (
+    SELECT 
+        ci.person_id,
+        ci.movie_id,
+        rt.role,
+        ROW_NUMBER() OVER (PARTITION BY ci.person_id, ci.role_id ORDER BY ci.nr_order) AS role_rank
+    FROM 
+        cast_info ci
+    JOIN 
+        role_type rt ON ci.role_id = rt.id
+), 
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        c.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(DISTINCT mc.company_id) AS total_companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name c ON mc.company_id = c.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, c.name, ct.kind
+),
+highest_rated AS (
+    SELECT 
+        mii.movie_id, 
+        AVG(CAST(mi.info AS numeric)) AS avg_rating
+    FROM 
+        movie_info mi
+    JOIN 
+        movie_info_idx mii ON mi.id = mii.info_type_id
+    WHERE 
+        mi.info_type_id = (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        mii.movie_id
+    HAVING 
+        AVG(CAST(mi.info AS numeric)) > 7.5
+)
+SELECT 
+    rt.title_id,
+    rt.title,
+    rt.production_year,
+    pr.person_id,
+    pr.role,
+    ci.total_companies,
+    hr.avg_rating
+FROM 
+    ranked_titles rt
+LEFT JOIN 
+    person_roles pr ON rt.title_id = pr.movie_id AND pr.role_rank = 1
+LEFT JOIN 
+    company_info ci ON rt.title_id = ci.movie_id
+LEFT JOIN 
+    highest_rated hr ON rt.title_id = hr.movie_id
+WHERE 
+    rt.title_rank BETWEEN 1 AND 5
+    AND (hr.avg_rating IS NOT NULL OR hr.avg_rating > 8.0)
+ORDER BY 
+    rt.production_year DESC, 
+    rt.title ASC;

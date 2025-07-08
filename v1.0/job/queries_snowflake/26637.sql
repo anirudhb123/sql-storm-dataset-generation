@@ -1,0 +1,49 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        m.production_year,
+        COUNT(DISTINCT c.person_id) AS cast_count,
+        ARRAY_AGG(DISTINCT a.name) AS actors,
+        ARRAY_AGG(DISTINCT k.keyword) AS keywords
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_keyword mk ON m.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    WHERE 
+        m.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        m.id, m.title, m.production_year
+),
+MovieRankings AS (
+    SELECT 
+        movie_id,
+        movie_title,
+        production_year,
+        cast_count,
+        actors,
+        keywords,
+        RANK() OVER (ORDER BY cast_count DESC) AS rank
+    FROM 
+        RankedMovies
+)
+SELECT 
+    mr.rank,
+    mr.movie_title,
+    mr.production_year,
+    mr.cast_count,
+    LISTAGG(mr.actors, ', ') WITHIN GROUP (ORDER BY mr.actors) AS actors_list,
+    LISTAGG(DISTINCT mr.keywords, ', ') WITHIN GROUP (ORDER BY mr.keywords) AS keywords_list
+FROM 
+    MovieRankings mr
+GROUP BY 
+    mr.rank, mr.movie_title, mr.production_year, mr.cast_count
+ORDER BY 
+    mr.rank;

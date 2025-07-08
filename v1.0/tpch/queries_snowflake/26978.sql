@@ -1,0 +1,34 @@
+
+SELECT 
+    p.p_name AS part_name,
+    CONCAT('Manufacturer: ', p.p_mfgr, ', Size: ', p.p_size, ', Container: ', p.p_container) AS part_details,
+    s.s_name AS supplier_name,
+    s.s_address AS supplier_address,
+    COALESCE(SUM(CASE 
+        WHEN l.l_returnflag = 'R' THEN l.l_quantity 
+        ELSE 0 
+    END), 0) AS total_returned_quantity,
+    LISTAGG(DISTINCT CONCAT(c.c_name, ' (', c.c_acctbal, ')'), '; ') AS customer_info,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice) DESC) AS price_rank
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    lineitem l ON ps.ps_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+JOIN 
+    customer c ON o.o_custkey = c.c_custkey
+WHERE 
+    p.p_brand IN ('BrandX', 'BrandY') 
+    AND l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_mfgr, p.p_size, p.p_container, s.s_name, s.s_address
+HAVING 
+    SUM(l.l_quantity) > 0
+    AND COUNT(DISTINCT c.c_custkey) > 5
+ORDER BY 
+    price_rank, total_returned_quantity DESC;

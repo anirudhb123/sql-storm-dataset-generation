@@ -1,0 +1,55 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-12-31'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name
+),
+CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+)
+
+SELECT 
+    od.o_orderkey,
+    od.o_orderdate,
+    COALESCE(cos.total_spent, 0) AS customer_spending,
+    COALESCE(sd.total_supply_cost, 0) AS supplier_cost,
+    RANK() OVER (ORDER BY od.o_orderdate DESC) AS order_age_rank
+FROM 
+    RankedOrders od
+LEFT JOIN 
+    CustomerOrderSummary cos ON od.o_orderkey IN (SELECT o.o_orderkey FROM orders o WHERE o.o_custkey = cos.c_custkey)
+LEFT JOIN 
+    SupplierDetails sd ON EXISTS (
+        SELECT 1 FROM lineitem li 
+        WHERE li.l_orderkey = od.o_orderkey AND li.l_suppkey = sd.s_suppkey
+    )
+WHERE 
+    od.order_rank <= 10
+ORDER BY 
+    od.o_orderdate DESC;

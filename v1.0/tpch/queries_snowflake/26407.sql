@@ -1,0 +1,31 @@
+
+SELECT 
+    p.p_partkey, 
+    p.p_name, 
+    CONCAT('Supplier: ', s.s_name, ', Region: ', r.r_name) AS supplier_info,
+    SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_quantity ELSE 0 END) AS returned_quantity,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    AVG(l.l_extendedprice * (1 - l.l_discount)) AS avg_sales_price,
+    LISTAGG(DISTINCT s.s_comment, '; ') WITHIN GROUP (ORDER BY s.s_comment) AS supplier_comments
+FROM 
+    part p
+JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+JOIN 
+    supplier s ON ps.ps_suppkey = s.s_suppkey
+JOIN 
+    nation n ON s.s_nationkey = n.n_nationkey
+JOIN 
+    region r ON n.n_regionkey = r.r_regionkey
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+WHERE 
+    n.n_name LIKE '%United%' 
+    AND o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+GROUP BY 
+    p.p_partkey, p.p_name, s.s_name, r.r_name
+ORDER BY 
+    returned_quantity DESC, total_orders DESC
+LIMIT 50;

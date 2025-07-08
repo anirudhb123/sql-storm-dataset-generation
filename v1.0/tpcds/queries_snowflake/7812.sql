@@ -1,0 +1,51 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws_web_site_sk,
+        SUM(ws_net_profit) AS total_net_profit,
+        COUNT(DISTINCT ws_order_number) AS total_orders
+    FROM 
+        web_sales
+    WHERE 
+        ws_sold_date_sk BETWEEN 2458479 AND 2458539 
+    GROUP BY 
+        ws_web_site_sk
+),
+CustomerData AS (
+    SELECT 
+        c_current_cdemo_sk,
+        COUNT(DISTINCT c_customer_sk) AS total_customers,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate
+    FROM 
+        customer c
+    JOIN 
+        customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    GROUP BY 
+        c_current_cdemo_sk
+),
+AddressData AS (
+    SELECT 
+        ca_state,
+        COUNT(ca_address_sk) AS total_addresses
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+)
+SELECT 
+    sd.ws_web_site_sk,
+    sd.total_net_profit,
+    sd.total_orders,
+    cd.total_customers,
+    cd.avg_purchase_estimate,
+    ad.total_addresses,
+    (sd.total_net_profit / NULLIF(cd.avg_purchase_estimate, 0)) AS profit_to_estimate_ratio
+FROM 
+    SalesData sd
+JOIN 
+    CustomerData cd ON sd.ws_web_site_sk = cd.c_current_cdemo_sk
+JOIN 
+    AddressData ad ON ad.ca_state = (SELECT ca_state FROM customer_address WHERE ca_address_sk = cd.c_current_cdemo_sk LIMIT 1)
+ORDER BY 
+    profit_to_estimate_ratio DESC
+LIMIT 100;

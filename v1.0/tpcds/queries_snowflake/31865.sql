@@ -1,0 +1,43 @@
+
+WITH RECURSIVE CustomerPaths AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        1 AS path_length,
+        CAST(c.c_customer_id AS VARCHAR) AS path
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'F'
+    
+    UNION ALL
+    
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        cd.cd_gender,
+        cp.path_length + 1,
+        CONCAT(cp.path, ' -> ', c.c_customer_id)
+    FROM customer c
+    JOIN CustomerPaths cp ON c.c_current_cdemo_sk = cp.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    WHERE cd.cd_gender = 'F' AND cp.path_length < 5
+)
+SELECT 
+    cp.c_customer_sk,
+    cp.c_first_name,
+    cp.c_last_name,
+    cp.cd_gender,
+    cp.path_length,
+    LISTAGG(cp.path, ', ') WITHIN GROUP (ORDER BY cp.path) AS full_path
+FROM CustomerPaths cp
+GROUP BY 
+    cp.c_customer_sk, 
+    cp.c_first_name, 
+    cp.c_last_name, 
+    cp.cd_gender, 
+    cp.path_length
+HAVING COUNT(*) > 1
+ORDER BY cp.path_length, cp.c_last_name;

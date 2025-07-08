@@ -1,0 +1,61 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COALESCE(i.info, 'No Info') DESC) AS rank
+    FROM 
+        title m
+    LEFT JOIN 
+        movie_info i ON m.id = i.movie_id AND i.info_type_id = (SELECT id FROM info_type WHERE info = 'description')
+    WHERE 
+        m.production_year IS NOT NULL
+),
+ActorCountPerMovie AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count
+    FROM 
+        cast_info c
+    GROUP BY 
+        c.movie_id
+),
+MovieDetails AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        a.actor_count,
+        COALESCE(a.actor_count, 0) AS actor_count_default,
+        r.rank
+    FROM 
+        RankedMovies r
+    LEFT JOIN 
+        ActorCountPerMovie a ON r.movie_id = a.movie_id
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.actor_count,
+    CASE 
+        WHEN md.actor_count IS NULL THEN 'Unknown Actor Count'
+        ELSE CAST(md.actor_count AS STRING)
+    END AS actor_count_text,
+    (SELECT COUNT(*) FROM aka_title WHERE movie_id = md.movie_id) AS aka_title_count,
+    CASE 
+        WHEN md.actor_count IS NOT NULL AND md.actor_count > 10 THEN 'Popular Cast'
+        ELSE 'Less Popular Cast'
+    END AS cast_popularity,
+    (SELECT LISTAGG(name, ', ') 
+     WITHIN GROUP (ORDER BY name) 
+     FROM aka_name 
+     WHERE person_id IN (SELECT DISTINCT person_id FROM cast_info WHERE movie_id = md.movie_id)) AS lead_actors
+FROM 
+    MovieDetails md
+WHERE 
+    md.rank <= 5
+ORDER BY 
+    md.production_year DESC, 
+    md.actor_count DESC
+LIMIT 10;

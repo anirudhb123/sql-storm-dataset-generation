@@ -1,0 +1,63 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rn 
+    FROM 
+        supplier s
+), 
+CostAnalysis AS (
+    SELECT
+        ps.ps_partkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_cost,
+        COUNT(DISTINCT s.s_suppkey) AS supplier_count
+    FROM 
+        partsupp ps
+    INNER JOIN 
+        RankedSuppliers s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+), 
+HighCostParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        ca.total_cost,
+        ca.supplier_count,
+        CASE 
+            WHEN ca.total_cost > 10000 THEN 'High Cost'
+            ELSE 'Normal Cost'
+        END AS cost_category
+    FROM 
+        part p
+    LEFT JOIN 
+        CostAnalysis ca ON p.p_partkey = ca.ps_partkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COUNT(DISTINCT np.n_nationkey) AS nations_count,
+    SUM(COALESCE(hp.total_cost, 0)) AS total_high_cost_parts,
+    LISTAGG(DISTINCT hp.p_name, ', ') WITHIN GROUP (ORDER BY hp.p_name) AS high_cost_parts
+FROM 
+    region r
+JOIN 
+    nation np ON r.r_regionkey = np.n_regionkey
+LEFT JOIN 
+    HighCostParts hp ON np.n_nationkey IN (
+        SELECT 
+            DISTINCT c.c_nationkey 
+        FROM 
+            customer c
+        JOIN 
+            orders o ON c.c_custkey = o.o_custkey
+        WHERE 
+            o.o_totalprice > (SELECT AVG(o1.o_totalprice) FROM orders o1 WHERE o1.o_orderdate < DATEADD(year, -1, '1998-10-01'))
+    )
+GROUP BY 
+    r.r_name 
+HAVING 
+    SUM(COALESCE(hp.total_cost, 0)) > 50000
+ORDER BY 
+    nations_count DESC NULLS LAST;

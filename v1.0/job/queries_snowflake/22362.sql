@@ -1,0 +1,94 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS year_rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+
+ActorRoleCounts AS (
+    SELECT 
+        c.person_id,
+        r.role,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM 
+        cast_info c
+    JOIN 
+        role_type r ON c.role_id = r.id
+    GROUP BY 
+        c.person_id, r.role
+),
+
+FilteredActors AS (
+    SELECT 
+        a.id AS actor_id,
+        a.name,
+        COUNT(DISTINCT c.movie_id) AS total_movies
+    FROM 
+        aka_name a
+    LEFT JOIN 
+        cast_info c ON a.person_id = c.person_id
+    GROUP BY 
+        a.id, a.name
+    HAVING 
+        COUNT(DISTINCT c.movie_id) > 5
+),
+
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        LISTAGG(k.keyword, ', ') WITHIN GROUP (ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+
+TopMovies AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title AS movie_title,
+        COALESCE(mk.keywords, 'No keywords') AS keywords,
+        CASE 
+            WHEN COUNT(DISTINCT c.person_id) > 10 THEN 'Large Ensemble'
+            WHEN COUNT(DISTINCT c.person_id) BETWEEN 5 AND 10 THEN 'Medium Ensemble'
+            ELSE 'Solo'
+        END AS ensemble_size,
+        RANK() OVER (ORDER BY m.production_year DESC) AS production_rank,
+        m.production_year
+    FROM 
+        title m
+    LEFT JOIN 
+        cast_info c ON m.id = c.movie_id
+    LEFT JOIN 
+        MovieKeywords mk ON m.id = mk.movie_id
+    WHERE 
+        m.production_year >= 2000
+    GROUP BY 
+        m.id, m.title, mk.keywords, m.production_year
+)
+
+SELECT 
+    ta.actor_id,
+    ta.name AS actor_name,
+    tm.movie_title,
+    tm.keywords,
+    tm.ensemble_size,
+    tm.production_rank
+FROM 
+    FilteredActors ta
+JOIN 
+    ActorRoleCounts arc ON ta.actor_id = arc.person_id
+JOIN 
+    TopMovies tm ON arc.movie_count > 3 AND tm.production_year = YEAR(DATE '2024-10-01') - 5
+WHERE 
+    ta.name IS NOT NULL
+ORDER BY 
+    tm.production_rank DESC, arc.movie_count DESC;

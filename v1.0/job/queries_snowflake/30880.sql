@@ -1,0 +1,77 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS depth
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT 
+        mt.id,
+        mt.title,
+        mt.production_year,
+        mh.depth + 1
+    FROM 
+        aka_title mt
+    INNER JOIN 
+        movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+cast_aggregates AS (
+    SELECT 
+        c.movie_id,
+        LISTAGG(DISTINCT ak.name, ', ') WITHIN GROUP (ORDER BY ak.name) AS actor_names,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        MAX(c.nr_order) AS max_order
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    GROUP BY 
+        c.movie_id
+),
+filtered_movies AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        ca.actor_names,
+        ca.actor_count,
+        ca.max_order
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_aggregates ca ON mh.movie_id = ca.movie_id
+    WHERE 
+        mh.production_year >= (SELECT AVG(production_year) FROM aka_title)
+        AND COALESCE(ca.actor_count, 0) > 5
+),
+keyword_filter AS (
+    SELECT 
+        mvk.movie_id,
+        LISTAGG(DISTINCT k.keyword, ', ') WITHIN GROUP (ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword mvk
+    JOIN 
+        keyword k ON mvk.keyword_id = k.id
+    GROUP BY 
+        mvk.movie_id
+)
+SELECT 
+    fm.title,
+    fm.production_year,
+    fm.actor_count,
+    km.keywords
+FROM 
+    filtered_movies fm
+LEFT JOIN 
+    keyword_filter km ON fm.movie_id = km.movie_id
+ORDER BY 
+    fm.production_year DESC,
+    fm.actor_count DESC
+LIMIT 10;

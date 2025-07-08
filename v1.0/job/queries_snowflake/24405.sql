@@ -1,0 +1,80 @@
+
+WITH RECURSIVE ranked_movies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY mt.id) AS rank
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+company_casts AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT cc.person_id) AS total_cast,
+        LISTAGG(DISTINCT cn.name, ', ') WITHIN GROUP (ORDER BY cn.name) AS company_names
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        cast_info cc ON mc.movie_id = cc.movie_id
+    GROUP BY 
+        mc.movie_id
+),
+movie_info_details AS (
+    SELECT 
+        mi.movie_id,
+        COUNT(mi.id) AS info_count,
+        MAX(CASE WHEN it.info = 'Genre' THEN mi.info END) AS genre,
+        MAX(CASE WHEN it.info = 'Director' THEN mi.info END) AS director
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+),
+final_benchmark AS (
+    SELECT 
+        rm.movie_id,
+        rm.title,
+        rm.production_year,
+        cc.total_cast,
+        cc.company_names,
+        mid.info_count,
+        mid.genre,
+        mid.director,
+        RANK() OVER (ORDER BY rm.production_year DESC, cc.total_cast DESC) AS movie_rank
+    FROM 
+        ranked_movies rm
+    LEFT JOIN 
+        company_casts cc ON rm.movie_id = cc.movie_id
+    LEFT JOIN 
+        movie_info_details mid ON rm.movie_id = mid.movie_id
+    WHERE 
+        cc.total_cast > 0 OR mid.info_count IS NOT NULL
+)
+
+SELECT 
+    mb.movie_id,
+    mb.title,
+    COALESCE(mb.production_year::TEXT, 'Unknown Year') AS production_year,
+    COALESCE(mb.total_cast, 0) AS total_cast,
+    mb.company_names,
+    mb.info_count,
+    mb.genre,
+    mb.director,
+    CASE 
+        WHEN mb.movie_rank IS NULL THEN 'No Ranking'
+        WHEN mb.movie_rank < 10 THEN 'Top Rank'
+        ELSE 'Below Top Rank'
+    END AS ranking_status
+FROM 
+    final_benchmark mb
+WHERE 
+    mb.production_year BETWEEN 2000 AND 2023
+ORDER BY 
+    mb.movie_rank, mb.title;

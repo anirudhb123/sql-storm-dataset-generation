@@ -1,0 +1,77 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        t.episode_of_id,
+        1 AS level
+    FROM 
+        title t
+    WHERE 
+        t.episode_of_id IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        t2.id,
+        t2.title,
+        t2.production_year,
+        t2.episode_of_id,
+        mh.level + 1
+    FROM 
+        title t2
+    INNER JOIN 
+        MovieHierarchy mh ON t2.episode_of_id = mh.movie_id  
+),
+
+MovieKeywordAggregation AS (
+    
+    SELECT 
+        mk.keyword_id,
+        COUNT(DISTINCT m.id) AS movie_count
+    FROM 
+        movie_keyword mk
+    JOIN 
+        title m ON mk.movie_id = m.id
+    GROUP BY 
+        mk.keyword_id
+),
+
+MovieInfo AS (
+    
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        COALESCE(ARRAY_AGG(DISTINCT mi.info), ARRAY_CONSTRUCT()) AS info_list,
+        COALESCE(mka.movie_count, 0) AS keyword_count
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_info mi ON t.id = mi.movie_id
+    LEFT JOIN 
+        MovieKeywordAggregation mka ON mka.keyword_id IN (SELECT keyword_id FROM movie_keyword WHERE movie_id = t.id)
+    GROUP BY 
+        t.id, t.title, mka.movie_count
+)
+
+SELECT 
+    mh.movie_id,
+    mh.title,
+    mh.production_year,
+    mh.level,
+    COALESCE(mka.movie_count, 0) AS keyword_count,
+    CASE 
+        WHEN mh.level = 1 THEN 'Main Movie'
+        ELSE 'Episode'
+    END AS movie_type
+FROM 
+    MovieHierarchy mh
+LEFT JOIN 
+    MovieKeywordAggregation mka ON mh.movie_id = mka.keyword_id
+
+ORDER BY 
+    mh.production_year DESC,
+    mh.level,
+    mh.title;

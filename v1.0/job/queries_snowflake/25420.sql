@@ -1,0 +1,58 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ARRAY_AGG(DISTINCT ak.name) AS alternate_names,
+        ARRAY_AGG(DISTINCT kw.keyword) AS keywords,
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword kw ON mk.keyword_id = kw.id
+    LEFT JOIN 
+        complete_cast cc ON mt.id = cc.movie_id
+    LEFT JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+
+TopMovies AS (
+    SELECT 
+        *,
+        RANK() OVER (ORDER BY cast_count DESC) AS movie_rank
+    FROM 
+        RankedMovies
+)
+
+SELECT 
+    tm.movie_id,
+    tm.title,
+    tm.production_year,
+    tm.alternate_names,
+    tm.keywords,
+    tm.cast_count,
+    COALESCE(ARRAY_AGG(DISTINCT char.name), 'No Characters') AS characters,
+    COALESCE(ARRAY_AGG(DISTINCT r.role), 'No Roles') AS roles
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    complete_cast cc ON tm.movie_id = cc.movie_id
+LEFT JOIN 
+    cast_info ci ON cc.subject_id = ci.id
+LEFT JOIN 
+    char_name char ON ci.person_role_id = char.id
+LEFT JOIN 
+    role_type r ON ci.role_id = r.id
+WHERE 
+    tm.movie_rank <= 10
+GROUP BY 
+    tm.movie_id, tm.title, tm.production_year, tm.alternate_names, tm.keywords, tm.cast_count
+ORDER BY 
+    tm.cast_count DESC;

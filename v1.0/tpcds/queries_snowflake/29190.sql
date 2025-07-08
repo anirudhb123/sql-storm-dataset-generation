@@ -1,0 +1,52 @@
+
+WITH AddressSummary AS (
+    SELECT 
+        ca_state,
+        COUNT(DISTINCT ca_address_sk) AS total_addresses,
+        LISTAGG(DISTINCT CONCAT(ca_street_number, ' ', ca_street_name, ' ', ca_street_type), '; ') WITHIN GROUP (ORDER BY ca_street_number) AS street_details
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state
+),
+DemographicsSummary AS (
+    SELECT 
+        cd_gender,
+        COUNT(DISTINCT cd_demo_sk) AS demo_count,
+        AVG(cd_purchase_estimate) AS avg_purchase_estimate,
+        LISTAGG(DISTINCT cd_marital_status, ', ') WITHIN GROUP (ORDER BY cd_marital_status) AS marital_statuses
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+WarehouseStats AS (
+    SELECT 
+        w_state,
+        SUM(w_warehouse_sq_ft) AS total_sq_ft,
+        MAX(w_warehouse_name) AS largest_warehouse
+    FROM 
+        warehouse
+    GROUP BY 
+        w_state
+)
+SELECT 
+    a.ca_state,
+    a.total_addresses,
+    a.street_details,
+    d.cd_gender,
+    d.demo_count,
+    d.avg_purchase_estimate,
+    d.marital_statuses,
+    w.w_state,
+    w.total_sq_ft,
+    w.largest_warehouse
+FROM 
+    AddressSummary a
+JOIN 
+    DemographicsSummary d ON 1=1
+JOIN 
+    WarehouseStats w ON a.ca_state = w.w_state
+ORDER BY 
+    a.total_addresses DESC, 
+    d.demo_count DESC;

@@ -1,0 +1,40 @@
+
+WITH RankedSuppliers AS (
+    SELECT s.s_suppkey, s.s_name, s.s_acctbal,
+           RANK() OVER (PARTITION BY s.s_nationkey ORDER BY s.s_acctbal DESC) AS rank,
+           CASE 
+               WHEN s.s_acctbal IS NULL THEN 'Unknown' 
+               ELSE 'Known' 
+           END AS acct_status
+    FROM supplier s
+), FilteredOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderstatus,
+           COUNT(DISTINCT li.l_orderkey) AS line_count
+    FROM orders o
+    LEFT JOIN lineitem li ON o.o_orderkey = li.l_orderkey
+    WHERE o.o_orderdate >= '1997-01-01'
+    GROUP BY o.o_orderkey, o.o_custkey, o.o_orderstatus
+), NationDetails AS (
+    SELECT n.n_nationkey, n.n_name, r.r_name AS r_name,
+           (SELECT COUNT(DISTINCT c.c_custkey) 
+            FROM customer c 
+            WHERE c.c_nationkey = n.n_nationkey) AS customer_count
+    FROM nation n
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+)
+SELECT ns.n_nationkey, ns.n_name, 
+       COUNT(DISTINCT fs.l_orderkey) AS fulfilled_orders,
+       SUM(COALESCE(rs.s_acctbal, 0)) AS total_acctbal,
+       LISTAGG(DISTINCT CONCAT(rs.s_name, ': ', rs.acct_status), ', ') WITHIN GROUP (ORDER BY rs.s_name) AS supplier_statuses
+FROM NationDetails ns
+LEFT JOIN FilteredOrders fo ON ns.n_nationkey = fo.o_custkey
+LEFT JOIN RankedSuppliers rs ON rs.rank = 1 AND rs.s_suppkey IN (
+    SELECT ps.ps_suppkey
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_mfgr LIKE 'MFGR%')
+LEFT JOIN lineitem fs ON fs.l_orderkey = fo.o_orderkey
+WHERE ns.customer_count > 10 AND fo.line_count > 5
+GROUP BY ns.n_nationkey, ns.n_name
+HAVING SUM(COALESCE(rs.s_acctbal, 0)) > 1000
+ORDER BY total_acctbal DESC, ns.n_name ASC;

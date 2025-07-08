@@ -1,0 +1,70 @@
+
+WITH RecursiveMovieDetails AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        COALESCE(cast_persons.actor_name, 'Unknown Actor') AS actor_name,
+        COALESCE(cast_persons.actor_role, 'Unknown Role') AS actor_role,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY c.nr_order) AS actor_order
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+    LEFT JOIN 
+        cast_info c ON t.id = c.movie_id
+    LEFT JOIN 
+        (SELECT 
+            a.id AS person_id, 
+            a.name AS actor_name, 
+            r.role AS actor_role 
+         FROM 
+            aka_name a 
+         JOIN 
+            role_type r ON a.id = r.id 
+         WHERE 
+            r.role IS NOT NULL) cast_persons 
+    ON c.person_id = cast_persons.person_id 
+    WHERE 
+        t.production_year IS NOT NULL
+),
+FilteredMovies AS (
+    SELECT 
+        title_id, 
+        title, 
+        production_year, 
+        keyword,
+        actor_name,
+        actor_role,
+        CASE 
+            WHEN actor_order IS NULL THEN 'Order Not Assigned'
+            WHEN actor_order < 3 THEN 'Leading Role'
+            ELSE 'Support Role'
+        END AS role_category
+    FROM 
+        RecursiveMovieDetails
+    WHERE 
+        production_year >= 2000 
+        AND keyword IS NOT NULL
+)
+SELECT 
+    f.title_id,
+    f.title,
+    f.production_year,
+    LISTAGG(DISTINCT f.keyword, ', ') WITHIN GROUP (ORDER BY f.keyword) AS keywords,
+    COUNT(DISTINCT f.actor_name) AS total_actors,
+    SUM(CASE WHEN f.role_category = 'Leading Role' THEN 1 ELSE 0 END) AS leading_roles_count,
+    CASE 
+        WHEN COUNT(DISTINCT f.actor_name) = 0 THEN NULL
+        WHEN COUNT(DISTINCT f.actor_name) > 5 THEN 'Ensemble Cast'
+        ELSE 'Small Cast'
+    END AS cast_size_category
+FROM 
+    FilteredMovies f
+GROUP BY 
+    f.title_id, f.title, f.production_year
+ORDER BY 
+    f.production_year DESC, f.title;

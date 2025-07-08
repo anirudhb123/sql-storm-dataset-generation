@@ -1,0 +1,78 @@
+
+WITH MovieRanked AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        COUNT(c.person_id) AS cast_count,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY COUNT(c.person_id) DESC) AS rn
+    FROM 
+        aka_title AS t
+    JOIN 
+        cast_info AS c ON t.id = c.movie_id
+    WHERE 
+        t.production_year IS NOT NULL
+        AND t.production_year > 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        title_id, 
+        title, 
+        production_year 
+    FROM 
+        MovieRanked 
+    WHERE 
+        rn <= 5
+),
+CompanyDetails AS (
+    SELECT 
+        mc.movie_id,
+        LISTAGG(COALESCE(cn.name, 'Unknown Company'), ', ') WITHIN GROUP (ORDER BY cn.name) AS companies,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    LEFT JOIN 
+        company_name cn ON mc.company_id = cn.id
+    LEFT JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+    GROUP BY 
+        mc.movie_id, ct.kind
+),
+MovieInfoDetails AS (
+    SELECT 
+        mi.movie_id,
+        MAX(CASE WHEN it.info = 'summary' THEN mi.info END) AS movie_summary,
+        MAX(CASE WHEN it.info = 'rating' THEN mi.info END) AS movie_rating
+    FROM 
+        movie_info mi
+    JOIN 
+        info_type it ON mi.info_type_id = it.id
+    GROUP BY 
+        mi.movie_id
+)
+
+SELECT 
+    tm.title,
+    tm.production_year,
+    COALESCE(ci.companies, 'No Companies') AS companies,
+    COALESCE(mid.movie_summary, 'No Summary Available') AS summary,
+    COALESCE(mid.movie_rating, 'No Rating Available') AS rating,
+    COUNT(DISTINCT ak.id) AS unique_actors_count
+FROM 
+    TopMovies tm
+LEFT JOIN 
+    CompanyDetails ci ON tm.title_id = ci.movie_id
+LEFT JOIN 
+    MovieInfoDetails mid ON tm.title_id = mid.movie_id
+LEFT JOIN 
+    cast_info c ON tm.title_id = c.movie_id
+LEFT JOIN 
+    aka_name ak ON ak.person_id = c.person_id
+GROUP BY 
+    tm.title, tm.production_year, ci.companies, mid.movie_summary, mid.movie_rating
+HAVING 
+    COUNT(CASE WHEN ak.name IS NOT NULL THEN 1 END) > 0
+ORDER BY 
+    tm.production_year DESC, unique_actors_count DESC;

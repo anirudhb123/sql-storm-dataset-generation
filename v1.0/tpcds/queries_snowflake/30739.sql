@@ -1,0 +1,50 @@
+WITH RECURSIVE CustomerHierarchy AS (
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_gender, cd.cd_marital_status, 
+           COALESCE(cd.cd_dep_count, 0) AS dep_count,
+           COALESCE(cd.cd_dep_employed_count, 0) AS dep_employed_count,
+           COALESCE(cd.cd_dep_college_count, 0) AS dep_college_count,
+           0 AS level
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    UNION ALL
+    SELECT c.c_customer_sk, c.c_first_name, c.c_last_name, 
+           cd.cd_gender, cd.cd_marital_status, 
+           COALESCE(cd.cd_dep_count, 0) AS dep_count,
+           COALESCE(cd.cd_dep_employed_count, 0) AS dep_employed_count,
+           COALESCE(cd.cd_dep_college_count, 0) AS dep_college_count,
+           ch.level + 1
+    FROM customer c
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN CustomerHierarchy ch ON c.c_customer_sk = ch.c_customer_sk
+    WHERE ch.level < 4  
+),
+SalesData AS (
+    SELECT ws.ws_ship_date_sk, 
+           SUM(ws.ws_sales_price) AS total_sales,
+           COUNT(DISTINCT ws.ws_order_number) AS order_count
+    FROM web_sales ws
+    WHERE ws.ws_ship_date_sk >= (SELECT MIN(d.d_date_sk) FROM date_dim d)
+    GROUP BY ws.ws_ship_date_sk
+),
+AggregateSales AS (
+    SELECT d.d_year, 
+           SUM(sd.total_sales) AS yearly_sales,
+           SUM(sd.order_count) AS yearly_orders
+    FROM SalesData sd
+    JOIN date_dim d ON sd.ws_ship_date_sk = d.d_date_sk
+    GROUP BY d.d_year
+)
+SELECT ch.c_first_name, ch.c_last_name, ch.cd_gender, 
+       ch.dep_count, ch.dep_employed_count, 
+       ch.dep_college_count, 
+       (CASE 
+           WHEN ag.yearly_sales > 10000 THEN 'High Value Customer' 
+           WHEN ag.yearly_sales BETWEEN 5000 AND 10000 THEN 'Medium Value Customer' 
+           ELSE 'Low Value Customer' 
+        END) AS customer_value_category
+FROM CustomerHierarchy ch
+LEFT JOIN AggregateSales ag ON YEAR(cast('2002-10-01' as date)) = ag.d_year
+WHERE (ch.cd_marital_status = 'M' AND ch.dep_employed_count > 0) 
+   OR (ch.cd_gender = 'F' AND ch.dep_college_count > 0)
+ORDER BY customer_value_category, ch.c_last_name;

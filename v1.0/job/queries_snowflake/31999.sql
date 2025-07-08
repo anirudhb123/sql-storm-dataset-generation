@@ -1,0 +1,75 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        NULL AS parent_id,
+        0 AS level
+    FROM
+        aka_title AS mt
+    WHERE
+        mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT
+        ep.id AS movie_id,
+        ep.title,
+        ep.production_year,
+        mh.movie_id AS parent_id,
+        mh.level + 1
+    FROM
+        aka_title AS ep
+    JOIN
+        MovieHierarchy AS mh ON ep.episode_of_id = mh.movie_id
+),
+TitleStats AS (
+    SELECT
+        mh.title,
+        mh.production_year,
+        COUNT(cc.id) AS cast_count,
+        AVG(COALESCE(mi.info_length, 0)) AS avg_info_length
+    FROM
+        MovieHierarchy AS mh
+    LEFT JOIN
+        complete_cast AS cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN (
+        SELECT
+            movie_id,
+            LENGTH(info) AS info_length
+        FROM
+            movie_info
+        WHERE
+            info IS NOT NULL
+    ) AS mi ON mh.movie_id = mi.movie_id
+    GROUP BY
+        mh.title,
+        mh.production_year
+),
+TopTitles AS (
+    SELECT
+        title,
+        production_year,
+        cast_count,
+        avg_info_length,
+        ROW_NUMBER() OVER (ORDER BY cast_count DESC, avg_info_length ASC) AS rn
+    FROM
+        TitleStats
+)
+SELECT
+    tt.title,
+    tt.production_year,
+    tt.cast_count,
+    tt.avg_info_length,
+    CASE
+        WHEN tt.cast_count >= 10 THEN 'High'
+        WHEN tt.cast_count BETWEEN 5 AND 9 THEN 'Medium'
+        ELSE 'Low'
+    END AS classification
+FROM
+    TopTitles AS tt
+WHERE
+    tt.rn <= 20
+ORDER BY
+    tt.cast_count DESC, tt.avg_info_length ASC;

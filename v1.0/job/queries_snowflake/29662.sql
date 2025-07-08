@@ -1,0 +1,65 @@
+
+WITH RankedTitles AS (
+    SELECT
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        t.kind_id,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS title_rank
+    FROM
+        aka_title t
+    WHERE
+        t.production_year IS NOT NULL
+),
+MovieKeywords AS (
+    SELECT
+        mk.movie_id,
+        LISTAGG(CAST(mk.keyword_id AS STRING), ', ') AS keywords
+    FROM
+        movie_keyword mk
+    JOIN
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY
+        mk.movie_id
+),
+AkaNames AS (
+    SELECT
+        ak.person_id,
+        LISTAGG(ak.name, ', ') AS aka_names
+    FROM
+        aka_name ak
+    GROUP BY
+        ak.person_id
+),
+DetailedMovieInfo AS (
+    SELECT
+        m.id AS movie_id,
+        m.title,
+        mv.production_year,
+        ak.aka_names,
+        mk.keywords
+    FROM
+        title m
+    JOIN
+        RankedTitles mv ON m.id = mv.title_id
+    LEFT JOIN
+        MovieKeywords mk ON m.id = mk.movie_id
+    LEFT JOIN
+        AkaNames ak ON m.id IN (
+            SELECT ci.movie_id FROM cast_info ci WHERE ci.person_id = ak.person_id
+        )
+    WHERE
+        mv.title_rank <= 5 
+)
+SELECT
+    dmi.title,
+    dmi.production_year,
+    dmi.aka_names,
+    dmi.keywords
+FROM
+    DetailedMovieInfo dmi
+WHERE
+    dmi.title ILIKE '%adventure%' 
+ORDER BY
+    dmi.production_year DESC
+LIMIT 10;

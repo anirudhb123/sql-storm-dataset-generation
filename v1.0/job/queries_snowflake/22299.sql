@@ -1,0 +1,75 @@
+
+WITH movie_actors AS (
+    SELECT 
+        c.movie_id,
+        COUNT(DISTINCT c.person_id) AS actor_count,
+        LISTAGG(DISTINCT a.name, ', ') WITHIN GROUP (ORDER BY a.name) AS actor_names
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id
+), 
+company_info AS (
+    SELECT 
+        m.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type,
+        COUNT(m.movie_id) OVER (PARTITION BY m.movie_id) AS total_company_count
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name co ON m.company_id = co.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+), 
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        LISTAGG(k.keyword, ', ') WITHIN GROUP (ORDER BY k.keyword) AS keywords 
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+),
+movie_details AS (
+    SELECT 
+        t.title,
+        t.production_year,
+        t.imdb_id,
+        COALESCE(ki.keywords, 'No Keywords') AS keywords,
+        ma.actor_count,
+        ma.actor_names,
+        ci.company_name,
+        ci.company_type,
+        ci.total_company_count
+    FROM 
+        title t
+    LEFT JOIN 
+        movie_actors ma ON t.id = ma.movie_id
+    LEFT JOIN 
+        company_info ci ON t.id = ci.movie_id
+    LEFT JOIN 
+        movie_keywords ki ON t.id = ki.movie_id
+)
+SELECT 
+    title,
+    production_year,
+    imdb_id,
+    keywords,
+    actor_count,
+    actor_names,
+    company_name,
+    company_type,
+    total_company_count
+FROM 
+    movie_details
+WHERE 
+    (production_year = 2023 OR production_year IS NULL)
+    AND (total_company_count IS NOT NULL OR keywords IS NOT NULL) 
+ORDER BY 
+    production_year DESC, actor_count DESC
+LIMIT 100;

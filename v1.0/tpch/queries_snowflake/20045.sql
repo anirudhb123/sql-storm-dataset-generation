@@ -1,0 +1,55 @@
+
+WITH RegionalSales AS (
+    SELECT 
+        n.n_name AS nation_name,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(DISTINCT c.c_custkey) AS unique_customers
+    FROM 
+        nation n
+    JOIN 
+        supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN 
+        part p ON ps.ps_partkey = p.p_partkey
+    JOIN 
+        lineitem l ON l.l_partkey = p.p_partkey
+    JOIN 
+        orders o ON l.l_orderkey = o.o_orderkey
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+        AND l.l_shipdate BETWEEN DATE '1995-01-01' AND DATE '1996-01-01'
+    GROUP BY 
+        n.n_name
+),
+RankedRegions AS (
+    SELECT 
+        r.nation_name,
+        r.total_sales,
+        r.unique_customers,
+        DENSE_RANK() OVER (ORDER BY r.total_sales DESC) AS sales_rank
+    FROM 
+        RegionalSales r
+)
+SELECT 
+    rr.nation_name,
+    rr.total_sales,
+    rr.unique_customers,
+    CASE 
+        WHEN rr.unique_customers IS NULL THEN 'No customers'
+        ELSE CONCAT('Total unique customers: ', rr.unique_customers)
+    END AS customer_info,
+    COALESCE(LEAD(rr.total_sales) OVER (ORDER BY rr.sales_rank), 0) AS next_region_sales,
+    CASE 
+        WHEN rr.total_sales < 5000 THEN 'Low'
+        WHEN rr.total_sales BETWEEN 5000 AND 10000 THEN 'Medium'
+        ELSE 'High'
+    END AS sales_category
+FROM 
+    RankedRegions rr
+WHERE 
+    rr.sales_rank <= 10
+ORDER BY 
+    rr.sales_rank;

@@ -1,0 +1,52 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        k.keyword,
+        ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY LENGTH(t.title) DESC) AS title_rank
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    LEFT JOIN 
+        keyword k ON mk.keyword_id = k.id
+),
+CastDetails AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        a.id AS actor_id,
+        RANK() OVER (PARTITION BY c.movie_id ORDER BY a.name) AS actor_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+),
+TitleWithCast AS (
+    SELECT 
+        rt.title_id,
+        rt.title,
+        rt.production_year,
+        cd.actor_name,
+        cd.actor_id
+    FROM 
+        RankedTitles rt
+    LEFT JOIN 
+        CastDetails cd ON rt.title_id = cd.movie_id
+    WHERE 
+        rt.title_rank = 1  
+)
+
+SELECT 
+    twc.title,
+    twc.production_year,
+    LISTAGG(twc.actor_name, ', ' ) WITHIN GROUP (ORDER BY twc.actor_name) AS cast,
+    COUNT(twc.actor_id) AS num_actors
+FROM 
+    TitleWithCast twc
+GROUP BY 
+    twc.title, twc.production_year
+ORDER BY 
+    twc.production_year DESC, twc.title;

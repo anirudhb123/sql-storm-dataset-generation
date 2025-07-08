@@ -1,0 +1,43 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_item_sk,
+        ws.ws_order_number,
+        ws.ws_sales_price,
+        ws.ws_net_profit,
+        CASE
+            WHEN cd.cd_gender = 'M' THEN 'Male'
+            WHEN cd.cd_gender = 'F' THEN 'Female'
+            ELSE 'Other'
+        END AS Gender,
+        d.d_year,
+        SUM(ws.ws_quantity) AS Total_Quantity_Sold,
+        COUNT(DISTINCT ws.ws_order_number) AS Total_Orders,
+        AVG(ws.ws_sales_price) AS Average_Sales_Price
+    FROM web_sales ws
+    JOIN customer c ON ws.ws_bill_customer_sk = c.c_customer_sk
+    JOIN customer_demographics cd ON c.c_current_cdemo_sk = cd.cd_demo_sk
+    JOIN date_dim d ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE d.d_year BETWEEN 2021 AND 2023
+    GROUP BY ws.ws_item_sk, ws.ws_order_number, Gender, d.d_year, ws.ws_net_profit, ws.ws_sales_price
+),
+AggregatedData AS (
+    SELECT 
+        Gender,
+        d_year,
+        SUM(Total_Quantity_Sold) AS Overall_Quantity_Sold,
+        SUM(Total_Orders) AS Overall_Orders,
+        AVG(Average_Sales_Price) AS Average_Sales_Price,
+        SUM(ws_net_profit) AS Total_Net_Profit
+    FROM SalesData
+    GROUP BY Gender, d_year
+)
+SELECT 
+    Gender,
+    d_year,
+    Overall_Quantity_Sold,
+    Overall_Orders,
+    Average_Sales_Price,
+    Total_Net_Profit
+FROM AggregatedData
+ORDER BY d_year, Gender;

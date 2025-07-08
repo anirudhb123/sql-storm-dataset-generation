@@ -1,0 +1,60 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT 
+        ws_sold_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales
+    GROUP BY 
+        ws_sold_date_sk, ws_item_sk
+    UNION ALL
+    SELECT 
+        cs_sold_date_sk,
+        cs_item_sk,
+        total_quantity + cs_quantity,
+        total_sales + cs_ext_sales_price
+    FROM 
+        SalesCTE
+    JOIN 
+        catalog_sales ON SalesCTE.ws_item_sk = catalog_sales.cs_item_sk
+    WHERE 
+        SalesCTE.ws_sold_date_sk < catalog_sales.cs_sold_date_sk
+), CustomerSales AS (
+    SELECT 
+        c.c_customer_id,
+        SUM(ws_ext_sales_price) AS total_sales,
+        COUNT(DISTINCT ws_order_number) AS order_count
+    FROM 
+        web_sales ws
+    JOIN 
+        customer c ON ws.ws_ship_customer_sk = c.c_customer_sk
+    GROUP BY 
+        c.c_customer_id
+), AddressSales AS (
+    SELECT 
+        ca.ca_address_id,
+        COUNT(DISTINCT c.c_customer_sk) AS customer_count,
+        AVG(cs.total_sales) AS avg_sales_per_customer
+    FROM 
+        customer_address ca
+    LEFT JOIN 
+        customer c ON ca.ca_address_sk = c.c_current_addr_sk
+    LEFT JOIN 
+        CustomerSales cs ON c.c_customer_id = cs.c_customer_id
+    GROUP BY 
+        ca.ca_address_id
+)
+SELECT 
+    a.ca_address_id,
+    a.customer_count,
+    a.avg_sales_per_customer,
+    ROW_NUMBER() OVER (ORDER BY a.avg_sales_per_customer DESC) AS sales_rank
+FROM 
+    AddressSales a
+WHERE 
+    a.avg_sales_per_customer IS NOT NULL
+    AND a.customer_count > 0
+ORDER BY 
+    a.avg_sales_per_customer DESC;

@@ -1,0 +1,31 @@
+
+WITH RECURSIVE order_hierarchy AS (
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, s.s_nationkey, 1 AS level
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN supplier s ON c.c_nationkey = s.s_nationkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1997-10-01'
+    UNION ALL
+    SELECT o.o_orderkey, o.o_totalprice, o.o_orderdate, oh.s_nationkey, oh.level + 1
+    FROM orders o
+    JOIN order_hierarchy oh ON o.o_custkey = oh.o_orderkey
+)
+SELECT 
+    r.r_name AS region_name,
+    COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END), 0) AS total_returned,
+    COUNT(DISTINCT c.c_custkey) AS total_customers,
+    AVG(oh.o_totalprice) AS avg_order_price,
+    LISTAGG(DISTINCT s.s_name, ', ') WITHIN GROUP (ORDER BY s.s_name) AS supplier_names
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN customer c ON s.s_nationkey = c.c_nationkey
+LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+LEFT JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+LEFT JOIN order_hierarchy oh ON c.c_nationkey = oh.s_nationkey
+WHERE (s.s_acctbal IS NOT NULL OR s.s_comment IS NULL) 
+AND r.r_name LIKE 'Asia%'
+GROUP BY r.r_name
+HAVING COALESCE(SUM(CASE WHEN l.l_returnflag = 'R' THEN l.l_extendedprice * (1 - l.l_discount) ELSE 0 END), 0) > 1000
+ORDER BY r.r_name DESC
+LIMIT 10;

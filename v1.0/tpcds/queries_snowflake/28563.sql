@@ -1,0 +1,55 @@
+
+WITH AddressSummary AS (
+    SELECT 
+        ca_state,
+        ca_city,
+        COUNT(*) AS address_count,
+        LISTAGG(ca_street_name, '; ') AS street_names,
+        LISTAGG(DISTINCT ca_street_type, ', ') AS distinct_street_types
+    FROM 
+        customer_address
+    GROUP BY 
+        ca_state, ca_city
+),
+DemographicsSummary AS (
+    SELECT 
+        cd_gender,
+        COUNT(*) AS demographic_count,
+        LISTAGG(DISTINCT cd_marital_status, ', ') AS marital_statuses,
+        AVG(cd_purchase_estimate) AS average_purchase_estimate
+    FROM 
+        customer_demographics
+    GROUP BY 
+        cd_gender
+),
+FullReport AS (
+    SELECT 
+        a.ca_state AS state,
+        a.ca_city AS city,
+        a.address_count,
+        a.street_names,
+        a.distinct_street_types,
+        d.cd_gender AS gender,
+        d.demographic_count,
+        d.marital_statuses,
+        d.average_purchase_estimate
+    FROM 
+        AddressSummary a
+    JOIN 
+        DemographicsSummary d ON a.ca_city = d.cd_gender 
+)
+
+SELECT 
+    state,
+    city,
+    address_count,
+    street_names,
+    distinct_street_types,
+    gender,
+    demographic_count,
+    marital_statuses,
+    average_purchase_estimate
+FROM 
+    FullReport
+ORDER BY 
+    address_count DESC, demographic_count DESC;

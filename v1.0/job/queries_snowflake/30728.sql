@@ -1,0 +1,79 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        0 AS depth,
+        NULL AS parent_movie_id
+    FROM 
+        aka_title t
+    WHERE 
+        t.episode_of_id IS NULL  
+    
+    UNION ALL
+    
+    SELECT 
+        t.id,
+        t.title,
+        t.production_year,
+        mh.depth + 1,
+        mh.movie_id
+    FROM 
+        aka_title t
+    JOIN 
+        MovieHierarchy mh ON t.episode_of_id = mh.movie_id  
+),
+MovieKeywordCounts AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+CompanyCount AS (
+    SELECT 
+        mc.movie_id,
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        movie_companies mc
+    GROUP BY 
+        mc.movie_id
+),
+FinalSummary AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(mkc.keyword_count, 0) AS keyword_count,
+        COALESCE(cc.company_count, 0) AS company_count,
+        mh.depth
+    FROM 
+        MovieHierarchy mh
+    LEFT JOIN 
+        MovieKeywordCounts mkc ON mh.movie_id = mkc.movie_id
+    LEFT JOIN 
+        CompanyCount cc ON mh.movie_id = cc.movie_id
+)
+SELECT 
+    fs.movie_id,
+    fs.title,
+    fs.production_year,
+    fs.keyword_count,
+    fs.company_count,
+    fs.depth,
+    ROW_NUMBER() OVER (ORDER BY fs.production_year DESC, fs.title) AS rank,
+    CASE 
+        WHEN fs.depth = 0 THEN 'Feature Film'
+        ELSE 'Episode'
+    END AS movie_type
+FROM 
+    FinalSummary fs
+WHERE 
+    fs.production_year >= 2000
+ORDER BY 
+    fs.keyword_count DESC,
+    fs.company_count DESC,
+    rank;

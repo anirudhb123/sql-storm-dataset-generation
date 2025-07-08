@@ -1,0 +1,60 @@
+
+WITH SalesCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        0 AS total_spent,
+        1 AS level
+    FROM 
+        customer c
+    UNION ALL
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        s.total_spent + COALESCE(SUM(o.o_totalprice), 0) AS total_spent,
+        s.level + 1
+    FROM 
+        SalesCTE s
+    JOIN 
+        customer c ON s.c_custkey = c.c_custkey
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        s.total_spent < 10000
+    GROUP BY 
+        c.c_custkey, c.c_name, s.level, s.total_spent
+), 
+QtyCTE AS (
+    SELECT 
+        l.l_partkey,
+        SUM(l.l_quantity) AS total_quantity
+    FROM 
+        lineitem l
+    WHERE 
+        l.l_shipdate >= '1997-01-01' 
+        AND l.l_shipdate <= '1997-12-31'
+    GROUP BY 
+        l.l_partkey
+)
+SELECT 
+    p.p_name,
+    p.p_brand,
+    COALESCE(s.total_spent, 0) AS customer_spending,
+    COALESCE(q.total_quantity, 0) AS total_quantity,
+    CASE 
+        WHEN q.total_quantity IS NULL THEN 'No Quantity'
+        ELSE 'Available'
+    END AS quantity_status,
+    ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY COALESCE(s.total_spent, 0) DESC) AS brand_rank,
+    RANK() OVER (ORDER BY COALESCE(q.total_quantity, 0) DESC) AS quantity_rank
+FROM 
+    part p
+LEFT JOIN 
+    SalesCTE s ON s.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'Germany') LIMIT 1)
+LEFT JOIN 
+    QtyCTE q ON p.p_partkey = q.l_partkey
+WHERE 
+    p.p_retailprice BETWEEN 20.00 AND 500.00
+    AND (p.p_container LIKE '%BOX%' OR p.p_container IS NULL)
+ORDER BY 
+    customer_spending DESC, quantity_status, brand_rank;

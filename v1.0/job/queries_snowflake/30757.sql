@@ -1,0 +1,56 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year,
+           CAST(NULL AS VARCHAR) AS parent_movie,
+           0 AS level
+    FROM aka_title mt
+    WHERE mt.episode_of_id IS NULL
+    
+    UNION ALL
+    
+    SELECT mt.id AS movie_id, 
+           mt.title, 
+           mt.production_year,
+           mh.title AS parent_movie,
+           mh.level + 1
+    FROM aka_title mt
+    JOIN movie_hierarchy mh ON mt.episode_of_id = mh.movie_id
+),
+
+top_movies AS (
+    SELECT m.movie_id,
+           m.title,
+           m.production_year,
+           COUNT(ci.id) AS cast_count,
+           ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(ci.id) DESC) AS rn
+    FROM movie_hierarchy m
+    LEFT JOIN cast_info ci ON m.movie_id = ci.movie_id
+    GROUP BY m.movie_id, m.title, m.production_year
+),
+
+keyword_count AS (
+    SELECT mk.movie_id,
+           COUNT(DISTINCT k.keyword) AS keyword_count
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+
+SELECT tm.title,
+       tm.production_year,
+       COALESCE(kc.keyword_count, 0) AS keyword_count,
+       tm.cast_count,
+       mh.parent_movie,
+       CASE WHEN tm.cast_count > 10 THEN 'Ensemble Cast' ELSE 'Small Cast' END AS cast_type,
+       CASE 
+           WHEN tm.production_year < 1980 THEN 'Classic'
+           WHEN tm.production_year BETWEEN 1980 AND 2000 THEN 'Modern Classic'
+           ELSE 'Recent'
+       END AS era
+FROM top_movies tm
+LEFT JOIN keyword_count kc ON tm.movie_id = kc.movie_id
+LEFT JOIN movie_hierarchy mh ON tm.movie_id = mh.movie_id
+WHERE tm.rn <= 5
+ORDER BY tm.production_year DESC, tm.cast_count DESC;

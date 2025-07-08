@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        CAST(s.s_name AS VARCHAR(255)) AS hierarchy_path
+    FROM 
+        supplier s
+    WHERE 
+        s.s_nationkey = (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT 
+        ps.ps_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        CONCAT(sh.hierarchy_path, ' -> ', s.s_name) AS hierarchy_path
+    FROM 
+        SupplierHierarchy sh
+    JOIN 
+        partsupp ps ON sh.s_suppkey = ps.ps_suppkey
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    p.p_retailprice,
+    COALESCE(SUM(l.l_quantity), 0) AS total_quantity_sold,
+    COUNT(DISTINCT o.o_orderkey) AS distinct_orders,
+    RANK() OVER (ORDER BY AVG(l.l_extendedprice) DESC) AS price_rank,
+    LISTAGG(DISTINCT sh.hierarchy_path, ', ') AS supplier_paths
+FROM 
+    part p
+LEFT JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+LEFT JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    SupplierHierarchy sh ON l.l_suppkey = sh.s_suppkey
+WHERE 
+    (p.p_size BETWEEN 10 AND 20 OR p.p_mfgr = 'MFGR#1')
+    AND (o.o_orderstatus = 'O' OR o.o_orderdate >= '1997-01-01')
+GROUP BY 
+    p.p_partkey, 
+    p.p_name, 
+    p.p_retailprice,
+    sh.hierarchy_path
+HAVING 
+    AVG(l.l_discount) IS NOT NULL
+ORDER BY 
+    total_quantity_sold DESC
+LIMIT 50;

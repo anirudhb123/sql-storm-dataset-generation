@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 0 AS level
+    FROM supplier
+    WHERE s_acctbal > 1000
+
+    UNION ALL
+
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE s.s_acctbal > sh.s_acctbal
+),
+NationSummary AS (
+    SELECT n.n_nationkey, n.n_name, COUNT(DISTINCT s.s_suppkey) AS supplier_count, SUM(s.s_acctbal) AS total_acctbal
+    FROM nation n
+    LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    GROUP BY n.n_nationkey, n.n_name
+),
+PartSales AS (
+    SELECT p.p_partkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM part p
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY p.p_partkey
+),
+TopParts AS (
+    SELECT p.p_partkey, p.p_name, ps.total_sales
+    FROM part p
+    JOIN PartSales ps ON p.p_partkey = ps.p_partkey
+    ORDER BY ps.total_sales DESC
+    LIMIT 10
+)
+SELECT ns.n_name, ns.supplier_count, ns.total_acctbal, tp.p_name, tp.total_sales
+FROM NationSummary ns
+LEFT JOIN supplier s ON ns.n_nationkey = s.s_nationkey
+LEFT JOIN TopParts tp ON s.s_suppkey IN (
+    SELECT ps.ps_suppkey FROM partsupp ps
+    WHERE ps.ps_partkey IN (SELECT p.p_partkey FROM TopParts p)
+)
+WHERE ns.total_acctbal IS NOT NULL
+ORDER BY ns.total_acctbal DESC, tp.total_sales DESC;

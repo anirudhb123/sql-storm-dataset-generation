@@ -1,0 +1,52 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        COUNT(ci.id) AS total_cast,
+        LISTAGG(a.name, ', ') WITHIN GROUP (ORDER BY a.name) AS cast_names
+    FROM 
+        title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    WHERE 
+        t.production_year BETWEEN 2000 AND 2023
+    GROUP BY 
+        t.title, t.production_year
+), MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        LISTAGG(k.keyword, ', ') WITHIN GROUP (ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+), TopRatedMovies AS (
+    SELECT 
+        rm.movie_title,
+        rm.production_year,
+        rm.total_cast,
+        mk.keywords,
+        ROW_NUMBER() OVER (ORDER BY rm.total_cast DESC) AS rank
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        MovieKeywords mk ON rm.movie_title = mk.movie_id
+)
+SELECT 
+    movie_title,
+    production_year,
+    total_cast,
+    keywords
+FROM 
+    TopRatedMovies
+WHERE 
+    rank <= 10
+ORDER BY 
+    production_year DESC;

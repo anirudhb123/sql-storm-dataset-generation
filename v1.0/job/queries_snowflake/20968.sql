@@ -1,0 +1,76 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY at.production_year DESC) AS year_rank,
+        COUNT(*) OVER (PARTITION BY at.production_year) AS movie_count,
+        COALESCE(NULLIF(at.note, ''), 'No Description') AS movie_note,
+        at.movie_id
+    FROM 
+        aka_title at
+    WHERE 
+        at.production_year IS NOT NULL
+),
+TopCast AS (
+    SELECT 
+        c.movie_id,
+        ak.name AS actor_name,
+        ROW_NUMBER() OVER (PARTITION BY c.movie_id ORDER BY c.nr_order) AS role_rank
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name ak ON c.person_id = ak.person_id
+    WHERE 
+        ak.name IS NOT NULL AND ak.name <> ''
+),
+MoviesWithTopCast AS (
+    SELECT 
+        rm.title,
+        rm.production_year,
+        tc.actor_name,
+        tc.role_rank,
+        rm.movie_id
+    FROM 
+        RankedMovies rm
+    LEFT JOIN 
+        TopCast tc ON rm.movie_id = tc.movie_id
+    WHERE 
+        rm.movie_count > 1
+),
+FilteredMovies AS (
+    SELECT 
+        mw.movie_id,
+        mw.title, 
+        mw.production_year,
+        mw.actor_name,
+        mw.role_rank,
+        CASE
+            WHEN mw.role_rank = 1 THEN 'Leading Actor'
+            WHEN mw.role_rank < 4 THEN 'Supporting Actor'
+            ELSE 'Minor Role'
+        END AS role_category
+    FROM 
+        MoviesWithTopCast mw
+    WHERE 
+        mw.production_year > 2000
+)
+
+SELECT 
+    f.title,
+    f.production_year,
+    f.actor_name,
+    COUNT(*) OVER(PARTITION BY f.role_category ORDER BY f.production_year) AS role_count,
+    f.role_category,
+    CONCAT('The movie "', f.title, '" was released in ', f.production_year, ' with a ', f.role_category, ' named ', f.actor_name, '.') AS movie_statement
+FROM 
+    FilteredMovies f
+WHERE 
+    NOT EXISTS (
+        SELECT 1 
+        FROM movie_companies mc 
+        WHERE mc.movie_id = f.movie_id AND mc.note IS NULL
+    )
+ORDER BY 
+    f.production_year DESC, 
+    f.role_category;

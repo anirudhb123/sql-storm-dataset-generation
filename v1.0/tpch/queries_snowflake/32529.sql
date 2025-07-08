@@ -1,0 +1,56 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, s_acctbal, 1 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'Germany')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+TotalSales AS (
+    SELECT 
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY o.o_custkey
+),
+HighValueCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COALESCE(ts.total_sales, 0) AS total_sales,
+        c.c_nationkey
+    FROM customer c
+    LEFT JOIN TotalSales ts ON c.c_custkey = ts.o_custkey
+    WHERE c.c_acctbal > 1000
+),
+SupplierPerformance AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COUNT(DISTINCT l.l_orderkey) AS order_count,
+        AVG(l.l_extendedprice) AS avg_price
+    FROM supplier s
+    LEFT JOIN partsupp ps ON ps.ps_suppkey = s.s_suppkey
+    LEFT JOIN lineitem l ON l.l_partkey = ps.ps_partkey
+    GROUP BY s.s_suppkey, s.s_name
+)
+SELECT 
+    sh.s_suppkey,
+    sh.s_name,
+    hvc.c_custkey,
+    hvc.c_name,
+    COALESCE(sp.order_count, 0) AS order_count,
+    COALESCE(sp.avg_price, 0) AS avg_price,
+    ROW_NUMBER() OVER (PARTITION BY sh.s_suppkey ORDER BY hvc.total_sales DESC) AS rank
+FROM SupplierHierarchy sh
+JOIN HighValueCustomers hvc ON sh.s_nationkey = hvc.c_nationkey
+LEFT JOIN SupplierPerformance sp ON sh.s_suppkey = sp.s_suppkey
+WHERE hvc.total_sales > (SELECT AVG(total_sales) FROM HighValueCustomers)
+ORDER BY sh.s_suppkey, rank;

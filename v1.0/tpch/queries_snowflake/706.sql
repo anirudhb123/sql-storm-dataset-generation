@@ -1,0 +1,61 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderstatus,
+        o.o_totalprice,
+        o.o_orderdate,
+        o.o_orderpriority,
+        ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01'
+),
+SupplierSummary AS (
+    SELECT 
+        s.s_nationkey,
+        COUNT(DISTINCT ps.ps_partkey) AS part_count,
+        SUM(ps.ps_availqty) AS total_avail_qty,
+        AVG(ps.ps_supplycost) AS avg_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_nationkey
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        COUNT(o.o_orderkey) AS total_orders,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+    HAVING 
+        SUM(o.o_totalprice) IS NOT NULL
+)
+SELECT 
+    n.n_name AS nation_name,
+    SUM(COALESCE(ss.part_count, 0)) AS total_parts,
+    SUM(COALESCE(ss.total_avail_qty, 0)) AS total_available_quantity,
+    SUM(COALESCE(co.total_orders, 0)) AS customer_order_count,
+    AVG(co.total_spent) AS avg_spent_by_customer,
+    RANK() OVER (ORDER BY SUM(COALESCE(co.total_spent, 0)) DESC) AS customer_spending_rank
+FROM 
+    nation n
+LEFT JOIN 
+    SupplierSummary ss ON n.n_nationkey = ss.s_nationkey
+LEFT JOIN 
+    CustomerOrders co ON n.n_nationkey = (SELECT c.c_nationkey FROM customer c WHERE c.c_custkey = co.c_custkey LIMIT 1) -- Adjusted for Snowflake syntax
+GROUP BY 
+    n.n_name
+HAVING 
+    COUNT(DISTINCT co.c_custkey) > 0
+ORDER BY 
+    customer_spending_rank;

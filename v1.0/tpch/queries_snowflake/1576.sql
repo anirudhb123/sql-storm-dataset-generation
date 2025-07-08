@@ -1,0 +1,60 @@
+
+WITH OrderSummary AS (
+    SELECT
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+        COUNT(DISTINCT l.l_linenumber) AS item_count,
+        MAX(l.l_shipdate) AS last_ship_date
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY o.o_orderkey
+),
+SupplierPerformance AS (
+    SELECT
+        ps.ps_suppkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS supplier_revenue,
+        SUM(ps.ps_availqty) AS total_available_quantity
+    FROM partsupp ps
+    JOIN lineitem l ON ps.ps_partkey = l.l_partkey
+    GROUP BY ps.ps_suppkey
+),
+SupplierRating AS (
+    SELECT
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(sp.supplier_revenue, 0) AS supplier_revenue,
+        COALESCE(sp.total_available_quantity, 0) AS total_available_quantity,
+        RANK() OVER (ORDER BY COALESCE(sp.supplier_revenue, 0) DESC) AS revenue_rank
+    FROM supplier s
+    LEFT JOIN SupplierPerformance sp ON s.s_suppkey = sp.ps_suppkey
+),
+CustomerOrderCounts AS (
+    SELECT
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey
+)
+SELECT
+    s.s_name AS supplier_name,
+    os.o_orderkey,
+    os.total_revenue,
+    os.item_count,
+    c.c_name AS customer_name,
+    co.order_count,
+    sr.total_available_quantity,
+    sr.revenue_rank,
+    CASE 
+        WHEN os.total_revenue > 1000 THEN 'High'
+        WHEN os.total_revenue BETWEEN 500 AND 1000 THEN 'Medium'
+        ELSE 'Low'
+    END AS revenue_category
+FROM OrderSummary os
+JOIN customer c ON c.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = os.o_orderkey)
+JOIN SupplierRating sr ON sr.supplier_revenue = (SELECT MAX(supplier_revenue) FROM SupplierRating)
+JOIN partsupp ps ON ps.ps_partkey = (SELECT l.l_partkey FROM lineitem l WHERE l.l_orderkey = os.o_orderkey LIMIT 1)
+JOIN supplier s ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN CustomerOrderCounts co ON c.c_custkey = co.c_custkey
+ORDER BY os.total_revenue DESC, sr.revenue_rank;

@@ -1,0 +1,65 @@
+
+WITH RECURSIVE SalesCTE AS (
+    SELECT
+        c.c_custkey,
+        SUM(o.o_totalprice) AS total_sales,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS sales_rank
+    FROM
+        customer c
+    JOIN
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE
+        o.o_orderdate >= DATE '1997-01-01' AND o.o_orderdate < DATE '1998-01-01'
+    GROUP BY
+        c.c_custkey, c.c_nationkey
+),
+TopRegions AS (
+    SELECT
+        n.n_regionkey,
+        SUM(s.s_acctbal) AS total_balance
+    FROM
+        supplier s
+    JOIN
+        nation n ON s.s_nationkey = n.n_nationkey
+    GROUP BY
+        n.n_regionkey
+    ORDER BY
+        total_balance DESC
+    LIMIT 5
+),
+PartStats AS (
+    SELECT
+        p.p_partkey,
+        p.p_name,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        AVG(ps.ps_supplycost) AS avg_supplycost
+    FROM
+        part p
+    LEFT JOIN
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY
+        p.p_partkey, p.p_name
+)
+SELECT
+    r.r_name AS region_name,
+    COALESCE(ss.total_sales, 0) AS total_sales,
+    ps.p_name,
+    ps.supplier_count,
+    ps.avg_supplycost,
+    CASE 
+        WHEN ss.sales_rank IS NOT NULL THEN 'Top Customer' 
+        ELSE 'Other' 
+    END AS customer_status
+FROM
+    region r
+LEFT JOIN
+    TopRegions tr ON r.r_regionkey = tr.n_regionkey
+LEFT JOIN
+    SalesCTE ss ON ss.c_custkey IN (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = r.r_regionkey)
+JOIN
+    PartStats ps ON ps.supplier_count > 2
+WHERE
+    r.r_name LIKE 'N%'
+    AND (tr.total_balance IS NULL OR tr.total_balance > 10000)
+ORDER BY
+    r.r_name, total_sales DESC;

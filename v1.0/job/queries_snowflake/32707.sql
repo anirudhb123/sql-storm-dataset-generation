@@ -1,0 +1,54 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        m.id AS movie_id,
+        m.title,
+        m.production_year,
+        1 AS level,
+        CAST(m.title AS VARCHAR) AS path
+    FROM title m
+    WHERE m.episode_of_id IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1,
+        CAST(mh.path || ' -> ' || e.title AS VARCHAR) AS path
+    FROM title e
+    JOIN MovieHierarchy mh ON e.episode_of_id = mh.movie_id  
+),
+MovieDetails AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        mh.level,
+        mh.path,
+        COALESCE(AVG(mk_count.keyword_count), 0) AS avg_keywords,
+        LISTAGG(DISTINCT c.name, ', ') WITHIN GROUP (ORDER BY c.name) AS cast_names
+    FROM MovieHierarchy mh
+    LEFT JOIN (
+        SELECT 
+            movie_id,
+            COUNT(*) AS keyword_count
+        FROM movie_keyword
+        GROUP BY movie_id
+    ) mk_count ON mh.movie_id = mk_count.movie_id
+    LEFT JOIN complete_cast cc ON mh.movie_id = cc.movie_id
+    LEFT JOIN aka_name c ON cc.subject_id = c.person_id
+    GROUP BY mh.movie_id, mh.title, mh.production_year, mh.level, mh.path
+)
+SELECT 
+    md.title,
+    md.production_year,
+    md.level,
+    md.path,
+    md.avg_keywords,
+    md.cast_names
+FROM MovieDetails md
+WHERE md.avg_keywords > 0  
+ORDER BY md.level, md.production_year DESC
+LIMIT 10;

@@ -1,0 +1,64 @@
+
+WITH ranked_movies AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ROW_NUMBER() OVER (PARTITION BY mt.production_year ORDER BY COUNT(ki.keyword) DESC) AS rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        movie_keyword mk ON mt.id = mk.movie_id
+    LEFT JOIN 
+        keyword ki ON mk.keyword_id = ki.id
+    GROUP BY 
+        mt.id, mt.title, mt.production_year
+),
+average_year AS (
+    SELECT 
+        AVG(m.production_year) AS avg_prod_year
+    FROM 
+        aka_title m
+    WHERE 
+        m.production_year IS NOT NULL
+),
+performance_benchmark AS (
+    SELECT 
+        ak.name,
+        mt.title,
+        mt.production_year,
+        rk.rank,
+        CASE 
+            WHEN rk.rank = 1 THEN 'Top Movie'
+            ELSE 'Other Movie'
+        END AS movie_classification,
+        COALESCE(pi.info, 'No Info') AS person_info,
+        COUNT(ci.id) OVER (PARTITION BY ak.person_id) AS movie_count
+    FROM 
+        aka_name ak
+    JOIN 
+        cast_info ci ON ak.person_id = ci.person_id
+    JOIN 
+        ranked_movies rk ON ci.movie_id = rk.movie_id
+    JOIN 
+        aka_title mt ON rk.movie_id = mt.id
+    LEFT JOIN 
+        person_info pi ON ak.person_id = pi.person_id 
+        AND pi.info_type_id = (SELECT id FROM info_type WHERE info = 'Biography')
+    WHERE 
+        mt.production_year > (SELECT avg_prod_year FROM average_year)
+)
+SELECT 
+    *,
+    CASE 
+        WHEN movie_count > 10 THEN 'Prolific Actor'
+        ELSE 'Occasional Actor'
+    END AS actor_type
+FROM 
+    performance_benchmark
+WHERE 
+    movie_classification = 'Top Movie'
+ORDER BY 
+    production_year DESC, 
+    name
+OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY;

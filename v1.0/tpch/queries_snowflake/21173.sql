@@ -1,0 +1,70 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_orderstatus,
+        RANK() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS rank_order,
+        c.c_nationkey,
+        c.c_mktsegment,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_orderstatus, c.c_nationkey, c.c_mktsegment
+),
+
+SupplierAverage AS (
+    SELECT 
+        ps.ps_partkey,
+        AVG(s.s_acctbal) AS avg_acctbal
+    FROM 
+        partsupp ps
+    JOIN 
+        supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY 
+        ps.ps_partkey
+),
+
+PartDetails AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_brand,
+        COALESCE(pa.avg_acctbal, 0) AS avg_supplier_acctbal,
+        ROW_NUMBER() OVER (ORDER BY p.p_retailprice DESC) AS part_rank
+    FROM 
+        part p
+    LEFT JOIN 
+        SupplierAverage pa ON p.p_partkey = pa.ps_partkey
+)
+
+SELECT 
+    ro.o_orderkey,
+    ro.o_orderdate,
+    pd.p_name,
+    pd.avg_supplier_acctbal,
+    CASE 
+        WHEN ro.rank_order = 1 THEN 'Top Order'
+        ELSE 'Regular Order'
+    END AS order_type,
+    PERCENT_RANK() OVER (PARTITION BY ro.c_mktsegment ORDER BY ro.total_revenue DESC) AS revenue_rank
+FROM 
+    RankedOrders ro
+INNER JOIN 
+    PartDetails pd ON pd.part_rank < 10
+WHERE 
+    (ro.c_nationkey IN (
+        SELECT n.n_nationkey 
+        FROM nation n 
+        WHERE n.n_name LIKE '%land%'
+    )) 
+    AND (ro.total_revenue > (SELECT AVG(total_revenue) FROM RankedOrders))
+    AND (COALESCE(ro.o_orderdate, '1900-01-01') > DATEADD(year, -1, '1998-10-01'))
+ORDER BY 
+    ro.o_orderdate DESC, 
+    pd.avg_supplier_acctbal DESC;

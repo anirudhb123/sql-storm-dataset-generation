@@ -1,0 +1,72 @@
+
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey, 
+        o.o_orderdate, 
+        o.o_totalprice,
+        DENSE_RANK() OVER (PARTITION BY c.c_mktsegment ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderstatus = 'F' AND 
+        o.o_orderdate BETWEEN '1996-01-01' AND '1996-12-31'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey
+),
+PartDetails AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_size, 
+        CASE 
+            WHEN p.p_size > 50 THEN 'Large'
+            WHEN p.p_size <= 50 AND p.p_size >= 30 THEN 'Medium'
+            ELSE 'Small'
+        END AS size_category
+    FROM 
+        part p
+),
+OrderSummary AS (
+    SELECT 
+        ro.o_orderkey,
+        MAX(ro.o_totalprice) AS max_order_price,
+        COUNT(*) FILTER (WHERE li.l_returnflag = 'R') AS returns_count,
+        SUM(CASE WHEN li.l_discount > 0 THEN li.l_extendedprice * (1 - li.l_discount) ELSE 0 END) AS discounted_total
+    FROM 
+        RankedOrders ro
+    LEFT JOIN 
+        lineitem li ON ro.o_orderkey = li.l_orderkey
+    GROUP BY 
+        ro.o_orderkey
+)
+SELECT 
+    od.o_orderkey, 
+    od.max_order_price, 
+    od.returns_count, 
+    od.discounted_total, 
+    pd.size_category, 
+    CASE 
+        WHEN sd.total_supply_cost IS NULL THEN 'No Supplier Data'
+        ELSE TO_VARCHAR(sd.total_supply_cost)
+    END AS supplier_info
+FROM 
+    OrderSummary od
+LEFT JOIN 
+    PartDetails pd ON od.o_orderkey = (SELECT l.l_orderkey FROM lineitem l WHERE l.l_linenumber = (SELECT MIN(l2.l_linenumber) FROM lineitem l2 WHERE l2.l_orderkey = od.o_orderkey))
+LEFT JOIN 
+    SupplierDetails sd ON sd.s_suppkey = (SELECT ps.ps_suppkey FROM partsupp ps JOIN lineitem li ON ps.ps_partkey = li.l_partkey WHERE li.l_orderkey = od.o_orderkey LIMIT 1)
+WHERE 
+    od.discounted_total > (SELECT AVG(max_order_price) FROM OrderSummary)
+ORDER BY 
+    od.max_order_price DESC, 
+    od.returns_count ASC;

@@ -1,0 +1,75 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey, 
+        p.p_name, 
+        p.p_retailprice, 
+        RANK() OVER (PARTITION BY p.p_mfgr ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size IN (SELECT DISTINCT ps.ps_availqty FROM partsupp ps WHERE ps.ps_supplycost < 50.00)
+), 
+SupplierInfo AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        COALESCE(NULLIF(s.s_comment, ''), 'No comment available') AS supplier_comment
+    FROM 
+        supplier s
+    WHERE 
+        s.s_acctbal > (SELECT AVG(c.c_acctbal) FROM customer c WHERE c.c_mktsegment = 'BUILDING')
+), 
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+        COUNT(DISTINCT l.l_linenumber) AS item_count
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        o.o_orderkey
+), 
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(DISTINCT o.o_orderkey) AS order_count,
+        SUM(od.total_price) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        OrderDetails od ON o.o_orderkey = od.o_orderkey
+    GROUP BY 
+        c.c_custkey
+)
+SELECT 
+    rp.p_name,
+    rp.p_retailprice,
+    COUNT(DISTINCT si.s_suppkey) AS supplier_count,
+    co.order_count,
+    co.total_spent,
+    RANK() OVER (ORDER BY rp.p_retailprice DESC) AS retail_rank
+FROM 
+    RankedParts rp
+LEFT JOIN 
+    SupplierInfo si ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = si.s_suppkey)
+LEFT JOIN 
+    CustomerOrders co ON rp.p_partkey IN (SELECT l.l_partkey FROM lineitem l JOIN orders o ON l.l_orderkey = o.o_orderkey WHERE o.o_totalprice > 1000)
+WHERE 
+    rp.price_rank = 1
+GROUP BY 
+    rp.p_name, 
+    rp.p_retailprice, 
+    co.order_count, 
+    co.total_spent
+HAVING 
+    COUNT(DISTINCT si.s_suppkey) > 5
+ORDER BY 
+    retail_rank ASC, 
+    supplier_count DESC;

@@ -1,0 +1,49 @@
+
+WITH movie_details AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        COUNT(DISTINCT c.person_id) AS total_cast,
+        LISTAGG(DISTINCT a.name, ', ') WITHIN GROUP (ORDER BY a.name) AS cast_names,
+        AVG(CASE WHEN it.info = 'rating' THEN CAST(i.info AS FLOAT) END) AS avg_rating
+    FROM 
+        aka_title t
+    LEFT JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    LEFT JOIN 
+        cast_info c ON cc.subject_id = c.id
+    LEFT JOIN 
+        aka_name a ON c.person_id = a.person_id
+    LEFT JOIN 
+        movie_info i ON t.id = i.movie_id
+    LEFT JOIN 
+        info_type it ON i.info_type_id = it.id
+    WHERE 
+        t.production_year >= 2000
+        AND (i.info IS NULL OR it.info != 'budget') 
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+high_rated_movies AS (
+    SELECT 
+        md.*,
+        ROW_NUMBER() OVER (PARTITION BY md.production_year ORDER BY md.avg_rating DESC) AS rank
+    FROM 
+        movie_details md
+    WHERE 
+        md.avg_rating IS NOT NULL
+)
+SELECT 
+    h.movie_id,
+    h.title,
+    h.production_year,
+    h.total_cast,
+    h.cast_names,
+    h.avg_rating
+FROM 
+    high_rated_movies h
+WHERE 
+    h.rank <= 3
+ORDER BY 
+    h.production_year, h.avg_rating DESC;

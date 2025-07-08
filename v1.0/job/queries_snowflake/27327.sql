@@ -1,0 +1,64 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id, 
+        t.title, 
+        t.production_year, 
+        COUNT(DISTINCT ci.person_id) AS cast_count
+    FROM 
+        aka_title t
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.person_id
+    WHERE 
+        t.production_year >= 2000
+    GROUP BY 
+        t.id, t.title, t.production_year
+),
+TopMovies AS (
+    SELECT 
+        movie_id, 
+        title, 
+        production_year, 
+        cast_count,
+        ROW_NUMBER() OVER (ORDER BY cast_count DESC) AS rnk
+    FROM 
+        RankedMovies
+    WHERE 
+        cast_count > 5
+),
+MovieDetails AS (
+    SELECT 
+        tm.movie_id, 
+        tm.title, 
+        tm.production_year, 
+        tm.cast_count,
+        LISTAGG(DISTINCT ak.name, ', ') WITHIN GROUP (ORDER BY ak.name) AS aka_names,
+        LISTAGG(DISTINCT ci.note, '; ') WITHIN GROUP (ORDER BY ci.note) AS cast_notes
+    FROM 
+        TopMovies tm
+    LEFT JOIN 
+        aka_title at ON tm.movie_id = at.id
+    LEFT JOIN 
+        aka_name ak ON ak.person_id IN (
+            SELECT person_id FROM cast_info WHERE movie_id = tm.movie_id
+        )
+    LEFT JOIN 
+        cast_info ci ON ci.movie_id = tm.movie_id
+    GROUP BY 
+        tm.movie_id, tm.title, tm.production_year, tm.cast_count
+)
+SELECT 
+    md.movie_id, 
+    md.title, 
+    md.production_year, 
+    md.cast_count, 
+    md.aka_names, 
+    md.cast_notes
+FROM 
+    MovieDetails md
+WHERE 
+    md.production_year = (SELECT MAX(production_year) FROM MovieDetails)
+ORDER BY 
+    md.cast_count DESC;

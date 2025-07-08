@@ -1,0 +1,86 @@
+
+WITH ranked_parts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_retailprice,
+        p.p_comment,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS part_rank
+    FROM 
+        part p
+    WHERE 
+        p.p_size BETWEEN 1 AND 50 
+        AND p.p_retailprice IS NOT NULL
+), 
+supplier_nation AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        n.n_name AS nation_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY s.s_acctbal DESC) AS acctbal_rank
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+), 
+order_summary AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_custkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales,
+        COUNT(*) AS line_count,
+        MAX(CASE WHEN l.l_returnflag = 'Y' THEN 1 ELSE 0 END) AS has_returns
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        o.o_orderdate >= '1996-01-01' 
+        AND o.o_orderdate < '1997-01-01'
+    GROUP BY 
+        o.o_orderkey, o.o_custkey
+)
+
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    s.s_name,
+    o.total_sales,
+    o.line_count,
+    CASE 
+        WHEN o.has_returns = 1 THEN 'Returned' 
+        ELSE 'No Returns' 
+    END AS return_status,
+    r.r_name AS region_name,
+    COALESCE(s.acctbal_rank, 0) AS supplier_acctbal_rank
+FROM 
+    ranked_parts p
+LEFT JOIN 
+    partsupp ps ON p.p_partkey = ps.ps_partkey
+LEFT JOIN 
+    supplier_nation s ON ps.ps_suppkey = s.s_suppkey AND s.acctbal_rank = 1
+LEFT JOIN 
+    order_summary o ON o.o_custkey = (
+        SELECT c.c_custkey 
+        FROM customer c 
+        WHERE c.c_nationkey = s.s_nationkey
+        LIMIT 1
+    )
+LEFT JOIN 
+    region r ON s.nation_name = CASE 
+                                   WHEN s.nation_name = 'GERMANY' THEN 'EUROPE'
+                                   WHEN s.nation_name IS NULL THEN 'UNKNOWN'
+                                   ELSE 'OTHER'
+                                 END
+WHERE 
+    p.part_rank <= 10
+    AND (s.s_acctbal IS NULL OR s.s_acctbal > 10000)
+ORDER BY 
+    o.total_sales DESC, 
+    return_status ASC;

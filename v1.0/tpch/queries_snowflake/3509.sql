@@ -1,0 +1,64 @@
+WITH RankedOrders AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        c.c_name,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY o.o_orderdate DESC) AS rnk
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    WHERE 
+        o.o_orderdate >= DATE '1997-01-01'
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        n.n_name AS supplier_nation,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, n.n_name
+),
+OrderLineTotals AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS order_total
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+)
+SELECT 
+    r.o_orderkey,
+    r.o_orderdate,
+    r.o_totalprice,
+    r.c_name,
+    COALESCE(ol.order_total, 0) AS calculated_total,
+    CASE 
+        WHEN ol.order_total IS NULL THEN 'No Line Items'
+        ELSE 'Has Line Items'
+    END AS line_item_status,
+    sd.supplier_nation,
+    sd.total_supply_cost
+FROM 
+    RankedOrders r
+LEFT JOIN 
+    OrderLineTotals ol ON r.o_orderkey = ol.l_orderkey
+LEFT JOIN 
+    SupplierDetails sd ON r.o_orderkey IN (
+        SELECT l.l_orderkey 
+        FROM lineitem l 
+        WHERE l.l_orderkey = r.o_orderkey
+    )
+WHERE 
+    r.rnk = 1
+ORDER BY 
+    r.o_orderdate DESC, r.o_orderkey;

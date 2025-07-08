@@ -1,0 +1,56 @@
+
+WITH ranked_titles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS year_rank
+    FROM title t
+),
+actor_movie_count AS (
+    SELECT 
+        c.person_id,
+        COUNT(DISTINCT c.movie_id) AS movie_count
+    FROM cast_info c
+    GROUP BY c.person_id
+),
+names_with_movies AS (
+    SELECT 
+        a.person_id,
+        a.name,
+        COALESCE(am.movie_count, 0) AS movie_count
+    FROM aka_name a
+    LEFT JOIN actor_movie_count am ON a.person_id = am.person_id
+),
+most_productive_actors AS (
+    SELECT 
+        nwm.person_id,
+        nwm.name,
+        nwm.movie_count,
+        RANK() OVER (ORDER BY nwm.movie_count DESC) AS rank
+    FROM names_with_movies nwm
+    WHERE nwm.movie_count > 0
+),
+movie_keywords AS (
+    SELECT 
+        mk.movie_id,
+        LISTAGG(k.keyword, ', ') WITHIN GROUP (ORDER BY k.keyword) AS keywords_list
+    FROM movie_keyword mk
+    JOIN keyword k ON mk.keyword_id = k.id
+    GROUP BY mk.movie_id
+)
+SELECT 
+    mt.title,
+    mt.production_year,
+    paa.name AS actor_name,
+    mk.keywords_list,
+    CASE 
+        WHEN paa.movie_count IS NULL THEN 'Unknown Actor'
+        ELSE CAST(paa.movie_count AS TEXT) || ' movies'
+    END AS movie_credits
+FROM ranked_titles mt
+LEFT JOIN most_productive_actors paa ON mt.year_rank = 1 AND paa.rank <= 5
+LEFT JOIN movie_keywords mk ON mt.title_id = mk.movie_id
+WHERE mt.production_year BETWEEN 2000 AND 2020
+  AND (mk.keywords_list IS NULL OR mk.keywords_list LIKE '%Drama%')
+ORDER BY mt.production_year, paa.movie_count DESC NULLS LAST;

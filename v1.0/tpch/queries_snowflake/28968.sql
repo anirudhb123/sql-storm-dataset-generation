@@ -1,0 +1,52 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_retailprice,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS Rank
+    FROM 
+        part p
+),
+FilteredParts AS (
+    SELECT 
+        rp.p_partkey, 
+        rp.p_name, 
+        rp.p_retailprice, 
+        LISTAGG(SUBSTRING(ps.ps_comment, 1, 50), '; ') WITHIN GROUP (ORDER BY ps.ps_comment) AS supplier_comments
+    FROM 
+        RankedParts rp
+    JOIN 
+        partsupp ps ON rp.p_partkey = ps.ps_partkey
+    WHERE 
+        rp.Rank <= 3
+    GROUP BY 
+        rp.p_partkey, rp.p_name, rp.p_retailprice
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_name,
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_name, o.o_orderkey
+)
+SELECT 
+    fp.p_name,
+    fp.p_retailprice,
+    fp.supplier_comments,
+    co.c_name,
+    co.total_sales
+FROM 
+    FilteredParts fp
+LEFT JOIN 
+    CustomerOrders co ON fp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_partkey = fp.p_partkey)
+ORDER BY 
+    fp.p_retailprice DESC, co.total_sales DESC
+LIMIT 10;

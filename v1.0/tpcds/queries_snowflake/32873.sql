@@ -1,0 +1,55 @@
+
+WITH RECURSIVE sales_cte AS (
+    SELECT 
+        ws_ship_date_sk,
+        ws_item_sk,
+        SUM(ws_quantity) AS total_quantity,
+        SUM(ws_net_profit) AS total_profit,
+        ROW_NUMBER() OVER (PARTITION BY ws_item_sk ORDER BY SUM(ws_net_profit) DESC) AS rn
+    FROM web_sales
+    GROUP BY ws_ship_date_sk, ws_item_sk
+),
+store_info AS (
+    SELECT 
+        s_store_sk,
+        s_store_name,
+        s_city,
+        s_state,
+        AVG(ss_net_profit) AS avg_net_profit
+    FROM store_sales
+    JOIN store ON store.s_store_sk = store_sales.ss_store_sk
+    GROUP BY s_store_sk, s_store_name, s_city, s_state
+),
+high_profit_stores AS (
+    SELECT 
+        si.s_store_sk,
+        si.s_store_name,
+        si.s_city,
+        si.s_state,
+        si.avg_net_profit
+    FROM store_info si 
+    WHERE si.avg_net_profit > (SELECT AVG(avg_net_profit) FROM store_info)
+),
+return_summaries AS (
+    SELECT 
+        sr_item_sk,
+        COUNT(DISTINCT sr_ticket_number) AS return_count,
+        SUM(sr_return_amt) AS total_return_amount
+    FROM store_returns
+    GROUP BY sr_item_sk
+)
+SELECT 
+    i.i_item_id,
+    i.i_item_desc,
+    COALESCE(hp.avg_net_profit, 0) AS store_avg_net_profit,
+    COALESCE(rs.return_count, 0) AS num_of_returns,
+    COALESCE(rs.total_return_amount, 0) AS total_return_amt,
+    (SELECT SUM(total_profit) FROM sales_cte WHERE ws_item_sk = i.i_item_sk) AS total_web_sales_profit
+FROM item i
+LEFT JOIN high_profit_stores hp ON hp.s_store_sk IN (
+    SELECT DISTINCT ss.ss_store_sk FROM store_sales ss WHERE ss.ss_item_sk = i.i_item_sk
+)
+LEFT JOIN return_summaries rs ON rs.sr_item_sk = i.i_item_sk
+WHERE i.i_current_price IS NOT NULL 
+  AND i.i_current_price > (SELECT AVG(i_current_price) FROM item WHERE i_item_sk IN (SELECT sr_item_sk FROM store_returns))
+ORDER BY total_web_sales_profit DESC, num_of_returns ASC;

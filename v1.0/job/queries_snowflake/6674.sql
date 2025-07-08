@@ -1,0 +1,67 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        t.id AS movie_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.production_year DESC) AS rank
+    FROM 
+        aka_title t
+    WHERE 
+        t.kind_id IN (SELECT id FROM kind_type WHERE kind = 'movie')
+),
+MovieStars AS (
+    SELECT 
+        c.movie_id,
+        a.name AS actor_name,
+        COUNT(c.person_id) AS cast_count
+    FROM 
+        cast_info c
+    JOIN 
+        aka_name a ON c.person_id = a.person_id
+    GROUP BY 
+        c.movie_id, a.name
+),
+CompanyInfo AS (
+    SELECT 
+        mc.movie_id,
+        co.name AS company_name,
+        ct.kind AS company_type
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name co ON mc.company_id = co.id
+    JOIN 
+        company_type ct ON mc.company_type_id = ct.id
+),
+MovieKeywords AS (
+    SELECT 
+        mk.movie_id,
+        LISTAGG(k.keyword, ', ') WITHIN GROUP (ORDER BY k.keyword) AS keywords
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    GROUP BY 
+        mk.movie_id
+)
+SELECT 
+    rm.title,
+    rm.production_year,
+    ms.actor_name,
+    ms.cast_count,
+    ci.company_name,
+    ci.company_type,
+    mk.keywords
+FROM 
+    RankedMovies rm
+LEFT JOIN 
+    MovieStars ms ON rm.movie_id = ms.movie_id
+LEFT JOIN 
+    CompanyInfo ci ON rm.movie_id = ci.movie_id
+LEFT JOIN 
+    MovieKeywords mk ON rm.movie_id = mk.movie_id
+WHERE 
+    rm.rank <= 10
+ORDER BY 
+    rm.production_year DESC, ms.cast_count DESC;

@@ -1,0 +1,69 @@
+
+WITH RankedParts AS (
+    SELECT 
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        COUNT(DISTINCT ps.ps_suppkey) AS supplier_count,
+        ROW_NUMBER() OVER (PARTITION BY p.p_brand ORDER BY p.p_retailprice DESC) AS price_rank
+    FROM 
+        part p
+    LEFT JOIN 
+        partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY 
+        p.p_partkey, p.p_name, p.p_mfgr, p.p_brand, p.p_type, p.p_size, p.p_container, p.p_retailprice
+),
+HighValueSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_nationkey,
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_value
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey
+    HAVING 
+        SUM(ps.ps_supplycost * ps.ps_availqty) > 1000000
+),
+RegionSales AS (
+    SELECT 
+        n.n_regionkey,
+        SUM(o.o_totalprice) AS total_sales
+    FROM 
+        orders o
+    JOIN 
+        customer c ON o.o_custkey = c.c_custkey
+    JOIN 
+        nation n ON c.c_nationkey = n.n_nationkey
+    WHERE 
+        o.o_orderdate >= DATE '1996-01-01' AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY 
+        n.n_regionkey
+)
+SELECT 
+    rp.p_brand,
+    rp.supplier_count,
+    AVG(rp.p_retailprice) AS avg_price,
+    r.total_sales,
+    hs.s_name,
+    hs.total_value
+FROM 
+    RankedParts rp
+JOIN 
+    HighValueSuppliers hs ON rp.supplier_count > 0
+JOIN 
+    RegionSales r ON rp.p_partkey IN (SELECT ps.ps_partkey FROM partsupp ps WHERE ps.ps_suppkey = hs.s_suppkey)
+WHERE 
+    rp.price_rank <= 5
+GROUP BY 
+    rp.p_brand, rp.supplier_count, r.total_sales, hs.s_name, hs.total_value
+ORDER BY 
+    avg_price DESC, total_sales DESC;

@@ -1,0 +1,84 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        1 AS level,
+        NULL::integer AS parent_id
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.episode_of_id IS NULL
+
+    UNION ALL
+
+    SELECT 
+        e.id AS movie_id,
+        e.title,
+        e.production_year,
+        mh.level + 1,
+        mh.movie_id AS parent_id
+    FROM 
+        aka_title e
+    JOIN 
+        movie_hierarchy mh ON e.episode_of_id = mh.movie_id
+),
+cast_with_role AS (
+    SELECT 
+        ci.movie_id,
+        ci.person_id,
+        ci.role_id,
+        ROW_NUMBER() OVER (PARTITION BY ci.movie_id ORDER BY ci.nr_order) AS role_order
+    FROM 
+        cast_info ci
+    WHERE 
+        ci.note IS NULL
+),
+keyword_stats AS (
+    SELECT 
+        mk.movie_id,
+        COUNT(mk.keyword_id) AS keyword_count
+    FROM 
+        movie_keyword mk
+    GROUP BY 
+        mk.movie_id
+),
+movie_overview AS (
+    SELECT 
+        mh.movie_id,
+        mh.title,
+        mh.production_year,
+        COALESCE(kw.keyword_count, 0) AS total_keywords,
+        COUNT(DISTINCT cwr.person_id) AS total_cast
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        cast_with_role cwr ON mh.movie_id = cwr.movie_id
+    LEFT JOIN 
+        keyword_stats kw ON mh.movie_id = kw.movie_id
+    GROUP BY 
+        mh.movie_id, mh.title, mh.production_year, kw.keyword_count
+)
+SELECT 
+    mo.title,
+    mo.production_year,
+    mo.total_keywords,
+    mo.total_cast,
+    LISTAGG(DISTINCT cn.name, ', ') WITHIN GROUP (ORDER BY cn.name) AS character_names,
+    COUNT(DISTINCT mc.company_id) AS production_companies
+FROM 
+    movie_overview mo
+LEFT JOIN 
+    complete_cast cc ON mo.movie_id = cc.movie_id
+LEFT JOIN 
+    name cn ON cc.subject_id = cn.imdb_id
+LEFT JOIN 
+    movie_companies mc ON mo.movie_id = mc.movie_id
+WHERE 
+    mo.production_year >= 2000
+GROUP BY 
+    mo.title, mo.production_year, mo.total_keywords, mo.total_cast
+ORDER BY 
+    mo.production_year DESC, mo.total_cast DESC
+LIMIT 10;

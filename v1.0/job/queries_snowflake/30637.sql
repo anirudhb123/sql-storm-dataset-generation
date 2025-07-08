@@ -1,0 +1,62 @@
+
+WITH RECURSIVE MovieHierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        mt.kind_id,
+        1 AS level
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.production_year >= 2000
+    
+    UNION ALL
+    
+    SELECT 
+        ml.linked_movie_id AS movie_id,
+        at.title,
+        at.production_year,
+        at.kind_id,
+        mh.level + 1
+    FROM 
+        movie_link ml
+    JOIN 
+        aka_title at ON ml.linked_movie_id = at.id
+    JOIN 
+        MovieHierarchy mh ON ml.movie_id = mh.movie_id
+)
+SELECT 
+    m.id AS movie_id,
+    m.title,
+    COALESCE(c.first_actor, 'No Cast') AS first_actor,
+    m.production_year,
+    COUNT(DISTINCT kw.keyword) AS keyword_count,
+    ROW_NUMBER() OVER (PARTITION BY m.production_year ORDER BY COUNT(DISTINCT kw.keyword) DESC) AS production_rank
+FROM 
+    aka_title m
+LEFT JOIN 
+    movie_keyword mk ON m.id = mk.movie_id
+LEFT JOIN 
+    keyword kw ON mk.keyword_id = kw.id
+LEFT JOIN 
+    (SELECT 
+        ci.movie_id,
+        ak.name AS first_actor
+     FROM 
+        cast_info ci
+     JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+     WHERE 
+        ci.nr_order = 1
+    ) c ON c.movie_id = m.id
+WHERE 
+    m.production_year IS NOT NULL
+GROUP BY 
+    m.id, m.title, c.first_actor, m.production_year, m.kind_id
+HAVING 
+    COUNT(DISTINCT kw.keyword) > 2 AND 
+    m.kind_id IN (SELECT id FROM kind_type WHERE kind IN ('feature', 'short'))
+ORDER BY 
+    m.production_year DESC, 
+    keyword_count DESC;

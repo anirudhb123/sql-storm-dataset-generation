@@ -1,0 +1,36 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal >= (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT ps.ps_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM partsupp ps
+    JOIN supplier_hierarchy sh ON ps.ps_suppkey = sh.s_suppkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    WHERE ps.ps_availqty > (SELECT COUNT(*) FROM lineitem)
+)
+
+SELECT 
+    COALESCE(n.n_name, 'Unknown') AS nation,
+    p.p_name AS part_name,
+    COUNT(DISTINCT o.o_orderkey) AS total_orders,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue,
+    ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS rank,
+    LISTAGG(s.s_name, ', ') WITHIN GROUP (ORDER BY s.s_name) AS suppliers
+FROM lineitem l
+JOIN orders o ON l.l_orderkey = o.o_orderkey
+JOIN partsupp ps ON l.l_partkey = ps.ps_partkey AND l.l_suppkey = ps.ps_suppkey
+JOIN part p ON l.l_partkey = p.p_partkey
+JOIN supplier_hierarchy sh ON sh.s_suppkey = l.l_suppkey
+JOIN nation n ON sh.s_nationkey = n.n_nationkey
+LEFT JOIN supplier s ON s.s_suppkey = l.l_suppkey
+WHERE 
+    o.o_orderstatus NOT IN ('F', 'X') 
+    AND l.l_shipdate >= DATEADD(YEAR, -1, '1998-10-01')
+    AND (l.l_tax IS NULL OR l.l_tax < 0.05)
+GROUP BY n.n_name, p.p_name
+HAVING SUM(l.l_extendedprice) > 1000
+ORDER BY total_revenue DESC;

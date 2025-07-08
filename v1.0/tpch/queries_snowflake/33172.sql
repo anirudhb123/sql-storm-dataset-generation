@@ -1,0 +1,42 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s_suppkey, s_name, s_nationkey, 0 AS level
+    FROM supplier
+    WHERE s_nationkey IN (SELECT n_nationkey FROM nation WHERE n_name = 'USA')
+    
+    UNION ALL
+    
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN SupplierHierarchy sh ON s.s_nationkey = sh.s_nationkey
+)
+SELECT 
+    p.p_partkey,
+    p.p_name,
+    SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_price,
+    COUNT(DISTINCT o.o_orderkey) AS order_count,
+    MAX(l.l_shipdate) AS latest_ship_date,
+    CASE 
+        WHEN p.p_size > 20 THEN 'Large'
+        ELSE 'Small'
+    END AS size_category,
+    RANK() OVER (PARTITION BY p.p_partkey ORDER BY SUM(l.l_extendedprice * (1 - l.l_discount)) DESC) AS price_rank
+FROM 
+    part p
+JOIN 
+    lineitem l ON p.p_partkey = l.l_partkey
+JOIN 
+    orders o ON l.l_orderkey = o.o_orderkey
+LEFT JOIN 
+    SupplierHierarchy sh ON l.l_suppkey = sh.s_suppkey
+WHERE 
+    o.o_orderstatus = 'O' 
+AND 
+    l.l_shipdate >= DATE '1996-01-01'
+GROUP BY 
+    p.p_partkey, p.p_name, p.p_size
+HAVING 
+    COUNT(DISTINCT o.o_orderkey) > 5
+ORDER BY 
+    total_price DESC
+LIMIT 10;

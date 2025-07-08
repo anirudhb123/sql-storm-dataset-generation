@@ -1,0 +1,63 @@
+
+WITH RankedPosts AS (
+    SELECT 
+        p.Id AS PostID,
+        p.Title,
+        p.Body,
+        p.Tags,
+        u.DisplayName AS OwnerDisplayName,
+        p.CreationDate,
+        p.Score,
+        p.AcceptedAnswerId,
+        ROW_NUMBER() OVER (PARTITION BY p.Tags ORDER BY p.Score DESC) AS Rank
+    FROM 
+        Posts p
+    JOIN 
+        Users u ON p.OwnerUserId = u.Id
+    WHERE 
+        p.PostTypeId = 1 
+        AND p.CreationDate >= DATEADD(year, -1, CURRENT_DATE)
+),
+TagStatistics AS (
+    SELECT
+        t.Tag,
+        COUNT(*) AS PostCount,
+        SUM(t.Score) AS TotalScore
+    FROM (
+        SELECT 
+            unnest(split(substring(Tags, 2, length(Tags) - 2), '> <')) AS Tag,
+            Score
+        FROM 
+            Posts 
+        WHERE 
+            PostTypeId = 1 
+    ) AS t 
+    GROUP BY 
+        t.Tag
+),
+TopTags AS (
+    SELECT 
+        Tag,
+        PostCount,
+        TotalScore,
+        RANK() OVER (ORDER BY TotalScore DESC) AS ScoreRank
+    FROM 
+        TagStatistics
+)
+SELECT 
+    tp.Tag,
+    tp.PostCount,
+    tp.TotalScore,
+    rp.Title,
+    rp.OwnerDisplayName,
+    rp.CreationDate,
+    rp.Score
+FROM 
+    TopTags tp
+JOIN 
+    RankedPosts rp ON tp.Tag = ANY(split(substring(rp.Tags, 2, length(rp.Tags) - 2), '> <'))
+WHERE 
+    tp.ScoreRank <= 5 
+    AND rp.Rank = 1 
+ORDER BY 
+    tp.TotalScore DESC, rp.CreationDate DESC;

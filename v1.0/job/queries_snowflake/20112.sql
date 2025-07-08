@@ -1,0 +1,95 @@
+
+WITH RecursiveMovieCTE AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title,
+        mt.production_year,
+        ak.name AS actor_name,
+        ak.id AS actor_id,
+        ROW_NUMBER() OVER (PARTITION BY mt.id ORDER BY ak.name) AS actor_rank
+    FROM 
+        aka_title mt
+    LEFT JOIN 
+        cast_info ci ON mt.id = ci.movie_id
+    LEFT JOIN 
+        aka_name ak ON ci.person_id = ak.person_id
+    WHERE 
+        mt.production_year IS NOT NULL
+),
+ActorSummary AS (
+    SELECT 
+        actor_id,
+        COUNT(movie_id) AS movie_count,
+        LISTAGG(title, ', ') WITHIN GROUP (ORDER BY title) AS movies
+    FROM 
+        RecursiveMovieCTE
+    GROUP BY 
+        actor_id
+),
+DiverseLanguages AS (
+    SELECT 
+        mv.id AS movie_id,
+        COUNT(DISTINCT ci.person_id) AS actor_count,
+        CASE 
+            WHEN COUNT(DISTINCT ci.person_id) >= 5 THEN 'Multi-lingual'
+            ELSE 'Mono-lingual'
+        END AS language_diversity
+    FROM 
+        aka_title mv
+    LEFT JOIN 
+        cast_info ci ON mv.id = ci.movie_id
+    WHERE 
+        mv.production_year >= 2000
+    GROUP BY 
+        mv.id
+),
+TopMovies AS (
+    SELECT 
+        r.movie_id,
+        r.title,
+        r.production_year,
+        d.language_diversity,
+        ROW_NUMBER() OVER (ORDER BY r.production_year DESC, d.actor_count DESC) AS rn
+    FROM 
+        RecursiveMovieCTE r
+    JOIN 
+        DiverseLanguages d ON r.movie_id = d.movie_id
+),
+MovieTrends AS (
+    SELECT 
+        m.movie_id,
+        m.title,
+        m.production_year,
+        a.movie_count,
+        a.movies,
+        CASE 
+            WHEN d.actor_count > 10 THEN 'Star-studded'
+            ELSE 'Indie'
+        END AS movie_type
+    FROM 
+        TopMovies m
+    JOIN 
+        ActorSummary a ON m.movie_id = a.actor_id
+    JOIN 
+        DiverseLanguages d ON m.movie_id = d.movie_id
+    WHERE 
+        m.rn <= 10
+)
+SELECT 
+    mt.title,
+    mt.production_year,
+    mt.movie_type,
+    mt.movie_count,
+    COALESCE(mt.movies, 'No actors listed') AS featured_actors,
+    (SELECT COUNT(*) 
+     FROM complete_cast cc 
+     WHERE cc.movie_id = mt.movie_id AND cc.status_id IS NOT NULL) AS complete_cast_count,
+    (SELECT LISTAGG(n.name, ', ') WITHIN GROUP (ORDER BY n.name) 
+     FROM name n 
+     LEFT JOIN cast_info ci ON n.imdb_id = ci.person_id 
+     WHERE ci.movie_id = mt.movie_id) AS notable_names
+FROM 
+    MovieTrends mt
+ORDER BY 
+    mt.movie_count DESC, 
+    mt.production_year ASC;

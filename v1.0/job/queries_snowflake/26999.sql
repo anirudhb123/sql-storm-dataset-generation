@@ -1,0 +1,50 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        at.title,
+        at.production_year,
+        ROW_NUMBER() OVER (PARTITION BY at.production_year ORDER BY LENGTH(at.title) DESC) AS title_rank
+    FROM 
+        aka_title at
+    JOIN 
+        movie_keyword mk ON mk.movie_id = at.movie_id
+    JOIN 
+        keyword k ON k.id = mk.keyword_id
+    WHERE 
+        k.keyword LIKE '%Action%'
+),
+CastDetails AS (
+    SELECT 
+        ci.movie_id, 
+        ak.name AS actor_name,
+        COUNT(DISTINCT ci.person_id) AS unique_actors
+    FROM 
+        cast_info ci
+    JOIN 
+        aka_name ak ON ak.person_id = ci.person_id
+    GROUP BY 
+        ci.movie_id, ak.name
+),
+FinalResults AS (
+    SELECT 
+        rt.title,
+        rt.production_year,
+        LISTAGG(cd.actor_name, ', ') WITHIN GROUP (ORDER BY cd.actor_name) AS actor_names,
+        COUNT(DISTINCT cd.unique_actors) AS unique_actors,
+        CONCAT(rt.title, ' (', rt.production_year, ') - Starring: ', LISTAGG(cd.actor_name, ', ') WITHIN GROUP (ORDER BY cd.actor_name)) AS full_description
+    FROM 
+        RankedTitles rt
+    JOIN 
+        CastDetails cd ON cd.movie_id = (SELECT movie_id FROM aka_title WHERE title = rt.title)
+    WHERE 
+        rt.title_rank <= 5
+    GROUP BY 
+        rt.title, rt.production_year
+)
+SELECT 
+    full_description
+FROM 
+    FinalResults
+ORDER BY 
+    production_year DESC, 
+    LENGTH(full_description) ASC;

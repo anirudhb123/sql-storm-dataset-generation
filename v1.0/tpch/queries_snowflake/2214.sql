@@ -1,0 +1,63 @@
+
+WITH RankedCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        c.c_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY c.c_nationkey ORDER BY c.c_acctbal DESC) AS rank
+    FROM 
+        customer c
+),
+TotalRevenue AS (
+    SELECT 
+        l.l_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        lineitem l
+    GROUP BY 
+        l.l_orderkey
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        o.o_orderdate,
+        o.o_totalprice,
+        r.r_name AS region_name,
+        n.n_name AS nation_name,
+        SUM(l.l_quantity) AS total_quantity,
+        SUM(l.l_extendedprice) AS total_extendedprice
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    JOIN 
+        supplier s ON l.l_suppkey = s.s_suppkey
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+    JOIN 
+        region r ON n.n_regionkey = r.r_regionkey
+    WHERE 
+        o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+    GROUP BY 
+        o.o_orderkey, o.o_orderdate, o.o_totalprice, r.r_name, n.n_name
+)
+SELECT 
+    rc.c_name,
+    od.o_orderkey,
+    od.o_orderdate,
+    od.total_extendedprice,
+    od.region_name,
+    od.nation_name,
+    rc.rank,
+    t.total_revenue
+FROM 
+    RankedCustomers rc
+LEFT JOIN 
+    OrderDetails od ON rc.c_custkey = (SELECT o.o_custkey FROM orders o WHERE o.o_orderkey = od.o_orderkey LIMIT 1)
+LEFT JOIN 
+    TotalRevenue t ON od.o_orderkey = t.l_orderkey
+WHERE 
+    rc.rank <= 5
+ORDER BY 
+    od.o_orderdate DESC, 
+    rc.rank;

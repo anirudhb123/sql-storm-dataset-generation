@@ -1,0 +1,60 @@
+
+WITH Recursive_CTE AS (
+    SELECT 
+        ca.person_id AS actor_id,
+        COUNT(DISTINCT ca.movie_id) AS movie_count,
+        SUM(CASE WHEN t.production_year IS NOT NULL 
+                 THEN 1 
+                 ELSE 0 END) AS films_in_years,
+        ROW_NUMBER() OVER (PARTITION BY ca.person_id ORDER BY COUNT(DISTINCT ca.movie_id) DESC) AS rank
+    FROM 
+        cast_info ca
+    JOIN 
+        aka_name an ON ca.person_id = an.person_id
+    LEFT JOIN 
+        aka_title at ON at.id = ca.movie_id 
+    LEFT JOIN 
+        title t ON t.id = ca.movie_id
+    GROUP BY 
+        ca.person_id
+),
+Filtered_Actors AS (
+    SELECT 
+        actor_id,
+        movie_count,
+        films_in_years
+    FROM 
+        Recursive_CTE
+    WHERE 
+        movie_count > 5
+),
+Keyword_Filter AS (
+    SELECT 
+        m.id AS movie_id,
+        LISTAGG(k.keyword, ', ') AS keywords_list
+    FROM 
+        movie_keyword mk
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        aka_title m ON m.id = mk.movie_id
+    WHERE 
+        k.keyword LIKE '%Action%'
+    GROUP BY 
+        m.id
+)
+SELECT 
+    a.actor_id,
+    an.name,
+    a.movie_count,
+    k.keywords_list AS action_movies_keywords
+FROM 
+    Filtered_Actors a
+JOIN 
+    aka_name an ON a.actor_id = an.person_id
+LEFT JOIN 
+    Keyword_Filter k ON k.movie_id IN (SELECT ci.movie_id FROM cast_info ci WHERE ci.person_id = a.actor_id)
+ORDER BY 
+    a.movie_count DESC,
+    an.name ASC
+LIMIT 10;

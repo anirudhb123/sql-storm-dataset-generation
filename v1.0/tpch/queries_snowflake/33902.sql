@@ -1,0 +1,83 @@
+
+WITH RECURSIVE RegionCTE AS (
+    SELECT 
+        r_regionkey, 
+        r_name, 
+        r_comment, 
+        0 AS level
+    FROM 
+        region
+    WHERE 
+        r_regionkey = 1
+    UNION ALL
+    SELECT 
+        r.r_regionkey, 
+        r.r_name, 
+        r.r_comment, 
+        cte.level + 1
+    FROM 
+        region r
+    JOIN 
+        RegionCTE cte ON r.r_regionkey = cte.r_regionkey + 1
+),
+SupplierDetails AS (
+    SELECT 
+        s.s_suppkey, 
+        s.s_name, 
+        s.s_nationkey, 
+        s.s_acctbal, 
+        SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost
+    FROM 
+        supplier s
+    JOIN 
+        partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    GROUP BY 
+        s.s_suppkey, s.s_name, s.s_nationkey, s.s_acctbal
+),
+CustomerOrders AS (
+    SELECT 
+        c.c_custkey,
+        COUNT(o.o_orderkey) AS order_count,
+        SUM(o.o_totalprice) AS total_spent
+    FROM 
+        customer c
+    LEFT JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    GROUP BY 
+        c.c_custkey
+),
+LineItemAnalysis AS (
+    SELECT 
+        li.l_orderkey, 
+        SUM(li.l_extendedprice * (1 - li.l_discount)) AS net_revenue
+    FROM 
+        lineitem li
+    WHERE 
+        li.l_shipdate >= DATE '1997-01-01'
+    GROUP BY 
+        li.l_orderkey
+)
+SELECT 
+    p.p_name, 
+    p.p_brand, 
+    p.p_mfgr, 
+    COALESCE(sd.total_supply_cost, 0) AS total_supply_cost,
+    COALESCE(co.order_count, 0) AS order_count,
+    COALESCE(co.total_spent, 0) AS total_spent,
+    la.net_revenue,
+    RANK() OVER (PARTITION BY p.p_brand ORDER BY la.net_revenue DESC) AS brand_rank
+FROM 
+    part p
+LEFT JOIN 
+    SupplierDetails sd ON p.p_partkey = sd.s_nationkey
+LEFT JOIN 
+    CustomerOrders co ON co.c_custkey = (SELECT c.c_custkey FROM customer c WHERE c.c_nationkey = sd.s_nationkey LIMIT 1)
+LEFT JOIN 
+    LineItemAnalysis la ON la.l_orderkey = co.order_count
+INNER JOIN 
+    RegionCTE r ON r.r_regionkey = (SELECT n.n_regionkey FROM nation n WHERE n.n_nationkey = sd.s_nationkey)
+WHERE 
+    (p.p_size BETWEEN 1 AND 10 OR p.p_size IS NULL)
+    AND r.level = 0
+ORDER BY 
+    p.p_partkey, brand_rank;

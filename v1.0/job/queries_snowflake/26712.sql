@@ -1,0 +1,51 @@
+
+WITH MovieDetails AS (
+    SELECT 
+        t.title AS movie_title,
+        t.production_year,
+        a.name AS actor_name,
+        COUNT(DISTINCT mc.company_id) AS production_companies,
+        LISTAGG(DISTINCT k.keyword, ', ') WITHIN GROUP (ORDER BY k.keyword) AS keywords,
+        LISTAGG(DISTINCT CAST(ci.role_id AS TEXT), ', ') WITHIN GROUP (ORDER BY ci.role_id) AS roles
+    FROM 
+        title t
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        complete_cast cc ON t.id = cc.movie_id
+    JOIN 
+        cast_info ci ON cc.subject_id = ci.id
+    JOIN 
+        aka_name a ON ci.person_id = a.person_id
+    LEFT JOIN 
+        movie_companies mc ON mc.movie_id = t.id
+    GROUP BY 
+        t.title, t.production_year, a.name
+),
+RankedMovies AS (
+    SELECT 
+        movie_title,
+        production_year,
+        actor_name,
+        production_companies,
+        keywords,
+        roles,
+        RANK() OVER (PARTITION BY production_year ORDER BY production_companies DESC) AS rank
+    FROM 
+        MovieDetails
+)
+SELECT 
+    movie_title,
+    production_year,
+    actor_name,
+    production_companies,
+    keywords,
+    roles
+FROM 
+    RankedMovies
+WHERE 
+    rank <= 5
+ORDER BY 
+    production_year DESC, production_companies DESC;

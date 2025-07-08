@@ -1,0 +1,54 @@
+
+WITH SalesRankCTE AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        RANK() OVER (PARTITION BY c.c_nationkey ORDER BY SUM(o.o_totalprice) DESC) AS rank_within_nation,
+        c.c_nationkey
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    WHERE 
+        o.o_orderstatus = 'O'
+    GROUP BY 
+        c.c_custkey, c.c_name, c.c_nationkey
+), 
+AverageSpending AS (
+    SELECT 
+        n.n_nationkey,
+        AVG(s.total_spent) AS avg_spent
+    FROM 
+        SalesRankCTE s
+    JOIN 
+        nation n ON s.c_nationkey = n.n_nationkey
+    GROUP BY 
+        n.n_nationkey
+)
+
+SELECT 
+    r.r_name AS region,
+    n.n_name AS nation,
+    SUM(ps.ps_supplycost * ps.ps_availqty) AS total_supply_cost,
+    COALESCE(sr.total_spent, 0) AS total_spent_by_top_customers,
+    CASE 
+        WHEN SUM(ps.ps_supplycost * ps.ps_availqty) > avg.avg_spent THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS supply_comparison
+FROM 
+    region r
+JOIN 
+    nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN 
+    supplier s ON n.n_nationkey = s.s_nationkey
+INNER JOIN 
+    partsupp ps ON s.s_suppkey = ps.ps_suppkey
+LEFT JOIN 
+    SalesRankCTE sr ON n.n_nationkey = sr.c_nationkey
+JOIN 
+    AverageSpending avg ON n.n_nationkey = avg.n_nationkey
+GROUP BY 
+    r.r_name, n.n_name, sr.total_spent, avg.avg_spent
+ORDER BY 
+    total_supply_cost DESC, region, nation;

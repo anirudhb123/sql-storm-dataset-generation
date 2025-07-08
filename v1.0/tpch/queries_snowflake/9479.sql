@@ -1,0 +1,42 @@
+
+WITH RECURSIVE supplier_hierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, 1 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > 2000.00
+    UNION ALL
+    SELECT s.s_suppkey, s.s_name, s.s_nationkey, sh.level + 1
+    FROM supplier s
+    JOIN supplier_hierarchy sh ON s.s_nationkey = sh.s_nationkey
+    WHERE sh.level < 5
+),
+order_summary AS (
+    SELECT o.o_orderkey, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o.o_orderdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY o.o_orderkey
+),
+part_supplier_info AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, SUM(ps.ps_availqty) AS total_available
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    GROUP BY p.p_partkey, p.p_name, ps.ps_supplycost
+)
+SELECT n.n_name, COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+       AVG(os.total_revenue) AS avg_revenue_per_order,
+       p.p_name AS part_name, ps.total_available, ps.ps_supplycost
+FROM region r
+JOIN nation n ON r.r_regionkey = n.n_regionkey
+JOIN supplier_hierarchy sh ON n.n_nationkey = sh.s_nationkey
+JOIN order_summary os ON sh.s_suppkey = os.o_orderkey
+JOIN part_supplier_info ps ON ps.p_partkey IN (
+    SELECT l.l_partkey
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    WHERE o.o_orderstatus = 'F'
+)
+JOIN part p ON ps.p_partkey = p.p_partkey
+WHERE r.r_name = 'Asia'
+GROUP BY n.n_name, p.p_name, ps.total_available, ps.ps_supplycost
+ORDER BY supplier_count DESC, avg_revenue_per_order DESC
+LIMIT 10;

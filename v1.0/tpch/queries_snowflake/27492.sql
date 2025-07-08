@@ -1,0 +1,49 @@
+
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        SUM(o.o_totalprice) AS total_spent,
+        COUNT(o.o_orderkey) AS order_count,
+        MAX(o.o_orderdate) AS last_order_date,
+        COUNT(DISTINCT l.l_orderkey) AS distinct_order_count
+    FROM 
+        customer c
+    JOIN 
+        orders o ON c.c_custkey = o.o_custkey
+    LEFT JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY 
+        c.c_custkey, c.c_name
+),
+TopCustomers AS (
+    SELECT 
+        c.c_custkey,
+        c.c_name,
+        cs.total_spent,
+        cs.order_count,
+        cs.last_order_date,
+        ROW_NUMBER() OVER (ORDER BY cs.total_spent DESC) AS rank
+    FROM 
+        CustomerOrderSummary cs
+    JOIN 
+        customer c ON cs.c_custkey = c.c_custkey
+)
+SELECT 
+    tc.c_custkey,
+    tc.c_name,
+    tc.total_spent,
+    tc.order_count,
+    tc.last_order_date,
+    LISTAGG(CONCAT(p.p_name, ' (', ps.ps_availqty, ' available)'), ', ') 
+        WITHIN GROUP (ORDER BY p.p_name) AS popular_parts
+FROM 
+    TopCustomers tc
+JOIN 
+    partsupp ps ON ps.ps_suppkey IN (SELECT s.s_suppkey FROM supplier s WHERE s.s_nationkey IN (SELECT n.n_nationkey FROM nation n WHERE n.n_name = 'USA'))
+JOIN 
+    part p ON ps.ps_partkey = p.p_partkey
+WHERE 
+    tc.rank <= 10
+GROUP BY 
+    tc.c_custkey, tc.c_name, tc.total_spent, tc.order_count, tc.last_order_date;

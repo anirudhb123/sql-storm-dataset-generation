@@ -1,0 +1,85 @@
+
+WITH RECURSIVE movie_hierarchy AS (
+    SELECT 
+        mt.id AS movie_id,
+        mt.title AS movie_title,
+        1 AS depth,
+        COALESCE(mt.production_year, 0) AS prod_year
+    FROM 
+        aka_title mt
+    WHERE 
+        mt.season_nr IS NULL  
+
+    UNION ALL
+
+    SELECT 
+        me.id AS movie_id,
+        me.title AS movie_title,
+        mh.depth + 1 AS depth,
+        COALESCE(me.production_year, 0) AS prod_year
+    FROM 
+        aka_title me
+    INNER JOIN 
+        movie_hierarchy mh ON me.episode_of_id = mh.movie_id
+),
+actor_movie_counts AS (
+    SELECT 
+        ai.person_id,
+        COUNT(DISTINCT ai.movie_id) AS movie_count
+    FROM 
+        cast_info ai
+    GROUP BY 
+        ai.person_id
+),
+company_info AS (
+    SELECT 
+        mc.movie_id,
+        LISTAGG(DISTINCT cn.name, ', ') WITHIN GROUP (ORDER BY cn.name) AS companies
+    FROM 
+        movie_companies mc
+    JOIN 
+        company_name cn ON mc.company_id = cn.id
+    GROUP BY 
+        mc.movie_id
+),
+ranked_movies AS (
+    SELECT 
+        mh.movie_title,
+        mh.depth,
+        mh.prod_year,
+        COALESCE(ac.movie_count, 0) AS actor_count,
+        COALESCE(ci.companies, 'No Companies') AS companies,
+        RANK() OVER (ORDER BY mh.prod_year DESC, mh.depth ASC) AS movie_rank
+    FROM 
+        movie_hierarchy mh
+    LEFT JOIN 
+        actor_movie_counts ac ON mh.movie_id = ac.person_id
+    LEFT JOIN 
+        company_info ci ON mh.movie_id = ci.movie_id
+),
+final_output AS (
+    SELECT 
+        movie_title,
+        depth,
+        prod_year,
+        actor_count,
+        companies,
+        movie_rank
+    FROM 
+        ranked_movies
+    WHERE 
+        actor_count > 0 AND prod_year IS NOT NULL
+    ORDER BY 
+        actor_count DESC, prod_year DESC
+)
+SELECT 
+    fo.*,
+    CASE 
+        WHEN fo.prod_year < 2000 THEN 'Classic'
+        WHEN fo.prod_year BETWEEN 2000 AND 2010 THEN 'Modern'
+        ELSE 'Recent'
+    END AS era
+FROM 
+    final_output fo
+WHERE 
+    fo.movie_rank <= 100;

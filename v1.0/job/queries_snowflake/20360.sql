@@ -1,0 +1,67 @@
+
+WITH RankedMovies AS (
+    SELECT 
+        a.title, 
+        a.production_year, 
+        COUNT(c.id) AS actor_count,
+        ROW_NUMBER() OVER (PARTITION BY a.production_year ORDER BY COUNT(c.id) DESC) AS rank,
+        a.id AS movie_id
+    FROM 
+        aka_title a
+    LEFT JOIN 
+        cast_info c ON a.id = c.movie_id
+    GROUP BY 
+        a.id, a.title, a.production_year
+), 
+CompanyMovieCounts AS (
+    SELECT 
+        m.id AS movie_id, 
+        COUNT(DISTINCT mc.company_id) AS company_count
+    FROM 
+        aka_title m
+    LEFT JOIN 
+        movie_companies mc ON m.id = mc.movie_id
+    GROUP BY 
+        m.id
+), 
+MovieRatings AS (
+    SELECT 
+        m.id AS movie_id, 
+        AVG(CAST(p.info AS FLOAT)) AS avg_rating
+    FROM 
+        movie_info m 
+    JOIN 
+        person_info p ON m.movie_id = p.person_id 
+    WHERE 
+        p.info_type_id IN (SELECT id FROM info_type WHERE info = 'rating')
+    GROUP BY 
+        m.id
+)
+SELECT 
+    R.title, 
+    R.production_year, 
+    R.actor_count, 
+    COALESCE(CMC.company_count, 0) AS company_count, 
+    COALESCE(MR.avg_rating, 0) AS avg_rating,
+    CASE 
+        WHEN R.actor_count >= 10 THEN 'Ensemble'
+        WHEN R.actor_count BETWEEN 5 AND 9 THEN 'Moderate'
+        ELSE 'Minimal'
+    END AS actor_group,
+    CASE
+        WHEN MR.avg_rating IS NULL THEN 'No Rating'
+        WHEN MR.avg_rating < 5 THEN 'Low'
+        WHEN MR.avg_rating BETWEEN 5 AND 7 THEN 'Average'
+        ELSE 'High'
+    END AS rating_group
+FROM 
+    RankedMovies R
+LEFT JOIN 
+    CompanyMovieCounts CMC ON R.movie_id = CMC.movie_id
+LEFT JOIN 
+    MovieRatings MR ON R.movie_id = MR.movie_id
+WHERE 
+    R.rank <= 5 
+    AND (R.production_year >= 2000 OR R.production_year IS NULL)
+ORDER BY 
+    R.production_year DESC, R.actor_count DESC;

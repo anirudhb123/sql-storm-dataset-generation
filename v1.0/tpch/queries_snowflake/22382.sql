@@ -1,0 +1,40 @@
+
+WITH nation_sales AS (
+    SELECT n.n_nationkey, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM nation n
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate >= '1997-01-01' AND l.l_shipdate < '1998-01-01'
+    GROUP BY n.n_nationkey, n.n_name
+),
+recursive_nation_sales AS (
+    SELECT ns.n_nationkey, ns.n_name, ns.total_sales
+    FROM nation_sales ns
+    UNION ALL
+    SELECT n.n_nationkey, n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_sales
+    FROM nation n
+    JOIN recursive_nation_sales rns ON n.n_nationkey = rns.n_nationkey
+    JOIN supplier s ON n.n_nationkey = s.s_nationkey
+    JOIN partsupp ps ON s.s_suppkey = ps.ps_suppkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN lineitem l ON p.p_partkey = l.l_partkey
+    WHERE l.l_shipdate > '1998-01-01'
+    GROUP BY n.n_nationkey, n.n_name
+),
+top_nations AS (
+    SELECT n.n_name, SUM(ns.total_sales) AS total_sales,
+           RANK() OVER (ORDER BY SUM(ns.total_sales) DESC) AS sales_rank
+    FROM recursive_nation_sales ns
+    JOIN nation n ON ns.n_nationkey = n.n_nationkey
+    GROUP BY n.n_name
+)
+SELECT COALESCE(tn.n_name, 'Unknown') AS nation_name,
+       COALESCE(tn.total_sales, 0) AS total_sales,
+       CASE WHEN tn.sales_rank IS NULL THEN 'Unranked'
+            ELSE CAST(tn.sales_rank AS VARCHAR) END AS sales_rank
+FROM top_nations tn
+RIGHT JOIN region r ON tn.n_name IS NULL AND r.r_regionkey = 1
+ORDER BY tn.sales_rank DESC NULLS LAST
+LIMIT 10;

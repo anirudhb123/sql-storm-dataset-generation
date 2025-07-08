@@ -1,0 +1,70 @@
+
+WITH RankedTitles AS (
+    SELECT 
+        t.id AS title_id,
+        t.title,
+        t.production_year,
+        ROW_NUMBER() OVER (PARTITION BY t.production_year ORDER BY t.title) AS rank_per_year
+    FROM 
+        title t
+    WHERE 
+        t.production_year IS NOT NULL
+),
+ActorDetails AS (
+    SELECT 
+        a.id AS aka_id,
+        a.name AS actor_name,
+        p.gender,
+        LISTAGG(DISTINCT k.keyword, ', ') WITHIN GROUP (ORDER BY k.keyword) AS keywords
+    FROM 
+        aka_name a
+    JOIN 
+        cast_info ci ON a.person_id = ci.person_id
+    JOIN 
+        title t ON ci.movie_id = t.id
+    JOIN 
+        movie_keyword mk ON t.id = mk.movie_id
+    JOIN 
+        keyword k ON mk.keyword_id = k.id
+    JOIN 
+        name p ON a.person_id = p.imdb_id
+    GROUP BY 
+        a.id, p.gender
+),
+MovieCompanyInfo AS (
+    SELECT 
+        m.movie_id,
+        LISTAGG(DISTINCT c.name, ', ') WITHIN GROUP (ORDER BY c.name) AS companies,
+        MAX(ct.kind) AS company_type
+    FROM 
+        movie_companies m
+    JOIN 
+        company_name c ON m.company_id = c.id
+    JOIN 
+        company_type ct ON m.company_type_id = ct.id
+    GROUP BY 
+        m.movie_id
+)
+SELECT 
+    rt.title_id,
+    rt.title,
+    rt.production_year,
+    ad.actor_name,
+    ad.gender,
+    ad.keywords,
+    mc.companies,
+    mc.company_type
+FROM 
+    RankedTitles rt
+JOIN 
+    cast_info ci ON rt.title_id = ci.movie_id
+JOIN 
+    ActorDetails ad ON ci.person_id = ad.aka_id
+JOIN 
+    MovieCompanyInfo mc ON rt.title_id = mc.movie_id
+WHERE 
+    rt.rank_per_year <= 3  
+GROUP BY 
+    rt.title_id, rt.title, rt.production_year, ad.actor_name, ad.gender, ad.keywords, mc.companies, mc.company_type
+ORDER BY 
+    rt.production_year, rt.title;

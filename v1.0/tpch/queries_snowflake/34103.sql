@@ -1,0 +1,49 @@
+
+WITH RECURSIVE SupplierHierarchy AS (
+    SELECT s.s_suppkey, s.s_name, s.s_address, 0 AS level
+    FROM supplier s
+    WHERE s.s_acctbal > (SELECT AVG(s_acctbal) FROM supplier)
+    
+    UNION ALL
+    
+    SELECT s2.s_suppkey, s2.s_name, s2.s_address, sh.level + 1
+    FROM supplier s2
+    JOIN SupplierHierarchy sh ON s2.s_nationkey = sh.s_suppkey
+),
+RankedOrders AS (
+    SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice,
+           ROW_NUMBER() OVER (PARTITION BY o.o_orderstatus ORDER BY o.o_totalprice DESC) AS order_rank
+    FROM orders o
+    WHERE o.o_orderdate BETWEEN '1997-01-01' AND '1997-12-31'
+),
+SupplierParts AS (
+    SELECT p.p_partkey, p.p_name, ps.ps_supplycost, p.p_retailprice,
+           p.p_comment, ps.ps_availqty,
+           (p.p_retailprice - ps.ps_supplycost) AS profit_margin
+    FROM part p
+    JOIN partsupp ps ON p.p_partkey = ps.ps_partkey
+    WHERE ps.ps_availqty IS NOT NULL AND ps.ps_supplycost < p.p_retailprice
+),
+CustomerOrders AS (
+    SELECT c.c_custkey, c.c_name, COUNT(o.o_orderkey) AS order_count, 
+           SUM(o.o_totalprice) AS total_spent
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_custkey, c.c_name
+    HAVING SUM(o.o_totalprice) > 10000
+)
+SELECT DISTINCT 
+    r.r_name,
+    COUNT(DISTINCT sh.s_suppkey) AS supplier_count,
+    AVG(co.total_spent) AS avg_spent,
+    SUM(sp.profit_margin) AS total_profit_margin
+FROM region r
+LEFT JOIN nation n ON r.r_regionkey = n.n_regionkey
+LEFT JOIN supplier s ON n.n_nationkey = s.s_nationkey
+LEFT JOIN SupplierHierarchy sh ON s.s_suppkey = sh.s_suppkey
+LEFT JOIN CustomerOrders co ON co.c_custkey IN (SELECT DISTINCT o.o_custkey FROM RankedOrders o WHERE o.order_rank <= 5)
+LEFT JOIN SupplierParts sp ON s.s_suppkey = sp.p_partkey
+WHERE r.r_name LIKE 'N%'
+GROUP BY r.r_name
+HAVING COUNT(DISTINCT sh.s_suppkey) > 0 AND AVG(co.total_spent) IS NOT NULL
+ORDER BY total_profit_margin DESC;

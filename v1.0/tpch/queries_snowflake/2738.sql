@@ -1,0 +1,77 @@
+
+WITH RankedSuppliers AS (
+    SELECT 
+        s.s_suppkey,
+        s.s_name,
+        s.s_acctbal,
+        ROW_NUMBER() OVER (PARTITION BY n.n_nationkey ORDER BY s.s_acctbal DESC) AS rnk,
+        n.n_nationkey
+    FROM 
+        supplier s
+    JOIN 
+        nation n ON s.s_nationkey = n.n_nationkey
+),
+TopSuppliers AS (
+    SELECT 
+        r.r_name,
+        s.s_name,
+        s.s_acctbal,
+        s.s_suppkey
+    FROM 
+        RankedSuppliers s
+    JOIN 
+        region r ON r.r_regionkey = (
+            SELECT 
+                n.n_regionkey 
+            FROM 
+                nation n 
+            WHERE 
+                n.n_nationkey = s.n_nationkey
+        )
+    WHERE 
+        s.rnk <= 5
+),
+OrderDetails AS (
+    SELECT 
+        o.o_orderkey,
+        SUM(l.l_extendedprice * (1 - l.l_discount)) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE 
+        l.l_shipdate BETWEEN DATE '1997-01-01' AND DATE '1997-12-31'
+    GROUP BY 
+        o.o_orderkey
+),
+SupplierOrderStats AS (
+    SELECT 
+        ts.s_name,
+        od.o_orderkey,
+        od.total_revenue,
+        DENSE_RANK() OVER (PARTITION BY ts.s_name ORDER BY od.total_revenue DESC) AS revenue_rank
+    FROM 
+        TopSuppliers ts
+    LEFT JOIN 
+        partsupp ps ON ts.s_suppkey = ps.ps_suppkey
+    LEFT JOIN 
+        lineitem l ON ps.ps_partkey = l.l_partkey
+    LEFT JOIN 
+        OrderDetails od ON l.l_orderkey = od.o_orderkey
+    WHERE 
+        l.l_quantity > 0
+)
+SELECT 
+    s.s_name,
+    COALESCE(SUM(oss.total_revenue), 0) AS total_revenues,
+    AVG(s.s_acctbal) AS average_account_balance
+FROM 
+    SupplierOrderStats oss
+RIGHT JOIN 
+    TopSuppliers s ON oss.s_name = s.s_name
+GROUP BY 
+    s.s_name
+HAVING 
+    COALESCE(SUM(oss.total_revenue), 0) > 10000
+ORDER BY 
+    total_revenues DESC;

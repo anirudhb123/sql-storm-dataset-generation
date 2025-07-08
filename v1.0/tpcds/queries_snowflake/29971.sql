@@ -1,0 +1,44 @@
+
+WITH ranked_items AS (
+    SELECT 
+        i.i_item_sk,
+        i.i_item_id,
+        LENGTH(i.i_item_desc) AS item_desc_length,
+        UPPER(i.i_item_desc) AS item_desc_upper,
+        LOWER(i.i_item_desc) AS item_desc_lower,
+        ROW_NUMBER() OVER (PARTITION BY i.i_category ORDER BY LENGTH(i.i_item_desc) DESC) AS item_rank
+    FROM 
+        item i
+    WHERE 
+        i.i_rec_start_date <= DATE '2002-10-01' AND 
+        (i.i_rec_end_date IS NULL OR i.i_rec_end_date > DATE '2002-10-01')
+), 
+customer_sales AS (
+    SELECT 
+        ws.ws_bill_customer_sk,
+        SUM(ws.ws_ext_sales_price) AS total_sales
+    FROM 
+        web_sales ws
+    INNER JOIN 
+        ranked_items ri ON ws.ws_item_sk = ri.i_item_sk
+    GROUP BY 
+        ws.ws_bill_customer_sk
+)
+SELECT 
+    c.c_customer_id,
+    COUNT(DISTINCT ri.i_item_id) AS total_distinct_items,
+    cs.total_sales,
+    LISTAGG(ri.item_desc_upper, ', ') AS upper_desc_items
+FROM 
+    customer c
+LEFT JOIN 
+    ranked_items ri ON c.c_customer_sk = ri.i_item_sk
+LEFT JOIN 
+    customer_sales cs ON c.c_customer_sk = cs.ws_bill_customer_sk
+WHERE 
+    cs.total_sales > 1000
+GROUP BY 
+    c.c_customer_id, cs.total_sales
+ORDER BY 
+    total_distinct_items DESC, cs.total_sales DESC
+LIMIT 50;

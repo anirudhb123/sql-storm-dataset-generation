@@ -1,0 +1,51 @@
+
+WITH CustomerOrderSummary AS (
+    SELECT 
+        c.c_customer_sk,
+        c.c_first_name,
+        c.c_last_name,
+        SUM(ws.ws_quantity) AS total_quantity,
+        SUM(ws.ws_net_profit) AS total_net_profit,
+        DENSE_RANK() OVER (PARTITION BY c.c_customer_sk ORDER BY SUM(ws.ws_net_profit) DESC) AS profit_rank
+    FROM 
+        customer c
+    JOIN 
+        web_sales ws ON c.c_customer_sk = ws.ws_ship_customer_sk
+    WHERE 
+        c.c_birth_year >= 1970
+    GROUP BY 
+        c.c_customer_sk, c.c_first_name, c.c_last_name
+),
+HighValueCustomers AS (
+    SELECT 
+        cus.c_customer_sk,
+        cus.c_first_name,
+        cus.c_last_name,
+        cus.total_quantity,
+        cus.total_net_profit
+    FROM 
+        CustomerOrderSummary cus
+    WHERE 
+        cus.profit_rank <= 10
+)
+SELECT 
+    hvc.c_first_name,
+    hvc.c_last_name,
+    hvc.total_quantity,
+    hvc.total_net_profit,
+    ca.ca_city,
+    (SELECT COUNT(*)
+     FROM store_sales ss 
+     WHERE ss.ss_customer_sk = hvc.c_customer_sk
+       AND ss.ss_sales_price > 50
+       AND ss.ss_sold_date_sk = (SELECT MAX(d.d_date_sk) FROM date_dim d WHERE d.d_date = '2002-10-01')
+    ) AS high_value_store_purchases,
+    COALESCE(hvc.total_net_profit / NULLIF(hvc.total_quantity, 0), 0) AS avg_profit_per_item
+FROM 
+    HighValueCustomers hvc
+LEFT JOIN 
+    customer_address ca ON ca.ca_address_sk = (SELECT c.c_current_addr_sk FROM customer c WHERE c.c_customer_sk = hvc.c_customer_sk)
+WHERE 
+    ca.ca_state IS NOT NULL
+ORDER BY 
+    hvc.total_net_profit DESC;

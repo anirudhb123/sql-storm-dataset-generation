@@ -1,0 +1,57 @@
+
+WITH SalesData AS (
+    SELECT 
+        ws.ws_order_number,
+        ws.ws_item_sk,
+        ws.ws_quantity,
+        ws.ws_net_profit,
+        ws.ws_sold_date_sk,
+        ws.ws_bill_customer_sk,
+        C.c_current_addr_sk,
+        D.d_year,
+        I.i_item_desc,
+        CASE 
+            WHEN C.c_birth_year IS NULL THEN 'Unknown'
+            ELSE CAST((EXTRACT(YEAR, DATE '2002-10-01') - C.c_birth_year) AS VARCHAR)
+        END AS age,
+        ROW_NUMBER() OVER (PARTITION BY ws.ws_order_number ORDER BY ws.ws_net_profit DESC) AS rn
+    FROM web_sales ws
+    JOIN customer C ON ws.ws_bill_customer_sk = C.c_customer_sk
+    JOIN item I ON ws.ws_item_sk = I.i_item_sk
+    JOIN date_dim D ON ws.ws_sold_date_sk = D.d_date_sk
+    WHERE D.d_year = (SELECT MAX(d_year) FROM date_dim)
+      AND ws.ws_net_profit > 0
+),
+FilteredSales AS (
+    SELECT 
+        sd.ws_order_number,
+        sd.ws_item_sk,
+        sd.ws_quantity,
+        sd.ws_net_profit,
+        sd.age,
+        RANK() OVER (PARTITION BY sd.ws_item_sk ORDER BY sd.ws_net_profit DESC) AS item_rank
+    FROM SalesData sd
+    WHERE sd.rn = 1
+)
+SELECT 
+    fs.ws_order_number,
+    fs.ws_item_sk,
+    fs.ws_quantity,
+    fs.ws_net_profit,
+    fs.age,
+    FD.store_count,
+    (SELECT AVG(inv_quantity_on_hand) FROM inventory I WHERE I.inv_item_sk = fs.ws_item_sk) AS avg_inventory,
+    (SELECT COUNT(*) 
+     FROM store_returns sr 
+     WHERE sr.sr_item_sk = fs.ws_item_sk AND sr.sr_return_quantity > 0) AS return_count
+FROM FilteredSales fs
+LEFT JOIN (
+    SELECT 
+        ws_item_sk, 
+        COUNT(DISTINCT ss_store_sk) AS store_count 
+    FROM store_sales 
+    GROUP BY ws_item_sk
+) FD ON fs.ws_item_sk = FD.ws_item_sk
+WHERE fs.item_rank <= 5
+GROUP BY fs.ws_order_number, fs.ws_item_sk, fs.ws_quantity, fs.ws_net_profit, fs.age, FD.store_count
+ORDER BY fs.ws_net_profit DESC, fs.age;
