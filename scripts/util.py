@@ -1,10 +1,36 @@
 import datetime
 import decimal
 from functools import cmp_to_key
+import os
 from typing import List
 
 import simplejson as json
 import re
+
+import gzip
+import bz2
+import lzma
+
+
+def smart_open(filename, mode='rt', search=False, **kwargs):
+    """
+    Open a file that may be compressed (gzip, bz2, lzma) or uncompressed.
+    Mode 'rt' or 'rb' is recommended for text/binary files.
+    """
+    if search:
+        for ending in ['.gz', '.bz2', '.xz', '.lzma']:
+            if os.path.exists(filename + ending):
+                filename += ending
+                break
+
+    if filename.endswith('.gz'):
+        return gzip.open(filename, mode, **kwargs)
+    elif filename.endswith('.bz2'):
+        return bz2.open(filename, mode, **kwargs)
+    elif filename.endswith('.xz') or filename.endswith('.lzma'):
+        return lzma.open(filename, mode, **kwargs)
+    else:
+        return open(filename, mode, **kwargs)
 
 
 def natural_sort_key(filename):

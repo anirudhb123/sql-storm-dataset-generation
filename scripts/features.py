@@ -7,6 +7,7 @@ import re
 from distinct import Result
 import distinct
 from log import log
+from util import smart_open
 
 complexity_classes = ["low", "medium", "high"]
 limits = {
@@ -91,8 +92,10 @@ def get_expression_category(exp):
     return expression_category_map[exp]
 
 
-def get_type(type):
-    return re.sub(r'\(.*\)', '', type)
+def normalize_type(typ):
+    if not typ:
+        return ""
+    return re.sub(r'\(.*\)', '', typ)
 
 
 join_type_counts = {}
@@ -144,14 +147,20 @@ def complexity(r: Result):
             comp = map_complexity(category, complexity_expression_categories, "expression category", comp)
             count(category, expression_category_counts, r.query)
 
-            comp = map_complexity(get_type(exp.type), complexity_types, "expression type", comp)
-            count(get_type(exp.type), type_counts, r.query)
+            comp = map_complexity(normalize_type(exp.type), complexity_types, "expression type", comp)
+            count(normalize_type(exp.type), type_counts, r.query)
 
     return complexity_classes[comp]
 
 
 def analyze(result_file):
     log.info(f"Analyzing result file: {result_file}")
+
+    # Ensure per-run counters are reset so multiple calls to analyze don't accumulate state
+    operator_counts.clear()
+    join_type_counts.clear()
+    expression_category_counts.clear()
+    type_counts.clear()
 
     queries = distinct.analyze(result_file)
 
@@ -186,38 +195,36 @@ def compute(result_file, output_file):
     queries = analyze(result_file)
 
     log.info(f"Writing results to {output_file} ...")
-    csvfile = open(output_file, 'w', newline='', encoding='utf-8')
-    csvfile_operators = open(output_file.replace(".csv", f"_operators.csv"), 'w', newline='', encoding='utf-8')
-    csvfile_expressions = open(output_file.replace(".csv", f"_expressions.csv"), 'w', newline='', encoding='utf-8')
 
-    writer = csv.DictWriter(csvfile, fieldnames=["query", "state", "message", "time", "rows", "allocatedBytes", "scannedRows", "querylength", "ops",
-                            "scans", "joins", "aggregations", "sorts", "windows", "iterations", "distinct_trees", "distinct_operators", "complexity"])
-    writer.writeheader()
+    # Use context managers to ensure files are closed even if an error occurs.
+    with smart_open(output_file, 'wt', newline='', encoding='utf-8') as csvfile, \
+            smart_open(output_file.replace(".csv", f"_operators.csv"), 'wt', newline='', encoding='utf-8') as csvfile_operators, \
+            smart_open(output_file.replace(".csv", f"_expressions.csv"), 'wt', newline='', encoding='utf-8') as csvfile_expressions:
 
-    writer_operators = csv.DictWriter(csvfile_operators, fieldnames=["query", "operator", "attributes"])
-    writer_operators.writeheader()
+        writer = csv.DictWriter(csvfile, fieldnames=["query", "state", "message", "time", "rows", "allocatedBytes", "scannedRows", "querylength", "ops",
+                                "scans", "joins", "aggregations", "sorts", "windows", "iterations", "distinct_trees", "distinct_operators", "complexity"])
+        writer.writeheader()
 
-    writer_expressions = csv.DictWriter(csvfile_expressions, fieldnames=["query", "expression", "category", "type", "attributes"])
-    writer_expressions.writeheader()
+        writer_operators = csv.DictWriter(csvfile_operators, fieldnames=["query", "operator", "attributes"])
+        writer_operators.writeheader()
 
-    iteration_count = 0
-    with log.progress("Writing query features", len(queries)) as progress:
-        for q in queries:
-            progress.description(q)
-            writer.writerow(queries[q].attributes)
+        writer_expressions = csv.DictWriter(csvfile_expressions, fieldnames=["query", "expression", "category", "type", "attributes"])
+        writer_expressions.writeheader()
 
-            for op in queries[q].tree.values():
-                writer_operators.writerow({"query": q, "operator": op.label, "attributes": json.dumps(op.attributes)})
+        with log.progress("Writing query features", len(queries)) as progress:
+            for q in queries:
+                progress.description(q)
+                writer.writerow(queries[q].attributes)
 
-                for exp in op.expression_list:
-                    category = get_expression_category(exp.label)
-                    writer_expressions.writerow({"query": q, "expression": exp.label, "category": category, "type": exp.type, "attributes": json.dumps(exp.attributes)})
+                for op in queries[q].tree.values():
+                    # Ensure JSON serialization won't fail on unexpected objects by falling back to str
+                    writer_operators.writerow({"query": q, "operator": op.label, "attributes": op.attributes})
 
-            progress.advance()
+                    for exp in op.expression_list:
+                        category = get_expression_category(exp.label)
+                        writer_expressions.writerow({"query": q, "expression": exp.label, "category": category, "type": exp.type, "attributes": exp.attributes})
 
-    csvfile.close()
-    csvfile_operators.close()
-    csvfile_expressions.close()
+                progress.advance()
 
 
 def main():

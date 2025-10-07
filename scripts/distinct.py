@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+from collections import deque
 import copy
 import csv
 import os
@@ -8,6 +9,7 @@ from dataclasses import dataclass
 import simplejson as json
 
 from log import log
+from util import smart_open
 
 csv.field_size_limit(1024 * 1024)
 
@@ -146,12 +148,19 @@ def analyze_operator(plan: dict, operators: dict[int, Operator], ius=None):
 
     raw = system_representation[0]
     if label == "Result":
-        for iu in raw["ius"]:
-            type = iu["type"]
-            ius[iu["iu"]] = type["type"] + (f"({type['precision']},{type['scale']})" if "precision" in type and "scale" in type else
-                                            f"({type['precision']})" if "precision" in type else "")
+        for iu in raw.get("ius", []):
+            iu_type = iu.get("type", {})
+            precision = iu_type.get("precision")
+            scale = iu_type.get("scale")
+            type_name = iu_type.get("type", "unknown")
+            if precision is not None and scale is not None:
+                ius[iu["iu"]] = f"{type_name}({precision},{scale})"
+            elif precision is not None:
+                ius[iu["iu"]] = f"{type_name}({precision})"
+            else:
+                ius[iu["iu"]] = type_name
 
-    for child in plan["_children"]:
+    for child in plan.get("_children", []):
         child_id = child["_attrs"]["operator_id"]
         analyze_operator(child, operators, ius)
         children.append(child_id)
@@ -333,36 +342,39 @@ def analyze_query(vals: dict) -> dict:
 
 def analyze(csv_path: str) -> dict[str, Result]:
     def traverse_tree(tree, fun):
-        queue = [-1]
-        while queue:
-            node = queue.pop(0)
-            assert node in tree
+        q = deque([-1])
+        while q:
+            node = q.popleft()
+            if node not in tree:
+                raise Exception(f"Node {node} not in tree")
 
             op = tree[node]
             fun(op)
             for child in op.children:
-                queue.append(child)
+                q.append(child)
 
     def compare_trees(tree1, tree2):
-        queue1 = [-1]
-        queue2 = [-1]
-        while queue1 and queue2:
-            node1 = queue1.pop(0)
-            node2 = queue2.pop(0)
-            assert node1 in tree1 and node2 in tree2
+        q1 = deque([-1])
+        q2 = deque([-1])
+        while q1 and q2:
+            node1 = q1.popleft()
+            node2 = q2.popleft()
+            if node1 not in tree1 or node2 not in tree2:
+                raise Exception(f"Node {node1} or {node2} not in tree")
 
             op1 = tree1[node1]
             op2 = tree2[node2]
 
-            if op1.label != op2.label:
+            # Compare label and number of children to early-exit on mismatch
+            if op1.label != op2.label or len(op1.children) != len(op2.children):
                 return False
 
             for child1 in op1.children:
-                queue1.append(child1)
+                q1.append(child1)
             for child2 in op2.children:
-                queue2.append(child2)
+                q2.append(child2)
 
-        return len(queue1) == 0 and len(queue2) == 0
+        return not q1 and not q2
 
     # Open and read the CSV file
     log.info("Loading the data...")
@@ -376,7 +388,7 @@ def analyze(csv_path: str) -> dict[str, Result]:
     num_trees = {}
     num_distinct_trees = {}
     with log.progress("Loading the data", total=0) as progress:
-        with open(csv_path, newline='', encoding='utf-8') as csvfile:
+        with smart_open(csv_path, newline='', encoding='utf-8', search=True) as csvfile:
             reader = csv.DictReader(csvfile)
 
             for row in reader:
