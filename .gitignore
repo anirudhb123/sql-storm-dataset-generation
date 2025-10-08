@@ -6,3 +6,6 @@ __pycache__/
 benchmark/
 data/
 db/
+
+# Exclude results by default, as they can be large
+results/**/*.csv

@@ -121,8 +121,6 @@ class Log:
             text (str): The header text to log.
         """
         self.console.rule(f'{text}')
-        if self.file:
-            self.file_console.rule(f'{text}')
 
     def newline(self):
         """
