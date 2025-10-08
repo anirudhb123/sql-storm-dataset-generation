@@ -12,7 +12,7 @@ from openai import OpenAI
 
 from log import Log
 from prompt import write_gpt_queries
-from util import sort_query_list
+from util import smart_open, sort_query_list
 
 log = Log()
 
@@ -38,7 +38,7 @@ def find_queries_with_errors(csv_path, success_threshold, subset=None):
         subset = set(subset)
 
     # Open and read the CSV file
-    with open(csv_path, newline='', encoding='utf-8') as csvfile:
+    with smart_open(csv_path, newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
 
         for row in reader:

@@ -503,7 +503,7 @@ def main():
     distinct_csv = os.path.join(args.version, args.dataset, "distinct_queries.csv")
     log.info(f"Writing distinct queries to {distinct_csv} ...")
     with log.progress("Writing distinct queries", total=len(distinct_queries)) as progress:
-        with open(distinct_csv, 'w', newline='', encoding='utf-8') as f:
+        with smart_open(distinct_csv, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=["query", "distinct_trees", "distinct_operators"])
             writer.writeheader()
 

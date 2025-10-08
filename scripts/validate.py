@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import simplejson as json
 
 from log import log
-from util import sort_query_list, compare_results
+from util import smart_open, sort_query_list, compare_results
 
 csv.field_size_limit(sys.maxsize)
 
@@ -56,7 +56,7 @@ def validate_queries(csv_path):
     log.info("Loading the data...")
     num_rows = 0
     with log.progress("Loading the data", total=0) as progress:
-        with open(csv_path, newline='', encoding='utf-8') as csvfile:
+        with smart_open(csv_path, newline='', encoding='utf-8') as csvfile:
             reader = csv.DictReader(csvfile)
 
             for row in reader:
@@ -191,12 +191,12 @@ def main():
 
     valid_csv = os.path.join(args.version, args.dataset, "valid_queries.csv")
     invalid_csv = os.path.join(args.version, args.dataset, "invalid_queries.csv")
-    results_csv = os.path.join(args.version, args.dataset, "results.csv")
+    results_csv = os.path.join(args.version, args.dataset, "results.csv.gz")
 
     log.newline()
     log.info(f"Writing valid queries to {valid_csv}")
     with log.progress("Writing valid queries", total=len(valid)) as progress:
-        with open(valid_csv, 'w', newline='', encoding='utf-8') as f:
+        with smart_open(valid_csv, 'wt', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=["query", "systems"])
             writer.writeheader()
 
@@ -210,7 +210,7 @@ def main():
 
     log.info(f"Writing results to {results_csv}")
     with log.progress("Writing results", total=len(valid)) as progress:
-        with open(results_csv, 'w', newline='', encoding='utf-8') as f:
+        with smart_open(results_csv, 'wt', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=["query", "system", "result"])
             writer.writeheader()
 
@@ -225,7 +225,7 @@ def main():
 
     log.info(f"Writing invalid queries to {invalid_csv}")
     with log.progress("Writing invalid queries", total=len(invalid)) as progress:
-        with open(invalid_csv, 'w', newline='', encoding='utf-8') as f:
+        with smart_open(invalid_csv, 'wt', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=["query", "systems"])
             writer.writeheader()
 

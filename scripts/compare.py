@@ -7,7 +7,7 @@ import sys
 import simplejson as json
 
 from log import log
-from util import locate_difference, compare_results
+from util import locate_difference, compare_results, smart_open
 from validate import Result, validate_queries
 
 csv.field_size_limit(sys.maxsize)
@@ -51,8 +51,8 @@ def main():
 
         log.info(f"Loading the valid queries ...")
         with log.progress(f"Loading the valid queries", total=len(queries)) as progress:
-            with open(valid_csv, 'r', encoding='utf-8') as f1:
-                with open(results_csv, 'r', encoding='utf-8') as f2:
+            with smart_open(valid_csv, encoding='utf-8') as f1:
+                with smart_open(results_csv, encoding='utf-8') as f2:
                     reader1 = csv.DictReader(f1)
                     reader2 = csv.DictReader(f2)
 
@@ -71,7 +71,7 @@ def main():
 
                         progress.advance()
 
-        with open(invalid_csv, 'r', encoding='utf-8') as f:
+        with smart_open(invalid_csv, encoding='utf-8') as f:
             reader = csv.DictReader(f)
 
             for row in reader:
@@ -103,7 +103,7 @@ def main():
     valid_count = 0
     invalid_count = 0
     with log.progress(f"Loading the data", total=len(queries)) as progress:
-        with open(input_csv, newline='', encoding='utf-8') as csvfile:
+        with smart_open(input_csv, newline='', encoding='utf-8') as csvfile:
             reader = csv.DictReader(csvfile)
 
             for row in reader:

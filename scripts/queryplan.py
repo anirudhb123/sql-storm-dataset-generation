@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass, fields
 
 import numpy as np
+from util import smart_open
 
 csv.field_size_limit(1024 * 1024)
 
@@ -17,7 +18,7 @@ def read_csv(csv_path):
     result = []
 
     # Open and read the CSV file
-    with open(csv_path, newline='', encoding='utf-8') as csvfile:
+    with smart_open(csv_path, newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
 
         for row in reader:
@@ -167,7 +168,7 @@ def main():
                 print(f"\t{depth}: min={min}, median={median}, mean={mean}, max={max}")
 
     # Write the result to the destination CSV file
-    with open(dest_csv, 'w', newline='', encoding='utf-8') as csvfile:
+    with smart_open(dest_csv, 'wt', newline='', encoding='utf-8') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=r.keys())
         writer.writeheader()
         for r in result:

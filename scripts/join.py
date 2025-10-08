@@ -6,6 +6,7 @@ import os
 import simplejson as json
 
 from log import log
+from util import smart_open
 
 csv.field_size_limit(1024 * 1024)
 
@@ -310,7 +311,7 @@ def analyze(csv_path: str, schema: dict):
     correct_joins = []
     incorrect_joins = []
     with log.progress("Loading the data", total=0) as progress:
-        with open(csv_path, newline='', encoding='utf-8') as csvfile:
+        with smart_open(csv_path, newline='', encoding='utf-8') as csvfile:
             reader = csv.DictReader(csvfile)
 
             for row in reader:
@@ -432,7 +433,7 @@ def main():
     correct_joins_csv = os.path.join(args.version, args.dataset, "correct_joins.csv")
     log.info(f"Writing queries with correct joins to {correct_joins_csv} ...")
     with log.progress("Writing distinct queries", total=len(correct_joins)) as progress:
-        with open(correct_joins_csv, 'w', newline='', encoding='utf-8') as f:
+        with smart_open(correct_joins_csv, 'wt', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=["query"])
             writer.writeheader()
 
@@ -442,9 +443,9 @@ def main():
                 progress.advance()
 
     incorrect_joins_csv = os.path.join(args.version, args.dataset, "incorrect_joins.csv")
-    log.info(f"Writing queries with correct joins to {incorrect_joins_csv} ...")
+    log.info(f"Writing queries with incorrect joins to {incorrect_joins_csv} ...")
     with log.progress("Writing distinct queries", total=len(incorrect_joins)) as progress:
-        with open(incorrect_joins_csv, 'w', newline='', encoding='utf-8') as f:
+        with smart_open(incorrect_joins_csv, 'wt', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=["query"])
             writer.writeheader()
 
