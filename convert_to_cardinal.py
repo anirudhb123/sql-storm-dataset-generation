@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Build a small Cardinal-compatible dataset from SQLStorm (subset of 10 queries).
-Steps:
+Build a small Cardinal-compatible dataset from SQLStorm.
+
 1. Load benchmark CSV results (runtime data)
 2. Match queries to SQL text
-3. Generate EXPLAIN (FORMAT JSON) plans in PostgreSQL for 10 queries
+3. Generate EXPLAIN (FORMAT JSON) plans in PostgreSQL
 4. Compute rewards and save as Parquet
 """
 
