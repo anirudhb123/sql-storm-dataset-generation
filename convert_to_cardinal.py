@@ -25,7 +25,7 @@ except ImportError:
 DATASET = "stackoverflow"       # dataset to use
 VERSION = "v1.0"
 DB_NAME = "stackoverflow"        # PostgreSQL DB name
-DB_USER = "anirudhbharadwaj"     # PostgreSQL username
+DB_USER = ""     # PostgreSQL username
 
 # Subset parameters
 SUBSET_SIZE = 50                 # number of queries to sample

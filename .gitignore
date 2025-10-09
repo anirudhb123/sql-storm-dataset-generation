@@ -1,11 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
 .venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Generated datasets
+cardinal_dataset/
+
+# SQLStorm data (too large for git)
+analysis/
+results/
+v0.0/
+v1.0/
+
+# Database files
+*.db
+*.sqlite
+
+# IDE
 .vscode/
 .idea/
-__pycache__/
+*.swp
+*.swo
 
-benchmark/
-data/
-db/
+# OS
+.DS_Store
+Thumbs.db
 
-# Exclude results by default, as they can be large
-results/**/*.csv
+# Logs
+*.log
