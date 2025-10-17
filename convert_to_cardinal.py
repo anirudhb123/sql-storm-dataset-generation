@@ -51,7 +51,18 @@ for d in possible_dirs:
     results_files += list(d.rglob(f"{DATASET}*.csv*"))
 
 if not results_files:
-    raise FileNotFoundError("❌ No results CSV found. Check paths under results/v1.0/ or analysis/features/v1.0/")
+    print("❌ No results CSV found!")
+    print("\n🔧 TROUBLESHOOTING:")
+    print("1. Make sure you're running from the SQLStorm root directory")
+    print("2. If you cloned from GitHub, the data files are missing due to Git LFS issues.")
+    print("   Download and extract: sqlstorm_data.zip")
+    print("   This will create the missing analysis/features/v1.0/ directory with data.")
+    print("3. Check that these directories exist:")
+    for d in possible_dirs:
+        exists = "✅" if d.exists() else "❌"
+        print(f"   {exists} {d}")
+    print(f"\n4. Looking for files matching: {DATASET}*.csv*")
+    raise FileNotFoundError("No results CSV found. See troubleshooting steps above.")
 
 # Prefer analysis folder files (they have proper timing data), but avoid expressions/operators files
 analysis_files = [f for f in results_files if "analysis" in str(f) and "expressions" not in str(f) and "operators" not in str(f)]
