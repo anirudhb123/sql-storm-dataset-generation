@@ -25,10 +25,10 @@ except ImportError:
 DATASET = "stackoverflow"       # dataset to use
 VERSION = "v1.0"
 DB_NAME = "stackoverflow"        # PostgreSQL DB name
-DB_USER = ""     # PostgreSQL username
+DB_USER = "aeshon"     # PostgreSQL username
 
 # Subset parameters
-SUBSET_SIZE = 50                 # number of queries to sample
+SUBSET_SIZE = 18147                 # number of queries to sample
 SUBSET_START = 0                 # starting index (0 = from beginning)
 SUBSET_METHOD = "sequential"     # "sequential", "random", or "by_time"
 RANDOM_SEED = 42                 # for reproducible random sampling
