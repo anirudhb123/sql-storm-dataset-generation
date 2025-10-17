@@ -4,12 +4,19 @@ Convert SQLStorm benchmark results into Cardinal-compatible datasets with config
 
 ## Quick Setup
 
-1. **Install dependencies**:
+1. **Clone and setup data**:
+```bash
+   git clone https://github.com/anirudhb123/sql-storm-dataset-generation.git
+   cd sql-storm-dataset-generation
+   unzip sqlstorm_data.zip  # Extract essential data files
+   ```
+
+2. **Install dependencies**:
 ```bash
    pip install pandas psycopg2-binary tqdm pyarrow
    ```
 
-2. **Setup PostgreSQL**:
+3. **Setup PostgreSQL**:
 ```bash
    brew services start postgresql@15
    createdb stackoverflow
@@ -20,6 +27,13 @@ Convert SQLStorm benchmark results into Cardinal-compatible datasets with config
    ```python
    DB_USER = "your_username"  # Change this to your PostgreSQL username
    ```
+
+## Troubleshooting
+
+**Getting "No results CSV found" error?**
+- Make sure you extracted `sqlstorm_data.zip` after cloning
+- This provides the essential data files that Git LFS sometimes fails to download
+- The zip file contains the required CSV files in the correct directory structure
 
 ## Running Different Query Subsets
 
